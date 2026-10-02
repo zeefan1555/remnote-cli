@@ -75,7 +75,7 @@ passed both plugin jobs, but both CLI jobs failed during dependency installation
 15 CLI lockfile tarballs pointed at a developer's private npm mirror.
 
 The correction changes only those download origins to `registry.npmjs.org`;
-versions, integrity hashes and other lock data are unchanged. Package-local
+versions, integrity hashes and other lock data are unchanged. Repository/package
 `.npmrc` files and regression tests prevent inheriting a private registry again.
 Both packages installed successfully using a new public-registry cache. Full
 quality checks passed with 719 CLI tests and 78 plugin tests; both production
@@ -99,3 +99,36 @@ ignored `.local/sdk-callback-repro.json`.
 Do not patch private SDK transport, swallow an abort as a commit, or repeat the
 known hanging write scenario. Native writes and daily adoption remain blocked
 until supported abort handling is resolved and tested on RemNote desktop.
+
+The repaired commit `25770b06b820ebb1e0e44307bad6970d3b94d003` passed
+all four [remote CI jobs](https://github.com/zeefan1555/remnote-direct/actions/runs/36987608092).
+Post-commit local quality and production builds passed again. A subsequent
+root-command check found that npm forwards its parent registry into child npm
+commands, overriding package-local settings. The repository root therefore also
+pins the public registry; tests check all three configuration files. This does
+not change the user's global npm configuration or any runtime source.
+
+## Desktop Read-Only Recheck
+
+Using the production artifacts from `25770b0`, temporary desktop activation of
+the already-installed independent plugin verified authenticated status, KB
+`byte`, SDK `0.0.46` and native platform `app`. The complete served plugin files
+matched their recorded build hashes. Capability discovery reported 265 supported
+and 21 unsupported methods; discovery is not native testing of all methods.
+
+The existing two cards were read by exact ID. All eight objects and full subtree
+scope in the saved context request matched the post-restart baseline, including
+Rem/native-card IDs, question/answer content and empty review histories. Both
+answers were observed in the desktop UI. A second complete read after desktop
+inspection showed no object or scope changes. CLI-only SDK reads counted exactly
+two existing native cards without changing plugin assets.
+
+Cold status connected in 2756 ms and completed in 2770 ms; its guarded wrapper
+took 6.00 s including the build. The complete context command took 1012 ms
+(3.68 s with the wrapper). Evidence is private under ignored
+`.local/native-readback-25770b0/`; the source/build manifest is
+`.local/candidate-25770b0.json`.
+
+No new card creation, same-key write replay or native abort was attempted in this
+recheck. The old pre-restart whole-context difference and native rollback gate
+remain unresolved. A passing read path does not establish full write acceptance.
