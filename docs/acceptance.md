@@ -65,3 +65,37 @@ no commit, push, publication, live write or installed-software change had been
 made. The maintainer then explicitly authorized commit, push and continued
 verification on 2026-10-02. The native rollback and adoption gates above remain
 open; this delivery authorization does not establish a passing live result.
+
+## Post-Commit Verification
+
+The independent repository is private and its default branch is `master`.
+Commit `9ecf91b9c2bfedd04db56ff198ed19ee279b9d3f` was pushed successfully.
+Its first [CI run](https://github.com/zeefan1555/remnote-direct/actions/runs/36986337235)
+passed both plugin jobs, but both CLI jobs failed during dependency installation:
+15 CLI lockfile tarballs pointed at a developer's private npm mirror.
+
+The correction changes only those download origins to `registry.npmjs.org`;
+versions, integrity hashes and other lock data are unchanged. Package-local
+`.npmrc` files and regression tests prevent inheriting a private registry again.
+Both packages installed successfully using a new public-registry cache. Full
+quality checks passed with 719 CLI tests and 78 plugin tests; both production
+builds passed with the same three plugin bundle-size warnings. These results
+are recorded in ignored `.local/quality-registry.log` and
+`.local/build-registry.log`. The earlier byte-identical lockfile statement
+describes the import, not this subsequent repair.
+
+The installs also reported existing dependency audit findings: 10 in the CLI
+and 25 in the plugin, including one critical plugin finding. These are not
+resolved by changing download URLs; no automatic dependency upgrades were made.
+
+An offline reproduction using the installed official SDK `0.0.46` confirmed that
+its callback dispatcher acknowledges a successful callback but sends no host
+response when the callback rejects. `app.transaction` uses this dispatcher.
+This is consistent with the observed native abort timeout, but is not a new
+native rollback test or a repair. The SDK's current public release is still
+`0.0.46`. The reproduction touched no knowledge-base data and is recorded in
+ignored `.local/sdk-callback-repro.json`.
+
+Do not patch private SDK transport, swallow an abort as a commit, or repeat the
+known hanging write scenario. Native writes and daily adoption remain blocked
+until supported abort handling is resolved and tested on RemNote desktop.

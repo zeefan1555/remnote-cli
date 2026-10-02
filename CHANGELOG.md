@@ -34,6 +34,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Use public npm tarballs and a package-local registry setting; prevent private
+  developer registry URLs from breaking clean installs outside that network.
 - Preserve SDK 0.0.46's undefined default Rem type in generated CLI constants;
   ordinary native card and Wiki nodes no longer fail the retype guard.
 - Document the desktop installer's required `localhost` URL and verify saved

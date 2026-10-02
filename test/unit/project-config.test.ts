@@ -3,6 +3,18 @@ import { readFileSync } from 'node:fs';
 import vitestConfig from '../../vitest.config.js';
 
 describe('project config', () => {
+  it('uses public registry tarballs so CI does not require a private network', () => {
+    expect(readFileSync('.npmrc', 'utf-8').trim()).toBe('registry=https://registry.npmjs.org/');
+    const lock = JSON.parse(readFileSync('package-lock.json', 'utf-8')) as {
+      packages: Record<string, { resolved?: string }>;
+    };
+    for (const [name, entry] of Object.entries(lock.packages)) {
+      if (entry.resolved) {
+        expect(new URL(entry.resolved).origin, name).toBe('https://registry.npmjs.org');
+      }
+    }
+  });
+
   it('keeps the supported Node.js policy aligned across package, lockfile, nvm, and CI', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf-8')) as {
       engines: { node: string };

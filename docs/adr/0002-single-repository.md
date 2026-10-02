@@ -17,6 +17,8 @@ Keep each package's existing dependency lock, toolchain and output. Root npm
 scripts coordinate both packages; GitHub Actions validates both from the same
 commit. No workspace dependency hoisting, shared runtime package, submodule,
 subtree synchronization service or additional build framework is needed.
+Both packages use the public npm registry. Their lockfiles must not depend on a
+developer's private registry or network.
 
 Product versions remain independent. A CLI-only business addition must not
 require a plugin release when its required SDK capability is already available.
