@@ -1,0 +1,67 @@
+# Acceptance Status
+
+The imported implementation is not accepted for daily installation.
+
+Before this repository migration, real RemNote desktop testing established:
+
+- Authenticated access to the intended KB through the independent SDK plugin.
+- Two real native cards, exact readback and desktop answer verification after
+  reconciling the original saved plan/key.
+- Same-key replay preserved Rem/native-card IDs, content and review history.
+- A CLI-only composition counted both cards against unchanged plugin assets.
+
+Mandatory gates still failed or remained incomplete:
+
+- Native transaction abort timed out without acknowledgement after 15020 ms.
+  A subsequent commit scenario was not reached.
+- After a user force-quit/reopen, the transaction root was restored and its
+  attempted child was absent. This is crash recovery, not a normal abort pass.
+- Card snapshots survived restart, but strict whole-context equality failed
+  because the daily document gained an empty Rem of unconfirmed provenance.
+- Persistent-host restart smoke and daily CLI adoption were not performed.
+
+The previous environment was restored: the new plugin was disabled, the old
+plugin/served assets restored, and the daily CLI left unchanged. The prior MCP
+service remained stopped. Restoring that state did not repair its known KB grant
+limitation or establish a working daily stack.
+
+Private plans, keys, IDs and raw logs remain outside this repository. Do not
+delete uncertain artifacts, narrow the proof scope, or blindly rerun the saved
+write plan. Resolve the supported SDK abort behavior before another live write.
+
+This migration requires fresh offline checks and builds of the relocated code.
+Previous test counts, source hashes and real-card evidence are provenance only,
+not acceptance of a new build. Nothing here authorizes installing it or reports
+that native rollback has been fixed.
+
+## Repository Migration Checks
+
+Verified on 2026-10-02 with Node.js 26.7.0 and npm 11.19.0:
+
+| Check | Result |
+| --- | --- |
+| `npm run setup` | Both locked dependency installs passed. |
+| `npm run quality` | CLI: 718 tests; plugin: 77 tests. Type, lint, format, coverage and SDK freshness checks passed. |
+| `npm run build` | Both production builds and the plugin ZIP passed. Webpack reported three bundle-size warnings. |
+| Built CLI `--help` / `--version` | Both exited successfully; version `0.24.0`. No live connection was opened. |
+| Runtime source and generated catalogs | All 41 CLI and 16 plugin files match the original candidate, including modes. |
+| Original inputs | Both original HEADs, dirty status, complete source hashes and existing build files remain unchanged. |
+| Licenses and lockfiles | Both packages retain the original bytes. |
+| CI configuration | Parsed and checked locally; covers each package on Node.js 22.13.0 and 24. Remote CI has not run. |
+
+The build correction is package-local manifest validation. The
+SDK's command assumes the plugin is the Git root, so the new script resolves the
+plugin directory and uses the same official `parseManifest` Node entry as the
+SDK command. A regression test invokes it from the shared repository root.
+
+Raw final logs are in ignored `.local/quality-final.log` and
+`.local/build-final.log`. `.local/migration-candidate.json` records the complete
+relocated source and production artifact manifests and SHA-256 values;
+`.local/preservation.json` records the unchanged original candidates. These are
+local migration evidence, not native persistence acceptance.
+
+At the end of migration the independent GitHub repository was private and empty;
+no commit, push, publication, live write or installed-software change had been
+made. The maintainer then explicitly authorized commit, push and continued
+verification on 2026-10-02. The native rollback and adoption gates above remain
+open; this delivery authorization does not establish a passing live result.

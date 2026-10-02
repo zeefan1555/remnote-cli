@@ -1,0 +1,82 @@
+{
+  "name": "remnote-cli",
+  "private": true,
+  "version": "0.24.0",
+  "description": "Direct CLI automation for the RemNote Plugin SDK",
+  "type": "module",
+  "main": "dist/remnote-cli/index.js",
+  "bin": {
+    "remnote-cli": "dist/remnote-cli/index.js"
+  },
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc && node scripts/chmod-bins.mjs",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "./run-agent-integration-test.sh",
+    "test:integration:cli": "tsx test/integration/cli/run-integration.ts",
+    "test:ui": "vitest --ui",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.mjs\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.mjs\" --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.mjs\"",
+    "quality": "./code-quality.sh",
+    "precommit": "./code-quality.sh",
+    "generate:sdk-constants": "node scripts/generate-sdk-constants.mjs",
+    "check:sdk-constants": "node scripts/generate-sdk-constants.mjs --check"
+  },
+  "keywords": [
+    "remnote",
+    "knowledge-base",
+    "note-taking",
+    "ai",
+    "assistant",
+    "websocket",
+    "bridge"
+  ],
+  "author": "zeefan1555",
+  "contributors": ["Robert Spiegel"],
+  "license": "MIT",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zeefan1555/remnote-direct.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/zeefan1555/remnote-direct/issues"
+  },
+  "homepage": "https://github.com/zeefan1555/remnote-direct#readme",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@remnote/plugin-sdk": "0.0.46",
+    "@types/node": "^26.1.1",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.1",
+    "@vitest/coverage-v8": "^4.1.3",
+    "@vitest/ui": "^4.1.3",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.3"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

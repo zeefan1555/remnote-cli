@@ -1,0 +1,116 @@
+---
+name: remnote
+description: Search, read, and write RemNote through remnote-cli. Require confirm write before mutating commands.
+homepage: https://github.com/zeefan1555/remnote-direct
+metadata:
+  openclaw:
+    requires:
+      bins: [remnote-cli]
+---
+
+# RemNote CLI
+
+Use the direct CLI for ordinary knowledge-base operations. A customized
+`remnote-kb-navigation` skill can supply the user's exact root IDs; do not guess
+IDs from an unconfigured template.
+
+## Preconditions
+
+- RemNote desktop is open with independent plugin `zeefan-remnote-sdk-bridge` enabled.
+- CLI and plugin are paired with a private token for the exact intended KB.
+- Official content and `KnowledgeBaseInfo: Read` permissions are granted.
+- Run `remnote-cli status` and verify plugin ID, KB, protocol, SDK and live write flags.
+- No MCP endpoint or business daemon is required. Local plugin loading uses a
+  file-only static host; product versions need not match.
+- Never request the private token in chat or include it in evidence.
+
+See [installation](../../docs/guides/installation.md) and
+[configuration](../../docs/guides/configuration.md).
+
+## Safety
+
+Default to reads and previews. Require the user's exact phrase `confirm write`
+in the same turn before ordinary mutating commands. Preview is not write consent.
+Destructive changes also require explicit replacement/deletion intent, both plugin
+write gates and `--allow-destructive`.
+
+Run one command per execution. Do not chain commands or restart unrelated
+processes. Prefer file payloads (`--content-file`, `--plan`, `--request`,
+`--expect`) over shell interpolation; inputs are bounded to 100 KiB.
+Use exact Rem IDs, not ambiguous tag names. Respect repository policy: live
+development/acceptance tests run only through the guarded integration wrapper
+after explicit authorization.
+
+## Read And Discover
+
+```bash
+remnote-cli status
+remnote-cli search "topic" --parent-id ROOT_ID
+remnote-cli search "topic" --cards-only --include-review-stats
+remnote-cli search-by-tag --tag-id TAG_ID
+remnote-cli read REM_ID --content-mode structured --depth 1 --child-limit 100
+remnote-cli list-children ROOT_ID
+remnote-cli review-stats REM_ID
+remnote-cli read-table --rem-id TABLE_ID
+remnote-cli todo list --tag-id TAG_ID
+remnote-cli sdk capabilities --status supported --mode read --text
+remnote-cli sdk rem object-get-children-rem --help
+```
+
+JSON is preferred for ID-based follow-up work. Use shallow structured reads for
+navigation, Markdown for presentation. Increase bounds only when needed.
+SDK command help comes from the live catalog. Callback/private/stateful-handle
+methods are unsupported; do not substitute arbitrary JavaScript.
+
+## Authorized Writes
+
+Use friendly commands when available: `create`, `update`, `insert-children`,
+`update-tags`, `set-property` and `journal`.
+`set-document-status`, `move-note`, `outline`, `todo complete|reopen`,
+`flashcards apply` and `wiki apply` default to preview and need `--apply`.
+
+Prefer additive `insert-children`. `replace-children` destroys child identities
+and requires `--allow-destructive`; an empty payload clears content children.
+Use stale-state guards where provided. Existing title/card/document identity and
+exact tag/property semantics are documented in the
+[command reference](../../docs/guides/remnote-cli-command-reference.md).
+
+## Bounded Tasks
+
+Use `context --request FILE` for bounded exact-ID metadata, then
+`verify scope --expect FILE` for fresh proof. Raw text appears only for explicit
+`remIds`; request it narrowly. Required subtree and inverse-tag scopes must not
+be narrowed merely to pass. Incomplete evidence is not success.
+
+`flashcards apply` and `wiki apply` take an inner schema-1 plan and stable
+`--idempotency-key`. Preview first, then authorized apply. Existing text patches
+require the current raw-text hash. Semantic receipt keys identify returned Rems;
+never infer IDs from creation order.
+
+Task commands do not look up dates or create daily documents. The caller validates
+the intended date before new batches/after midnight; same-key replay retains its
+original diary. Wiki plain-node/duplicate/grouped-index guards remain mandatory.
+There is no task rollback guarantee.
+
+Keep evidence metadata-only: IDs, counts, checks and hashes, not KB titles,
+text, aliases or review-history bodies. Exact semantic text readback is still
+required before acceptance. See [read receipts](../../docs/guides/read-receipts.md)
+and [task plans](../../docs/guides/task-plans.md).
+
+## Recovery
+
+Exit 0 means success; 1 includes validation, connection and incomplete-receipt
+failures. Preserve available receipts on failure.
+
+A timed-out or disconnected write may have taken effect. Preserve its exact plan,
+key and local journal. Inspect known IDs and reconcile the outcome before another
+authorized operation. Never blind-retry, change a plan under its key or remove a
+journal/create a new key to bypass uncertainty.
+
+For connection failures, check the exact KB, pairing, permissions and occupied
+port. The plugin normally waits between commands. Bring RemNote to the foreground
+for a read-only status retry if background timer throttling is suspected. Do not
+stop arbitrary listeners, weaken KB binding or disable browser security.
+
+Capabilities are fetched live per command. Journals and ID-only paging snapshots
+are private local state, not an offline copy of the knowledge base.
