@@ -64,6 +64,11 @@ methods are unsupported; do not substitute arbitrary JavaScript.
 
 ## Authorized Writes
 
+First check [ADR 0003](../../../../docs/adr/0003-disable-unsafe-native-transactions.md):
+native transactions are disabled. Atomic update/replace/property/TODO apply commands
+are unavailable. Additive create/journal/insert commands retain per-attempt recovery
+keys and known IDs on failure; they are not atomic and must not be blindly replayed.
+
 Use friendly commands when available: `create`, `update`, `insert-children`,
 `update-tags`, `set-property` and `journal`.
 `set-document-status`, `move-note`, `outline`, `todo complete|reopen`,

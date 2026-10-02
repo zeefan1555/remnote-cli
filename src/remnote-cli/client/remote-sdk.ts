@@ -43,7 +43,7 @@ export function remoteSdk(
     if (data.$type === 'undefined') return undefined;
     if (data.$type === 'date') return new Date(String(data.value));
     if (data.$type === 'rem' || data.$type === 'card') {
-      if (typeof data.id !== 'string') throw new Error('Invalid SDK object identity');
+      if (typeof data.id !== 'string' || !data.id) throw new Error('Invalid SDK object identity');
       const object = Object.fromEntries(
         Object.entries(data)
           .filter(([key]) => key !== '$type' && key !== 'id')
@@ -76,18 +76,10 @@ export function remoteSdk(
         ? (...args: unknown[]) => ({ value: () => invoke(method.id, args) })
         : (...args: unknown[]) => invoke(method.id, args);
   }
-  (plugin.app ??= Object.create(null)).transaction = async <T>(
-    fn: () => Promise<T>
-  ): Promise<T> => {
-    await connection.request('transaction_begin', {});
-    try {
-      const value = await fn();
-      await connection.request('transaction_end', { commit: true });
-      return value;
-    } catch (error) {
-      await connection.request('transaction_end', { commit: false }).catch(() => {});
-      throw error;
-    }
+  (plugin.app ??= Object.create(null)).transaction = async (): Promise<never> => {
+    throw new Error(
+      'Native transactions are unavailable: SDK 0.0.46 cannot acknowledge abort. No transaction writes were started. Use a journaled task or individual SDK calls.'
+    );
   };
   return plugin as unknown as ReactRNPlugin;
 }

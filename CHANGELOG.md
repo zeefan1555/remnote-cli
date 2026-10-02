@@ -7,6 +7,17 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed In 0.24.1
+
+- Accept native alias text values without requiring or journaling fictional Rem
+  IDs; preserve the owning Rem ID for failed additive-write recovery.
+
+- Reject unsafe native transactions before executing callbacks. Keep additive
+  create/journal/insert commands and flashcard tasks usable without them, saving
+  known IDs before follow-up writes and stopping on partial or unknown results.
+- Preflight native transaction acceptance before creating a fixture; surface the
+  restriction in status and document which atomic commands remain unavailable.
+
 ### Added
 
 - Guarded desktop-native transaction abort/commit/readback acceptance and CLI-only

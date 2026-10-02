@@ -739,6 +739,8 @@ export class TaskOperations {
     try {
       const ids = await this.mutate(action);
       if (!ids.length || new Set(ids).size !== ids.length) throw new Error('Ambiguous created IDs');
+      j.steps[k].remIds = ids;
+      await save();
       for (const id of ids) {
         const r = await this.rem(id);
         j.createdTextHashes[id] = await contentHash(r.text);
@@ -1046,38 +1048,38 @@ export class TaskOperations {
     j.ids.tag = p.tagRemId;
     const cards = p.newCards ?? [];
     if (cards.length) {
-      const ids = await this.create('create:cards', j, save, async () =>
-        this.deps.plugin.app.transaction(async () => {
-          const lines = cards
-            .map(
-              (card, index) =>
-                `- Task card ${index + 1} ===\n${card.answer.map((_, n) => `    - Answer ${n + 1}`).join('\n')}`
-            )
-            .join('\n');
-          const markdown =
-            cards.length > 1
-              ? 'Task card cluster\n' +
-                lines
-                  .split('\n')
-                  .map((line) => '  ' + line)
-                  .join('\n')
-              : lines;
-          this.assertCanMutate();
-          const rems = await this.deps.plugin.rem.createTreeWithMarkdown(markdown, p.dailyRemId);
-          const ids = nativeIds(rems ?? []);
-          await this.bindScaffold(p, ids, j);
-          const root = await this.rem(j.ids.root);
-          for (const rem of rems ?? []) {
-            if ((await rem.getChildrenRem()).length) {
-              this.assertCanMutate();
-              await rem.setIsCollapsed(true, p.dailyRemId);
-            }
+      const ids = await this.create('create:cards', j, save, async () => {
+        const lines = cards
+          .map(
+            (card, index) =>
+              `- Task card ${index + 1} ===\n${card.answer.map((_, n) => `    - Answer ${n + 1}`).join('\n')}`
+          )
+          .join('\n');
+        const markdown =
+          cards.length > 1
+            ? 'Task card cluster\n' +
+              lines
+                .split('\n')
+                .map((line) => '  ' + line)
+                .join('\n')
+            : lines;
+        this.assertCanMutate();
+        const rems = await this.deps.plugin.rem.createTreeWithMarkdown(markdown, p.dailyRemId);
+        const ids = nativeIds(rems ?? []);
+        j.steps['create:cards'].remIds = ids;
+        await save();
+        await this.bindScaffold(p, ids, j);
+        const root = await this.rem(j.ids.root);
+        for (const rem of rems ?? []) {
+          if ((await rem.getChildrenRem()).length) {
+            this.assertCanMutate();
+            await rem.setIsCollapsed(true, p.dailyRemId);
           }
-          this.assertCanMutate();
-          await root.addTag(p.tagRemId);
-          return ids;
-        })
-      );
+        }
+        this.assertCanMutate();
+        await root.addTag(p.tagRemId);
+        return ids;
+      });
       const bound = await this.boundScaffold(p, ids, j);
       for (let i = 0; i < cards.length; i++) {
         await this.createdText(bound.cards[i]._id, [cards[i].question], j, save);

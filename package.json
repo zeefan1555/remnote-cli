@@ -1,7 +1,7 @@
 {
   "name": "remnote-cli",
   "private": true,
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Direct CLI automation for the RemNote Plugin SDK",
   "type": "module",
   "main": "dist/remnote-cli/index.js",
@@ -38,7 +38,9 @@
     "bridge"
   ],
   "author": "zeefan1555",
-  "contributors": ["Robert Spiegel"],
+  "contributors": [
+    "Robert Spiegel"
+  ],
   "license": "MIT",
   "files": [
     "dist/",

@@ -1,5 +1,10 @@
 # Acceptance Status
 
+Latest check: the 0.24.1 freeze fix passed real desktop two-card creation,
+same-key replay and normal restart readback. Native transactions are disabled,
+not repaired; see [the safety decision](adr/0003-disable-unsafe-native-transactions.md)
+and the latest verification below. Historical checks describe their own candidates.
+
 The imported implementation is not accepted for daily installation.
 
 Before this repository migration, real RemNote desktop testing established:
@@ -132,3 +137,52 @@ took 6.00 s including the build. The complete context command took 1012 ms
 No new card creation, same-key write replay or native abort was attempted in this
 recheck. The old pre-restart whole-context difference and native rollback gate
 remain unresolved. A passing read path does not establish full write acceptance.
+
+## Freeze Regression Fix: 0.24.1
+
+The regression had two connected causes. The official SDK 0.0.46 never sends a
+host response when a transaction callback rejects; holding that transaction open
+across CLI requests could therefore leave the editor locked. Native aliases also
+return text values without Rem IDs despite the SDK declaration. The old fork
+checked alias creation truthiness, while the direct serializer required a Rem ID
+and triggered the broken abort path.
+
+ADR 0003 removes the cross-request native transaction scope. Additive commands
+save private recovery metadata and known IDs before follow-up writes; unknown
+outcomes stop without retry or cleanup. Alias methods return bounded text values.
+Ordinary Rem/Card results still require real IDs. Atomic update, replacement,
+property writes and TODO apply remain unavailable rather than silently losing
+their atomicity guarantee.
+
+Verified on RemNote desktop, KB `byte`, on 2026-10-02:
+
+| Check | Result |
+| --- | --- |
+| `npm run quality` | 725 CLI tests and 77 plugin tests passed, including actual-SDK callback and idless-alias regressions. |
+| SDK freshness and production builds | Passed; the plugin build retains three bundle-size warnings. |
+| Previous uncertain alias write | Exact-ID readback recovered the existing title and alias, with no duplicate create. |
+| New installed-CLI create with alias | Write and exact-ID readback passed; the native daily document showed both title and alias. |
+| Guarded two-card acceptance | 6/6 steps passed, no skips; 13.0 s including runner setup. |
+| Preview / apply / fresh verification | 789 / 1719 / 695 ms. |
+| Same-key replay and comparison | 2316 ms; Rem IDs, native card IDs, text, child lists and review histories were unchanged. |
+| CLI-only composition | 1422 ms; existing public SDK commands counted the same two native cards with unchanged plugin assets. |
+| Desktop inspection | Both exact card pages and answers were observed. Subsequent eight-object readback was unchanged. |
+| Normal restart | Quit through the RemNote menu, restarted the static LaunchAgent, reopened the app, and invoked installed `remnote-cli` from `/tmp`. |
+| Post-restart persistence | Eight objects unchanged; full scope verification passed five checks across 13 objects; same-key replay and final equality passed. The native second-card answer was visible again. |
+| Unsafe transaction preflight | Refused before fixture creation with `nativeTransactions: false`; this is not a rollback pass. |
+
+The plugin and CLI reported 0.24.1 and SDK catalog SHA-256
+`6c6c4420e6b7058c2b1e2706b9bf9f43933b5d448f7a3de5de0a8cbe1cd28fd4`.
+Cold status after app launch connected in 5217 ms and completed in 5227 ms.
+Plugin `index.js` SHA-256 was
+`dd41fec6d1439d725fa13d73489d8dae376cb5799e43e341ded7bbb3bf815c95`;
+`sdk_bridge.js` was
+`bfb040ff30e4424788605b342a4add66bbb7ec93068fa0056ddd427152a3dfc9`.
+Served files matched the production build before and after CLI-only composition.
+
+Private plans, idempotency keys, exact IDs, source/build manifests and raw results
+are recorded under ignored `.local/freeze-fix-*` and the referenced private test
+evidence directory. Pre-existing dirty documentation is preserved separately and
+is not evidence that the earlier HEAD contained this fix. No rollback retest,
+private SDK patch, old MCP fallback or marketplace publication was performed.
+The broader SDK catalog and transaction-dependent commands are not fully accepted.

@@ -13,7 +13,7 @@ export const CapabilitySchema = z
     status: z.enum(['supported', 'unsupported']),
     mode: z.enum(['read', 'write', 'interactive', 'destructive']),
     reason: z.string().optional(),
-    materialize: z.literal('richText').optional(),
+    materialize: z.enum(['richText', 'aliasText']).optional(),
   })
   .strict();
 export const CatalogSchema = z

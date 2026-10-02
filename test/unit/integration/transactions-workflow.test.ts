@@ -12,8 +12,8 @@ vi.mock('../../../src/remnote-cli/client/remote-sdk.js');
 vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js');
 afterEach(() => vi.restoreAllMocks());
 
-it.each([false, true])(
-  'checks native readback and stops when rollback is broken=%s',
+it.each([false, true, 'unavailable'])(
+  'checks native readback or refuses writes when rollback is %s',
   async (broken) => {
     let directory = '';
     vi.spyOn(console, 'log').mockImplementation((value: string) => {
@@ -39,6 +39,7 @@ it.each([false, true])(
     });
     vi.spyOn(Connection.prototype, 'request').mockResolvedValue({
       pluginId: 'zeefan-remnote-sdk-bridge',
+      nativeTransactions: broken === 'unavailable' ? false : true,
     });
     const close = vi.spyOn(Connection.prototype, 'close').mockResolvedValue();
     vi.mocked(verifiedCatalog).mockReturnValue({
@@ -82,15 +83,22 @@ it.each([false, true])(
     try {
       const result = await transactionsWorkflow({ cli: new CliTestClient(), runId: 'unit-test' });
       expect(result.steps.map((step) => step.passed)).toEqual(
-        broken ? [true, true, false] : [true, true, true, true, true]
+        broken === 'unavailable'
+          ? [false]
+          : broken
+            ? [true, true, false]
+            : [true, true, true, true, true]
       );
-      expect(transaction).toHaveBeenCalledTimes(broken ? 1 : 2);
+      expect(transaction).toHaveBeenCalledTimes(broken === 'unavailable' ? 0 : broken ? 1 : 2);
       expect(close).toHaveBeenCalledTimes(broken ? 1 : 2);
       const receipt = JSON.parse(
         await readFile(`${directory}/${broken ? 'failure' : 'result'}.json`, 'utf8')
       );
-      expect(receipt.ids).toEqual({ root: 'r1', abortedChild: 'r2' });
-      expect(state.has('r2')).toBe(broken);
+      expect(receipt.ids).toEqual(
+        broken === 'unavailable' ? {} : { root: 'r1', abortedChild: 'r2' }
+      );
+      expect(state.has('r2')).toBe(broken === true);
+      if (broken === 'unavailable') expect(state.size).toBe(0);
     } finally {
       if (directory) await rm(directory, { recursive: true });
     }

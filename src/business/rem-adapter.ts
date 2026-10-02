@@ -3,6 +3,7 @@
  * Wraps the RemNote Plugin SDK with correct method signatures for v0.0.46+
  */
 
+import { randomUUID } from 'node:crypto';
 import type {
   ReactRNPlugin,
   RichTextInterface,
@@ -33,6 +34,7 @@ import {
   type WikiPlan,
 } from './task-operations.js';
 import { cardDelimiterIndex } from './card-structure.js';
+import { contentHash } from './content-hash.js';
 
 export type ContentMode = 'none' | 'markdown' | 'structured';
 export type SearchByTagResultMode = 'context' | 'tagged';
@@ -1080,7 +1082,7 @@ export class RemAdapter {
 
   /**
    * Get alternate names for a Rem via the SDK aliases API.
-   * The SDK returns alias Rems whose `.text` contains the alias content.
+   * Native aliases expose `.text` but are values, not Rem handles.
    */
   private async getAliases(rem: PluginRem): Promise<string[]> {
     if (!('getAliases' in rem) || typeof rem.getAliases !== 'function') return [];
@@ -2431,6 +2433,44 @@ export class RemAdapter {
     return await this.plugin.app.transaction(fn);
   }
 
+  private async runAdditive<T>(
+    operation: string,
+    input: unknown,
+    fn: (remember: (remIds: string[]) => Promise<void>) => Promise<T>,
+    beforeMutation?: () => void
+  ): Promise<T> {
+    this.assertWriteEnabled(beforeMutation);
+    const key = `additive:${randomUUID()}`;
+    const entry = {
+      schemaVersion: 1,
+      operation,
+      inputHash: await contentHash(input),
+      state: 'started',
+      remIds: [] as string[],
+    };
+    const save = () => this.journal.setLocal(key, { ...entry, remIds: [...entry.remIds] });
+    await save();
+    try {
+      this.assertWriteEnabled(beforeMutation);
+      const result = await fn(async (ids) => {
+        if (ids.some((id) => typeof id !== 'string' || !id))
+          throw new Error('Invalid SDK Rem identity');
+        entry.remIds = [...new Set([...entry.remIds, ...ids])];
+        await save();
+      });
+      entry.state = 'applied';
+      await save();
+      return result;
+    } catch (error) {
+      entry.state = 'unknown';
+      await save().catch(() => {});
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}. Additive writes may be partial; no rollback or retry was attempted. Recovery key: ${key}; known Rem IDs: ${entry.remIds.join(', ') || 'none returned'}. Read back before retry.`,
+        { cause: error }
+      );
+    }
+  }
+
   private async prepareMarkdownIdReferenceTokens(markdown: string): Promise<PreparedMarkdown> {
     const matches = Array.from(markdown.matchAll(ID_REFERENCE_TOKEN_PATTERN)).map((match) => ({
       token: match[0],
@@ -2531,7 +2571,8 @@ export class RemAdapter {
   private async createSingleRemWithPreparedMarkdown(
     preparedMarkdown: PreparedMarkdown,
     parentId?: string,
-    beforeMutation?: () => void
+    beforeMutation?: () => void,
+    remember?: (remIds: string[]) => Promise<void>
   ): Promise<PluginRem> {
     this.assertWriteEnabled(beforeMutation);
     const rem = await this.plugin.rem.createSingleRemWithMarkdown(
@@ -2539,6 +2580,7 @@ export class RemAdapter {
       parentId
     );
     if (!rem) throw new Error('Failed to create Rem');
+    await remember?.([rem._id]);
     return await this.applyIdReferenceTokensToRem(rem, preparedMarkdown, beforeMutation);
   }
 
@@ -2639,7 +2681,7 @@ export class RemAdapter {
       if (alias === normalizedPrimaryTitle) continue;
       this.assertWriteEnabled(beforeMutation);
       const aliasRem = await rem.getOrCreateAliasWithText(this.textToRichText(alias));
-      if (!aliasRem) {
+      if (!aliasRem || this.normalizeAliasText(await this.extractText(aliasRem.text)) !== alias) {
         throw new Error(`Failed to create alias: ${alias}`);
       }
     }
@@ -2936,7 +2978,8 @@ export class RemAdapter {
     parentId: string,
     positionAmongstSiblings?: number,
     diagnosticTrace?: DiagnosticTrace,
-    beforeMutation?: () => void
+    beforeMutation?: () => void,
+    remember?: (remIds: string[]) => Promise<void>
   ): Promise<PluginRem[]> {
     if (!preparedMarkdown.markdown.trim()) {
       this.logDiagnosticTrace(diagnosticTrace, 'markdown_tree:empty');
@@ -2959,6 +3002,7 @@ export class RemAdapter {
       preparedMarkdown.markdown,
       parentId || undefined
     );
+    await remember?.(createdRems.map((rem) => rem._id));
     this.logDiagnosticTrace(diagnosticTrace, 'create_tree_with_markdown:done', {
       treeLength: createdRems.length,
     });
@@ -3175,45 +3219,53 @@ export class RemAdapter {
         }
       }
 
-      return await this.runInTransaction(async () => {
-        const titleRem = await this.createSingleRemWithPreparedMarkdown(
-          preparedTitle!,
-          parentId,
-          beforeMutation
-        );
+      return await this.runAdditive(
+        'create_note',
+        params,
+        async (remember) => {
+          if (parentId) await remember([parentId]);
+          const titleRem = await this.createSingleRemWithPreparedMarkdown(
+            preparedTitle!,
+            parentId,
+            beforeMutation,
+            remember
+          );
 
-        if (asDocument) {
-          await this.setRemDocumentStatus(titleRem, true, beforeMutation);
-        }
+          if (asDocument) {
+            await this.setRemDocumentStatus(titleRem, true, beforeMutation);
+          }
 
-        await this.addTagRemIdsToRem(titleRem, tagRemIds, beforeMutation);
-        const primaryTitle = await this.extractText(titleRem.text);
-        await this.addAliasesToRem(titleRem, aliases, primaryTitle, beforeMutation);
+          await this.addTagRemIdsToRem(titleRem, tagRemIds, beforeMutation);
+          const primaryTitle = await this.extractText(titleRem.text);
+          await this.addAliasesToRem(titleRem, aliases, primaryTitle, beforeMutation);
 
-        remIds.push(titleRem._id);
-        titles.push(title);
+          remIds.push(titleRem._id);
+          titles.push(title);
 
-        if (hasContent) {
-          if (preparedContent) {
-            const createdRems = await this.createRemsFromPreparedMarkdown(
-              preparedContent,
-              titleRem._id,
-              undefined,
-              undefined,
-              beforeMutation
-            );
-            if (createdRems.length > 0) {
-              const results = await this.extractRemResults(createdRems);
-              remIds.push(...results.remIds);
-              titles.push(...results.titles);
+          if (hasContent) {
+            if (preparedContent) {
+              const createdRems = await this.createRemsFromPreparedMarkdown(
+                preparedContent,
+                titleRem._id,
+                undefined,
+                undefined,
+                beforeMutation,
+                remember
+              );
+              if (createdRems.length > 0) {
+                const results = await this.extractRemResults(createdRems);
+                remIds.push(...results.remIds);
+                titles.push(...results.titles);
+              }
             }
           }
-        }
 
-        await this.collapseCreatedNonLeafRems([titleRem], beforeMutation);
+          await this.collapseCreatedNonLeafRems([titleRem], beforeMutation);
 
-        return { remIds, titles };
-      }, beforeMutation);
+          return { remIds, titles };
+        },
+        beforeMutation
+      );
     } else if (hasContent) {
       // Scenario 2: content only
       // Normalize content to collapse consecutive blank lines
@@ -3223,27 +3275,34 @@ export class RemAdapter {
       }
 
       const preparedContent = await this.prepareMarkdownIdReferenceTokens(normalizedContent);
-      return await this.runInTransaction(async () => {
-        const createdRems = await this.createRemsFromPreparedMarkdown(
-          preparedContent,
-          parentId,
-          undefined,
-          undefined,
-          beforeMutation
-        );
+      return await this.runAdditive(
+        'create_note',
+        params,
+        async (remember) => {
+          if (parentId) await remember([parentId]);
+          const createdRems = await this.createRemsFromPreparedMarkdown(
+            preparedContent,
+            parentId,
+            undefined,
+            undefined,
+            beforeMutation,
+            remember
+          );
 
-        if (!createdRems || createdRems.length === 0) {
-          throw new Error('No Rems created from markdown content');
-        }
+          if (!createdRems || createdRems.length === 0) {
+            throw new Error('No Rems created from markdown content');
+          }
 
-        await this.addTagRemIdsToTopLevelRems(createdRems, parentId, tagRemIds, beforeMutation);
+          await this.addTagRemIdsToTopLevelRems(createdRems, parentId, tagRemIds, beforeMutation);
 
-        const results = await this.extractRemResults(createdRems);
-        remIds.push(...results.remIds);
-        titles.push(...results.titles);
+          const results = await this.extractRemResults(createdRems);
+          remIds.push(...results.remIds);
+          titles.push(...results.titles);
 
-        return { remIds, titles };
-      }, beforeMutation);
+          return { remIds, titles };
+        },
+        beforeMutation
+      );
     } else {
       throw new Error('create_note requires either title or content');
     }
@@ -3290,23 +3349,25 @@ export class RemAdapter {
 
     const preparedContent = await this.prepareMarkdownIdReferenceTokens(normalizedContent);
 
-    const dailyDoc = await this.plugin.date.getDailyDoc(today);
-
-    if (!dailyDoc) {
-      throw new Error('Failed to access daily document');
-    }
-
     const remIds: string[] = [];
     const titles: string[] = [];
-    let parentRemId: string = dailyDoc._id;
     let journalRootRem: PluginRem | undefined;
 
-    return await this.runInTransaction(async () => {
+    return await this.runAdditive('append_journal', params, async (remember) => {
+      this.assertWriteEnabled();
+      const dailyDoc = await this.plugin.date.getDailyDoc(today);
+      if (!dailyDoc) throw new Error('Failed to access daily document');
+      await remember([dailyDoc._id]);
+      let parentRemId = dailyDoc._id;
       // If content is > 2 lines of markdown, add all content under a rem with prefix
       if (shouldCreateJournalRoot) {
+        this.assertWriteEnabled();
         const titleRem = await this.plugin.rem.createRem();
         if (titleRem) {
+          await remember([titleRem._id]);
+          this.assertWriteEnabled();
           await titleRem.setText(this.textToRichText(prefixToCreate));
+          this.assertWriteEnabled();
           await titleRem.setParent(dailyDoc);
           journalRootRem = titleRem;
 
@@ -3317,7 +3378,14 @@ export class RemAdapter {
       }
 
       // Create the tree under daily document or the prefix Rem
-      const createdRems = await this.createRemsFromPreparedMarkdown(preparedContent, parentRemId);
+      const createdRems = await this.createRemsFromPreparedMarkdown(
+        preparedContent,
+        parentRemId,
+        undefined,
+        undefined,
+        undefined,
+        remember
+      );
       if (tagRemIds.length) {
         if (journalRootRem) {
           await this.addTagRemIdsToRem(journalRootRem, tagRemIds);
@@ -3873,21 +3941,24 @@ export class RemAdapter {
         preparedLength: preparedContent.markdown.length,
       });
 
-      this.logDiagnosticTrace(trace, 'transaction:start');
-      const result = await this.runInTransaction(async () => {
-        this.logDiagnosticTrace(trace, 'transaction:entered');
+      this.logDiagnosticTrace(trace, 'write:start');
+      const result = await this.runAdditive('insert_children', params, async (remember) => {
+        await remember([safeParams.parentRemId]);
+        this.logDiagnosticTrace(trace, 'write:entered');
         const createdRems = await this.createRemsFromPreparedMarkdown(
           preparedContent,
           safeParams.parentRemId,
           positionAmongstSiblings,
-          trace
+          trace,
+          undefined,
+          remember
         );
-        this.logDiagnosticTrace(trace, 'transaction:created_rems', {
+        this.logDiagnosticTrace(trace, 'write:created_rems', {
           createdRemCount: createdRems.length,
         });
 
         if (createdRems.length === 0) {
-          this.logDiagnosticTrace(trace, 'transaction:callback_done', {
+          this.logDiagnosticTrace(trace, 'write:callback_done', {
             createdRemCount: createdRems.length,
             resultRemCount: 0,
           });
@@ -3902,13 +3973,13 @@ export class RemAdapter {
           remIds: extractedResult.remIds,
           titleCount: extractedResult.titles.length,
         });
-        this.logDiagnosticTrace(trace, 'transaction:callback_done', {
+        this.logDiagnosticTrace(trace, 'write:callback_done', {
           createdRemCount: createdRems.length,
           resultRemCount: extractedResult.remIds.length,
         });
         return extractedResult;
       });
-      this.logDiagnosticTrace(trace, 'transaction:done', {
+      this.logDiagnosticTrace(trace, 'write:done', {
         remIds: result.remIds,
         titleCount: result.titles.length,
       });

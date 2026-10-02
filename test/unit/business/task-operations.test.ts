@@ -141,6 +141,7 @@ describe('public task operation controls', () => {
   it('applies two cards and preserves semantic IDs/history on replay with no date calls', async () => {
     expect(RemType.DEFAULT_TYPE).toBeUndefined();
     const f = await fixture();
+    f.plugin.app.transaction.mockRejectedValue(new Error('Native transactions unavailable'));
     const plan = flashPlan();
     const first = await f.adapter.applyFlashcards(request(plan));
     success(first);
@@ -155,6 +156,26 @@ describe('public task operation controls', () => {
     expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
     expect(f.plugin.date.getDailyDoc).not.toHaveBeenCalled();
     expect(f.plugin.date.getTodaysDoc).not.toHaveBeenCalled();
+    expect(f.plugin.app.transaction).not.toHaveBeenCalled();
+  });
+  it('persists scaffold IDs before a failed follow-up and never recreates them', async () => {
+    const f = await fixture();
+    vi.spyOn(MockRem.prototype, 'setIsCollapsed').mockRejectedValueOnce(
+      new Error('Collapse failed')
+    );
+    const first = await f.adapter.applyFlashcards(request(flashPlan()));
+    expect(first.status).toBe('unknown');
+    const stored = await loadJournal<{ steps: Record<string, { remIds: string[] }> }>(
+      f,
+      'flashcards'
+    );
+    expect(stored.steps['create:cards'].remIds).toHaveLength(5);
+    expect(first.steps.find((step) => step.key === 'create:cards')?.remIds).toEqual(
+      stored.steps['create:cards'].remIds
+    );
+    expect((await adapter(f.plugin).applyFlashcards(request(flashPlan()))).status).toBe('unknown');
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledOnce();
+    expect(f.plugin.app.transaction).not.toHaveBeenCalled();
   });
   it.each([RemType.CONCEPT, RemType.DESCRIPTOR, RemType.PORTAL])(
     'rejects a created card retyped to %s without changing its content',
@@ -465,7 +486,8 @@ describe('durable journal and bounded recovery', () => {
       ids: Record<string, string>;
     }>(f, 'flashcards');
     expect(stored!.steps['create:cards'].state).toBe('started');
-    expect(stored!.ids['card:a']).toBeUndefined();
+    expect(stored!.ids['card:a']).toBe(first.ids['card:a']);
+    expect(stored!.ids['card:a']).toBeTruthy();
     const again = await adapter(f.plugin).applyFlashcards(request(flashPlan()));
     expect(again.status).toBe('unknown');
     expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(count);

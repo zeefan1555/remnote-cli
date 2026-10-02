@@ -62,7 +62,11 @@ batch to bypass uncertainty.
 
 ## General Suite
 
-`--transactions-only` uses the CLI's shared authenticated connection and SDK
+`--transactions-only` first requires `status.nativeTransactions === true`, before
+creating any fixture. The current SDK returns false, so this gate fails without
+writes. Do not bypass it to reproduce the known editor hang.
+
+When available, the test uses the CLI's shared authenticated connection and SDK
 client to create one isolated `[CLI-TEST]` root. It aborts a native transaction
 after editing that root and creating a child, then reads both exact IDs back.
 It next commits a root edit, awaits acknowledgement and verifies persistence

@@ -33,6 +33,17 @@ function catalog(): CapabilityResult {
       materialize: 'richText',
     },
     {
+      id: 'rem:getAliases',
+      target: 'rem',
+      method: 'getAliases',
+      group: 'rem',
+      command: 'object-get-aliases',
+      signatures: [],
+      status: 'supported',
+      mode: 'read',
+      materialize: 'aliasText',
+    },
+    {
       id: 'rem:setParent',
       target: 'rem',
       method: 'setParent',
@@ -90,15 +101,18 @@ describe('remote SDK values', () => {
           ? { $type: 'rem', id: payload.args[0], text: ['Title'], parent: 'root' }
           : payload.capability === 'namespace:richText.rem'
             ? [{ i: 'q', _id: 'r' }]
-            : payload.capability === 'namespace:date.getDailyDoc'
-              ? { $type: 'date', value: '2026-10-02T00:00:00.000Z' }
-              : { $type: 'undefined' },
+            : payload.capability === 'rem:getAliases'
+              ? [{ text: ['Alias'] }]
+              : payload.capability === 'namespace:date.getDailyDoc'
+                ? { $type: 'date', value: '2026-10-02T00:00:00.000Z' }
+                : { $type: 'undefined' },
     }));
     const sdk = remoteSdk({ request } as never, catalog(), false);
     const child = (await sdk.rem.findOne('r'))!,
       parent = (await sdk.rem.findOne('p'))!;
     expect(child._id).toBe('r');
     expect(child.text).toEqual(['Title']);
+    expect(await child.getAliases()).toEqual([{ text: ['Alias'] }]);
     expect(await child.setParent(parent, undefined)).toBeUndefined();
     expect(request).toHaveBeenLastCalledWith(
       'sdk_call',
@@ -122,24 +136,14 @@ describe('remote SDK values', () => {
     await expect(sdk.rem.findOne('r')).rejects.toThrow('mismatch');
   });
 
-  it('waits for transaction commit acknowledgement and aborts local failures', async () => {
+  it('refuses native transactions before any callback or request runs', async () => {
     const request = vi.fn(async () => ({}));
     const sdk = remoteSdk({ request } as never, catalog(), false);
-    expect(await sdk.app.transaction(async () => 42)).toBe(42);
-    expect(request.mock.calls).toEqual([
-      ['transaction_begin', {}],
-      ['transaction_end', { commit: true }],
-    ]);
-    request.mockClear();
-    await expect(
-      sdk.app.transaction(async () => {
-        throw new Error('failed write');
-      })
-    ).rejects.toThrow('failed write');
-    expect(request).toHaveBeenLastCalledWith('transaction_end', { commit: false });
-    request
-      .mockImplementationOnce(async () => ({}))
-      .mockRejectedValueOnce(new Error('unknown commit'));
-    await expect(sdk.app.transaction(async () => 42)).rejects.toThrow('unknown commit');
+    const callback = vi.fn(async () => 42);
+    await expect(sdk.app.transaction(callback)).rejects.toThrow(
+      'Native transactions are unavailable'
+    );
+    expect(callback).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
   });
 });

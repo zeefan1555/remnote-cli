@@ -13,6 +13,15 @@ owns a short-lived loopback connection; no daemon or MCP endpoint is used.
 Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
 See [configuration](configuration.md) for permissions and private pairing-file handling.
 
+### Native Transaction Restriction
+
+SDK 0.0.46 cannot safely abort a native transaction. `update`, `replace-children`,
+`set-property` and changed TODO `--apply` operations fail before mutation.
+`create`, `journal` and `insert-children` perform sequential additive writes with
+private recovery journals, not atomic transactions. A failure can leave partial
+content: retain the reported key/IDs and read back before retrying. Use the task
+commands for stable-key replay. See [ADR 0003](../../../../docs/adr/0003-disable-unsafe-native-transactions.md).
+
 ## Global Options
 
 | Flag              | Default                         | Description                         |
@@ -274,8 +283,8 @@ remnote-cli todo complete <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id
 remnote-cli todo reopen <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id> --apply
 ```
 
-`complete` and `reopen` default to preview. On apply, native todo state is changed only when the Rem already uses a
-native checkbox; exact status tags are always synchronized in one Bridge transaction.
+`complete` and `reopen` default to preview. Changed apply operations require atomic
+native status/tag synchronization and are currently unavailable; previews remain usable.
 
 ## SDK commands
 

@@ -41,8 +41,11 @@ plan, key, journal and any returned IDs. Read those exact IDs and reconcile the
 outcome before another authorized attempt. Never blindly rerun the original write
 or choose a new idempotency key to bypass uncertainty.
 
-Native transactions are bounded, not a general rollback promise. The CLI reports
-success only after acknowledgement and required readback.
+Native transactions are disabled: SDK 0.0.46 cannot acknowledge a rejected callback
+and can leave the editor blocked. Atomic commands fail before their callbacks run.
+Additive commands retain a private per-attempt recovery key and known IDs; task
+commands retain their stable idempotency key. Neither supplies automatic rollback.
+See [the exact boundary](../../../../docs/adr/0003-disable-unsafe-native-transactions.md).
 
 ## Exit Status
 

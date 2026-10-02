@@ -17,10 +17,10 @@ inside the CLI command, not a separate server product.
 - `src/schemas/`: CLI input/output contracts.
 - `src/remnote-cli/client/`: paired connection, SDK snapshots and private local state.
 - Companion plugin: official SDK, generated method allowlist, serialization,
-  permission checks, KB binding and native transaction scopes.
+  permission checks and KB binding.
 
-Only `get_status`, `get_sdk_capabilities`, `sdk_call`,
-`transaction_begin` and `transaction_end` cross the plugin boundary. Task names
+Only `get_status`, `get_sdk_capabilities` and `sdk_call` execute in the plugin.
+`transaction_begin` and `transaction_end` explicitly fail without SDK calls. Task names
 such as `flashcards_apply` are local CLI dispatch names, not plugin actions.
 There is no HTTP MCP endpoint, OAuth provider, MCPB proxy, daemon or semver matching.
 
@@ -43,17 +43,20 @@ collection, node and text bounds. Rem/Card objects cross as value snapshots with
 IDs; callbacks and private/stateful handles do not cross. Supported RichTextBuilder
 factories are materialized with the native `value()` method within one call.
 
-SDK calls have a 15-second default deadline. Native transaction scopes are bounded
-to 10 seconds; the CLI must await the commit acknowledgement. Timeout or disconnect
-does not prove cancellation or rollback. No running command reconnects or replays
-writes automatically. New plugin sessions wait for prior native work to settle.
+SDK calls have a 15-second default deadline. Native transactions are disabled because
+SDK 0.0.46 does not acknowledge a rejected callback and can block the editor. See
+[ADR 0003](../../../docs/adr/0003-disable-unsafe-native-transactions.md) for the
+additive-write and rejected atomic-command boundary. Timeout or disconnect does
+not prove cancellation or rollback. No running command reconnects or replays writes
+automatically. New plugin sessions wait only for prior individual SDK calls to settle.
 
 ## Local State
 
 The pairing file and state files are private to the local user. Journals and paging
 snapshots live beside the pairing file, under `state/<KB hash>/`. Journals are
-metadata-only, durably written before mutations and keyed by a stable idempotency
-key. Corrupt or uncertain journal state fails closed. Search snapshots contain IDs
+metadata-only and durably written before mutations. Task journals use a stable
+idempotency key; additive command journals use a per-attempt recovery key and retain
+known IDs on partial failure. Corrupt or uncertain journal state fails closed. Search snapshots contain IDs
 and query hashes, not copied KB text.
 
 The CLI fetches a live capability catalog for each command; there is no persistent

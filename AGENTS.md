@@ -13,7 +13,7 @@ CLI commands <-> authenticated loopback WebSocket <-> ../plugin <-> SDK
 - `src/business/`: note/card/wiki/todo workflows, inspection and recovery.
 - `src/schemas/`: Zod input/output contracts.
 - `../plugin`: generated official SDK allowlist, serialization,
-  live permissions, exact KB binding and bounded native transactions.
+  live permissions and exact KB binding. Native transactions are disabled by shared ADR 0003.
 - [Architecture](docs/architecture.md) and [approved ADR](docs/adr/0001-direct-cli.md).
 
 Business changes belong in the CLI and must not require a plugin update when the

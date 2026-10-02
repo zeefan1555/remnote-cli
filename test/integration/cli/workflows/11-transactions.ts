@@ -31,8 +31,16 @@ export async function transactionsWorkflow(ctx: WorkflowContext): Promise<Workfl
     const config = await readConnectionConfig();
     const open = async (current: Connection) => {
       const identity = await current.open();
-      const status = (await current.request('get_status', {})) as { pluginId: string };
+      const status = (await current.request('get_status', {})) as {
+        pluginId: string;
+        nativeTransactions?: boolean;
+      };
       assert.equal(status.pluginId, 'zeefan-remnote-sdk-bridge');
+      assert.equal(
+        status.nativeTransactions,
+        true,
+        'Native transactions unavailable; no test writes started'
+      );
       assert.equal(identity.knowledgeBaseId, config.knowledgeBaseId);
       assert.equal(identity.acceptWriteOperations, true);
       const catalog = verifiedCatalog(await current.request('get_sdk_capabilities', {}));

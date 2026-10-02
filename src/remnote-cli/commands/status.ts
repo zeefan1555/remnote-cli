@@ -26,6 +26,8 @@ export function registerStatusCommand(program: Command): void {
             if (r.knowledgeBaseId) lines.push(`KB: ${r.knowledgeBaseName} (${r.knowledgeBaseId})`);
             if (r.protocolVersion) lines.push(`Protocol: ${r.protocolVersion}`);
             if (r.sdkVersion) lines.push(`SDK: ${r.sdkVersion}`);
+            if (r.nativeTransactions === false)
+              lines.push('Native transactions: unavailable (SDK cannot acknowledge abort)');
             if (r.authorizationError) lines.push(`Authorization: ${r.authorizationError}`);
             return lines.join('\n');
           })

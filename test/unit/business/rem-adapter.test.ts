@@ -44,6 +44,85 @@ describe('RemAdapter', () => {
   });
 
   describe('createNote', () => {
+    it('accepts text-only native aliases and journals only the owning Rem ID', async () => {
+      const createAlias = vi
+        .spyOn(MockRem.prototype, 'getOrCreateAliasWithText')
+        .mockResolvedValue({ text: ['Alias'] } as never);
+      const readAliases = vi
+        .spyOn(MockRem.prototype, 'getAliases')
+        .mockResolvedValue([{ text: ['Alias'] }] as never);
+      try {
+        const result = await adapter.createNote({ title: 'Alias owner', aliases: ['Alias'] });
+        expect(result.remIds).toHaveLength(1);
+        expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
+          expect.stringMatching(/^additive:/),
+          expect.objectContaining({ state: 'applied', remIds: result.remIds })
+        );
+        expect(await adapter.readNote({ remId: result.remIds[0], view: 'full' })).toMatchObject({
+          aliases: ['Alias'],
+        });
+      } finally {
+        createAlias.mockRestore();
+        readAliases.mockRestore();
+      }
+    });
+
+    it('keeps additive commands usable without native transactions', async () => {
+      plugin.app.transaction.mockRejectedValue(new Error('Unsafe native transaction'));
+      const created = await adapter.createNote({ title: 'Additive root' });
+      const inserted = await adapter.insertChildren({
+        parentRemId: created.remIds[0],
+        content: 'Added child',
+        position: 'last',
+      });
+      const journal = await adapter.appendJournal({ content: 'Daily entry', timestamp: false });
+
+      expect(created.remIds).toHaveLength(1);
+      expect(inserted.remIds).toHaveLength(1);
+      expect(journal.remIds).toHaveLength(1);
+      expect(plugin.app.transaction).not.toHaveBeenCalled();
+      const entries = plugin.storage.setLocal.mock.calls.map(([, value]) => value);
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ operation: 'create_note', state: 'applied' }),
+          expect.objectContaining({ operation: 'insert_children', state: 'applied' }),
+          expect.objectContaining({ operation: 'append_journal', state: 'applied' }),
+        ])
+      );
+    });
+
+    it('records known IDs before an alias failure and never retries or cleans them up', async () => {
+      const alias = vi
+        .spyOn(MockRem.prototype, 'getOrCreateAliasWithText')
+        .mockRejectedValueOnce(new Error('Invalid SDK Rem identity'));
+      try {
+        await expect(
+          adapter.createNote({ title: 'Partial root', aliases: ['Alias'], content: 'Child' })
+        ).rejects.toThrow(/Recovery key: additive:/);
+        const root = (await plugin.rem.createSingleRemWithMarkdown.mock.results[0].value)!;
+        expect(root).toBeDefined();
+        expect(plugin.rem.createSingleRemWithMarkdown).toHaveBeenCalledTimes(1);
+        expect(plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+        expect(alias).toHaveBeenCalledTimes(1);
+        expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
+          expect.stringMatching(/^additive:/),
+          expect.objectContaining({ state: 'unknown', remIds: [root._id] })
+        );
+        expect(await root.getChildrenRem()).toEqual([]);
+      } finally {
+        alias.mockRestore();
+      }
+    });
+
+    it('does not create a daily document when its recovery journal cannot be saved', async () => {
+      plugin.storage.setLocal.mockRejectedValueOnce(new Error('Private state unavailable'));
+      await expect(adapter.appendJournal({ content: 'Entry' })).rejects.toThrow(
+        'Private state unavailable'
+      );
+      expect(plugin.date.getDailyDoc).not.toHaveBeenCalled();
+      expect(plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+    });
+
     it('should reject create when write operations are disabled', async () => {
       adapter.updateSettings({ acceptWriteOperations: false });
 
@@ -3105,11 +3184,9 @@ describe('RemAdapter', () => {
         message.includes('extract_results:done')
       );
       const callbackDoneIndex = messages.findIndex((message) =>
-        message.includes('transaction:callback_done')
+        message.includes('write:callback_done')
       );
-      const transactionDoneIndex = messages.findIndex((message) =>
-        message.includes('transaction:done')
-      );
+      const writeDoneIndex = messages.findIndex((message) => message.includes('write:done'));
 
       expect(messages.some((message) => message.includes('insert_children'))).toBe(true);
       expect(messages.some((message) => message.includes('create_tree_with_markdown:start'))).toBe(
@@ -3119,7 +3196,7 @@ describe('RemAdapter', () => {
       expect(extractResultsStartIndex).toBeGreaterThan(-1);
       expect(extractResultsDoneIndex).toBeGreaterThan(extractResultsStartIndex);
       expect(callbackDoneIndex).toBeGreaterThan(extractResultsDoneIndex);
-      expect(transactionDoneIndex).toBeGreaterThan(callbackDoneIndex);
+      expect(writeDoneIndex).toBeGreaterThan(callbackDoneIndex);
 
       const children = await parent.getChildrenRem();
       expect(result.titles).toEqual(['Inserted']);

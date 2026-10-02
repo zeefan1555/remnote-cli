@@ -27,6 +27,13 @@ symlink, version and build hash against the candidate after linking.
 
 ## Plugin
 
+Version 0.24.1 requires rebuilding and reloading the existing plugin assets as
+well as the CLI. Confirm `status.pluginVersion`, `status.sdkCatalogHash` and
+`status.nativeTransactions === false`; the installed manifest panel alone does
+not prove which JavaScript is running. Atomic update/replacement/property/TODO
+commands are unavailable until native abort is safe. Additive writes and
+journaled flashcards remain available with exact readback and recovery records.
+
 Build and load the companion SDK Bridge from source using its
 [local plugin guide](../../../plugin/docs/guides/development-run-plugin-locally.md).
 Install independent plugin ID `zeefan-remnote-sdk-bridge` in RemNote desktop.
