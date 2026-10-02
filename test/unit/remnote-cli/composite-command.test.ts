@@ -200,7 +200,9 @@ describe('four composite commands', () => {
       'after midnight',
       'original recorded diary',
       'full bounded tree',
-      'section-targeted fallback',
+      'indexParentRemId',
+      'never moves existing entries',
+      'Foreign or conflicting parents fail before writes',
       'live write gate',
       'never narrow away required',
     ])

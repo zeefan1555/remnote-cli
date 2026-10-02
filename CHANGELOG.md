@@ -7,6 +7,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Grouped Wiki Index Targets
+
+- Add optional per-page `indexParentRemId` for exact root/section insertion,
+  retaining existing entry parents and rejecting conflicts before writes.
+- Recheck index ancestry before mutations and verify the exact parent on readback;
+  preserve full bounded uniqueness scans, write gates and same-key recovery.
+- Document impact-based maintenance and commit/push completion in the repository
+  agent map. CLI-only changes keep the deployed SDK plugin unchanged.
+
 ### Fixed In 0.24.1
 
 - Accept native alias text values without requiring or journaling fictional Rem

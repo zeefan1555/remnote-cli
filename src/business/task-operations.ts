@@ -37,6 +37,7 @@ export interface WikiPlan {
   pages: Array<{
     key: string;
     remId?: string;
+    indexParentRemId?: string;
     title: string;
     aliases?: string[];
     nodes: Array<{ key: string; remId?: string; text: TextSegment[]; expectedTextHash?: string }>;
@@ -232,10 +233,11 @@ export function validateTaskPlan(
     pages = new Set(plan.pages.map((pg) => pg.key));
     for (const pg of plan.pages) {
       object(pg);
-      keys(pg, ['key', 'remId', 'title', 'aliases', 'nodes', 'summary']);
+      keys(pg, ['key', 'remId', 'indexParentRemId', 'title', 'aliases', 'nodes', 'summary']);
       unique(pg.key);
       string(pg.title, 1000);
       if (pg.remId !== undefined) string(pg.remId);
+      if (pg.indexParentRemId !== undefined) string(pg.indexParentRemId);
       if (pg.aliases !== undefined) {
         array(pg.aliases, 20);
         pg.aliases.forEach((v) => string(v, 200));
@@ -440,7 +442,8 @@ export class TaskOperations {
     if (Date.now() > this.deadline) throw new TaskError('incomplete', 'Task deadline exhausted');
     if (!this.deps.canWrite()) throw new TaskError('write_disabled', 'Bridge writes disabled');
   }
-  private async mutate<T>(fn: () => Promise<T>): Promise<T> {
+  private async mutate<T>(fn: () => Promise<T>, beforeWrite?: () => Promise<void>): Promise<T> {
+    if (beforeWrite) await beforeWrite();
     this.assertCanMutate();
     return await fn();
   }
@@ -659,14 +662,8 @@ export class TaskOperations {
             throw new TaskError('conflict', 'Planned canonical names/aliases collide');
           names.set(name, pg.key);
         }
-        const own = pg.remId ?? j.ids[`page:${pg.key}`],
-          entries = own ? await this.indexEntries(index, own, graph) : [];
-        if (!graph.flat && entries.length !== 1)
-          throw new TaskError(
-            'conflict',
-            'Grouped index requires an existing unique page entry; create the exact section entry explicitly first',
-            own
-          );
+        const own = pg.remId ?? j.ids[`page:${pg.key}`];
+        await this.indexTarget(index, pg, own, graph);
         for (const sibling of siblings) {
           if (sibling._id === own) continue;
           const texts = [sibling.text, ...(await sibling.getAliases()).map((a) => a.text)];
@@ -724,7 +721,8 @@ export class TaskOperations {
     k: string,
     j: Journal,
     save: () => Promise<void>,
-    action: () => Promise<string[]>
+    action: () => Promise<string[]>,
+    beforeWrite?: () => Promise<void>
   ): Promise<string[]> {
     const old = j.steps[k];
     if (old) {
@@ -737,7 +735,7 @@ export class TaskOperations {
     j.steps[k] = { key: k, state: 'started', remIds: [] };
     await save();
     try {
-      const ids = await this.mutate(action);
+      const ids = await this.mutate(action, beforeWrite);
       if (!ids.length || new Set(ids).size !== ids.length) throw new Error('Ambiguous created IDs');
       j.steps[k].remIds = ids;
       await save();
@@ -768,13 +766,20 @@ export class TaskOperations {
     parentId: string,
     text: TextSegment[],
     j: Journal,
-    save: () => Promise<void>
+    save: () => Promise<void>,
+    beforeWrite?: () => Promise<void>
   ): Promise<PluginRem> {
-    const ids = await this.create(k, j, save, async () => {
-      const r = await this.deps.plugin.rem.createRem();
-      if (!r) throw new Error('SDK did not create Rem');
-      return [r._id];
-    });
+    const ids = await this.create(
+      k,
+      j,
+      save,
+      async () => {
+        const r = await this.deps.plugin.rem.createRem();
+        if (!r) throw new Error('SDK did not create Rem');
+        return [r._id];
+      },
+      beforeWrite
+    );
     const id = ids[0],
       desired = await this.richText(text, j),
       desiredHash = await contentHash(desired),
@@ -786,9 +791,11 @@ export class TaskOperations {
     }
     const target = await this.rem(parentId),
       before = await this.assertPlain(id, parents, hashes);
-    if (before.parentId !== parentId) await this.mutate(() => before.rem.setParent(target));
+    if (before.parentId !== parentId)
+      await this.mutate(() => before.rem.setParent(target), beforeWrite);
     const fresh = await this.assertPlain(id, [parentId], hashes);
-    if (fresh.textHash !== desiredHash) await this.mutate(() => fresh.rem.setText(desired));
+    if (fresh.textHash !== desiredHash)
+      await this.mutate(() => fresh.rem.setText(desired), beforeWrite);
     const readback = await this.assertPlain(id, [parentId], [desiredHash]);
     await this.assertReferences(readback.rem, desired);
     j.steps[k].state = 'verified';
@@ -804,7 +811,8 @@ export class TaskOperations {
     j: Journal,
     save: () => Promise<void>,
     parentId: string,
-    plain: boolean
+    plain: boolean,
+    beforeWrite?: () => Promise<void>
   ): Promise<void> {
     const desired = await this.richText(text, j),
       desiredHash = await contentHash(desired),
@@ -823,7 +831,7 @@ export class TaskOperations {
       if (!hashes.includes(actual)) throw new TaskError('conflict', 'Answer text changed', id);
     }
     if (actual !== desiredHash) {
-      await this.mutate(() => rem.setText(desired));
+      await this.mutate(() => rem.setText(desired), beforeWrite);
       this.add(j, 'updated', k, id);
     } else this.add(j, 'skipped', k, id);
     const after = await this.rem(id);
@@ -1192,6 +1200,43 @@ export class TaskOperations {
     if (entries.length > 1) throw new TaskError('conflict', 'Duplicate index page owner', pageId);
     return entries;
   }
+  private async indexTarget(
+    index: PluginRem,
+    page: WikiPlan['pages'][number],
+    pageId?: string,
+    graph?: { entries: PluginRem[]; flat: boolean }
+  ): Promise<{ entry?: PluginRem; parentId: string }> {
+    graph ??= await this.indexGraph(index);
+    const entry = pageId ? (await this.indexEntries(index, pageId, graph))[0] : undefined,
+      parentId = entry ? (await entry.getParentRem())?._id : undefined;
+    if (page.indexParentRemId !== undefined) {
+      if (
+        page.indexParentRemId !== index._id &&
+        !graph.entries.some((r) => r._id === page.indexParentRemId)
+      )
+        throw new TaskError(
+          'conflict',
+          'Index parent is outside the selected index',
+          page.indexParentRemId
+        );
+      if (entry && parentId !== page.indexParentRemId)
+        throw new TaskError('conflict', 'Existing index entry has a different parent', entry._id);
+    } else if (!entry && !graph.flat)
+      throw new TaskError(
+        'conflict',
+        'Grouped index requires an explicit indexParentRemId for a new entry',
+        pageId
+      );
+    if (entry && !parentId) throw new TaskError('conflict', 'Index entry lost parent', entry._id);
+    return { entry, parentId: page.indexParentRemId ?? parentId ?? index._id };
+  }
+  private async assertIndexParent(parentId: string, indexId: string): Promise<void> {
+    const target = await this.rem(parentId);
+    if (target._id === indexId) return;
+    const parent = await target.getParentRem();
+    if (!parent || !(await this.within(parent, indexId)))
+      throw new TaskError('conflict', 'Index parent moved outside the selected index', parentId);
+  }
   private async wiki(
     p: WikiPlan,
     j: Journal,
@@ -1231,21 +1276,29 @@ export class TaskOperations {
         } else j.ids[k] = (await this.createPlain(k, id, n.text, j, save))._id;
       }
       const index = await this.rem(p.indexRemId),
-        matches = await this.indexEntries(index, id),
+        { entry, parentId } = await this.indexTarget(index, pg, id),
+        beforeWrite = () => this.assertIndexParent(parentId, p.indexRemId),
         k = `index:${pg.key}`,
         text: TextSegment[] = [{ remId: id }, ' — ', ...pg.summary];
-      if (j.ids[k] && (matches.length !== 1 || matches[0]._id !== j.ids[k]))
+      if (j.ids[k] && entry?._id !== j.ids[k])
         throw new TaskError('conflict', 'Recorded index owner changed', id);
-      if (matches.length) {
-        const entry = matches[0],
-          parent = (await entry.getParentRem())?._id;
-        if (!parent) throw new TaskError('conflict', 'Index entry lost parent', entry._id);
+      if (entry) {
         j.ids[k] = entry._id;
         j.textPreconditions[k] ??=
           j.createdTextHashes[entry._id] ?? (await contentHash(entry.text));
         await save();
-        await this.patch(k, entry._id, j.textPreconditions[k], text, j, save, parent, true);
-      } else j.ids[k] = (await this.createPlain(k, p.indexRemId, text, j, save))._id;
+        await this.patch(
+          k,
+          entry._id,
+          j.textPreconditions[k],
+          text,
+          j,
+          save,
+          parentId,
+          true,
+          beforeWrite
+        );
+      } else j.ids[k] = (await this.createPlain(k, parentId, text, j, save, beforeWrite))._id;
       if (!(await r.isCollapsed(p.partitionRemId))) {
         if (j.completed) throw new TaskError('conflict', 'Completed page outline changed', id);
         const current = await this.assertPlain(
@@ -1268,14 +1321,14 @@ export class TaskOperations {
     }
     for (const pg of p.pages) {
       const id = j.ids[`page:${pg.key}`],
-        matches = await this.indexEntries(await this.rem(p.indexRemId), id),
+        { entry, parentId } = await this.indexTarget(await this.rem(p.indexRemId), pg, id),
         expected = await contentHash(await this.richText([{ remId: id }, ' — ', ...pg.summary], j));
       if (
-        matches.length !== 1 ||
-        matches[0]._id !== j.ids[`index:${pg.key}`] ||
-        (await contentHash(matches[0].text)) !== expected ||
-        !(await matches[0].remsBeingReferenced()).some((r) => r._id === id) ||
-        !(await this.plain(matches[0]))
+        !entry ||
+        entry._id !== j.ids[`index:${pg.key}`] ||
+        (await contentHash(entry.text)) !== expected ||
+        !(await entry.remsBeingReferenced()).some((r) => r._id === id) ||
+        !(await this.plain(entry))
       )
         throw new TaskError('incomplete', 'Index unique owner/text/reference proof failed', id);
       await this.assertPlain(id, [p.partitionRemId], [await contentHash([pg.title])]);
@@ -1289,8 +1342,8 @@ export class TaskOperations {
         kind: 'wikiIndex',
         remId: id,
         status: 'passed',
-        expected: { ownerCount: 1 },
-        actual: { ownerCount: 1, indexRemId: matches[0]._id },
+        expected: { ownerCount: 1, parentRemId: parentId },
+        actual: { ownerCount: 1, indexRemId: entry._id, parentRemId: parentId },
       });
     }
     const pageIds = p.pages.map((pg) => j.ids[`page:${pg.key}`]),

@@ -117,6 +117,14 @@ async function existingPage(f: Fixture) {
     },
   } as { page: MockRem; entry: MockRem; plan: WikiPlan };
 }
+async function groupedPage(f: Fixture) {
+  const e = await existingPage(f);
+  const section = f.plugin.addTestRem('section', 'Section');
+  await section.setParent(f.index);
+  await e.entry.setParent(section);
+  e.plan.pages[0].indexParentRemId = section._id;
+  return { ...e, section };
+}
 
 describe('public task operation controls', () => {
   it('previews without mutation/storage/date APIs, even when writes are disabled', async () => {
@@ -394,6 +402,153 @@ describe('Wiki replay ownership and plain-state guards', () => {
     expect(result.status).toBe('conflict');
     expect(result.errors[0].message).toContain('Grouped index');
     expect(f.plugin.rem.createRem).toHaveBeenCalledTimes(create);
+  });
+  it.each(['section', 'index'])('creates and replays an entry at explicit %s', async (parentId) => {
+    const f = await fixture();
+    const e = await groupedPage(f);
+    const plan = wikiPlan();
+    plan.pages[0].indexParentRemId = parentId;
+    const preview = await f.adapter.applyWiki(request(plan, 'grouped', true));
+    expect(preview.status).toBe('preview');
+    expect(preview.complete).toBe(true);
+    expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
+    expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+    const first = await f.adapter.applyWiki(request(plan, 'grouped'));
+    success(first);
+    expect((await (await rem(f, first.ids['index:p'])).getParentRem())?._id).toBe(parentId);
+    const created = f.plugin.rem.createRem.mock.calls.length;
+    const replay = await adapter(f.plugin).applyWiki(request(plan, 'grouped'));
+    success(replay);
+    expect(replay.ids).toEqual(first.ids);
+    expect(replay.facts).toEqual(first.facts);
+    expect(f.plugin.rem.createRem).toHaveBeenCalledTimes(created);
+    expect(await f.log.getChildrenRem()).toHaveLength(1);
+    expect((await e.entry.getParentRem())?._id).toBe(e.section._id);
+  });
+  it.each([true, false])('keeps an existing page with entry present=%s', async (hasEntry) => {
+    const f = await fixture();
+    const e = await groupedPage(f);
+    if (!hasEntry) await e.entry.setParent(f.source);
+    const first = await f.adapter.applyWiki(request(e.plan));
+    success(first);
+    expect(first.ids['page:p']).toBe(e.page._id);
+    expect((await (await rem(f, first.ids['index:p'])).getParentRem())?._id).toBe(e.section._id);
+    if (hasEntry) expect(first.ids['index:p']).toBe(e.entry._id);
+    const count = f.plugin.rem.createRem.mock.calls.length;
+    const replay = await adapter(f.plugin).applyWiki(request(e.plan));
+    success(replay);
+    expect(replay.ids).toEqual(first.ids);
+    expect(f.plugin.rem.createRem).toHaveBeenCalledTimes(count);
+  });
+  it.each(['source', 'missing', 'index'])(
+    'rejects foreign, missing or conflicting explicit parent %s before writes',
+    async (parentId) => {
+      const f = await fixture();
+      const e = await groupedPage(f);
+      e.plan.pages[0].indexParentRemId = parentId;
+      const setter = vi.spyOn(MockRem.prototype, 'setText');
+      for (const dryRun of [true, false]) {
+        const result = await f.adapter.applyWiki(request(e.plan, 'bad-parent', dryRun));
+        expect(result.status).toBe('conflict');
+      }
+      expect(setter).not.toHaveBeenCalled();
+      expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
+      expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+    }
+  );
+  it.each(['', ' ', 'x'.repeat(257), 1])(
+    'validates index parent at the business boundary %#',
+    async (value) => {
+      const f = await fixture();
+      const plan = wikiPlan();
+      Object.assign(plan.pages[0], { indexParentRemId: value });
+      await expect(f.adapter.applyWiki(request(plan))).rejects.toThrow();
+      expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
+    }
+  );
+  it.each(['width', 'depth', 'repeated'])(
+    'never narrows the index uniqueness scan for an explicit parent: %s',
+    async (bound) => {
+      const f = await fixture();
+      const e = await groupedPage(f);
+      if (bound === 'repeated')
+        vi.spyOn(e.section, 'getChildrenRem').mockResolvedValue([e.entry, e.entry]);
+      else {
+        let parent = f.index;
+        for (let i = 0; i < (bound === 'width' ? 1001 : 101); i++) {
+          const child = f.plugin.addTestRem(`bound-${i}`, 'Section');
+          await child.setParent(parent);
+          if (bound === 'depth') parent = child;
+        }
+      }
+      expect((await f.adapter.applyWiki(request(e.plan))).status).toBe('incomplete');
+      expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
+      expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+    }
+  );
+  it('revalidates a section after patch reads and before its setter', async () => {
+    const f = await fixture();
+    const e = await groupedPage(f);
+    e.plan.pages[0].summary = ['Changed'];
+    vi.spyOn(e.entry, 'getTagRems').mockImplementation(async () => {
+      await e.section.setParent(f.source);
+      return [];
+    });
+    const setter = vi.spyOn(e.entry, 'setText');
+    expect((await f.adapter.applyWiki(request(e.plan))).status).toBe('conflict');
+    expect(setter).not.toHaveBeenCalled();
+    expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
+  });
+  it('never parents a known-created entry into a section moved after creation', async () => {
+    const f = await fixture();
+    const e = await groupedPage(f);
+    const plan = wikiPlan();
+    plan.pages[0].indexParentRemId = e.section._id;
+    const original = MockRem.prototype.getTagRems;
+    vi.spyOn(MockRem.prototype, 'getTagRems').mockImplementation(async function (this: MockRem) {
+      if (f.plugin.rem.createRem.mock.calls.length === 3 && this._id.startsWith('rem_'))
+        await e.section.setParent(f.source);
+      return original.call(this);
+    });
+    const result = await f.adapter.applyWiki(request(plan));
+    expect(result.status).toBe('conflict');
+    const entryId = result.created.find((r) => r.key === 'index:p')!.remId;
+    expect((await rem(f, entryId)).parent).toBeUndefined();
+    expect(f.plugin.rem.createRem).toHaveBeenCalledTimes(3);
+  });
+  it.each(['gate', 'deadline'])('rechecks %s after awaited index ancestry', async (boundary) => {
+    const f = await fixture();
+    const e = await groupedPage(f);
+    e.plan.pages[0].summary = ['Changed'];
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    let patchRead = false;
+    vi.spyOn(e.entry, 'getTagRems').mockImplementation(async () => {
+      patchRead = true;
+      return [];
+    });
+    vi.spyOn(e.section, 'getParentRem').mockImplementation(async () => {
+      if (patchRead) {
+        if (boundary === 'gate') f.adapter.updateSettings({ acceptWriteOperations: false });
+        else clock.mockReturnValue(45001);
+      }
+      return f.index;
+    });
+    const setter = vi.spyOn(e.entry, 'setText');
+    const result = await f.adapter.applyWiki(request(e.plan));
+    expect(result.complete).toBe(false);
+    expect(result.errors[0].code).toBe(boundary === 'gate' ? 'write_disabled' : 'incomplete');
+    expect(setter).not.toHaveBeenCalled();
+  });
+  it('rejects late parent drift in final proof instead of reporting success', async () => {
+    const f = await fixture();
+    const e = await groupedPage(f);
+    vi.spyOn(e.page, 'isCollapsed').mockImplementation(async () => {
+      await e.entry.setParent(f.index);
+      return true;
+    });
+    const result = await f.adapter.applyWiki(request(e.plan));
+    expect(result.status).toBe('conflict');
+    expect(result.errors[0].message).toContain('different parent');
   });
 });
 

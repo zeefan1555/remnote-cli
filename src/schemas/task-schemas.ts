@@ -88,6 +88,7 @@ export const WikiPlanSchema = z
           .object({
             key: Key,
             remId: RemId.optional(),
+            indexParentRemId: RemId.optional(),
             title: Title,
             aliases: z.array(z.string().min(1).max(200).regex(/\S/)).max(20).optional(),
             nodes: z.array(WikiNode).max(100),

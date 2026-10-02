@@ -79,6 +79,10 @@ describe('task plan contract', () => {
   );
   it.each([
     { pages: [] },
+    { pages: [{ ...page, indexParentRemId: '' }] },
+    { pages: [{ ...page, indexParentRemId: ' ' }] },
+    { pages: [{ ...page, indexParentRemId: 'x'.repeat(257) }] },
+    { pages: [{ ...page, indexParentRemId: 1 }] },
     { pages: Array(11).fill(page) },
     { pages: [{ ...page, aliases: Array(21).fill('alias') }] },
     { pages: [{ ...page, aliases: [' '] }] },
@@ -117,6 +121,10 @@ describe('task plan contract', () => {
         ],
       }).success
     ).toBe(true);
+  });
+  it('accepts an exact optional Wiki index parent', () => {
+    const plan = { ...wiki, pages: [{ ...page, indexParentRemId: 'section' }] };
+    expect(WikiPlanSchema.parse(plan)).toEqual(plan);
   });
   it('enforces UTF8 size and idempotency bounds', () => {
     expect(

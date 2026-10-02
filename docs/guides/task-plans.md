@@ -85,9 +85,17 @@ plain, untagged non-card text before mutation; prior creation metadata is not en
 
 Canonical-name/alias duplicate checks cover the selected partition and current plan. Agent-owned semantic/whole-WIKI
 deduplication remains necessary. Existing index entries are searched through the complete bounded entity tree,
-including grouped sections, and retain their parent. A missing/new entry in a grouped index fails before writes
-because the schema has no insertion-section selector. Use an explicitly reviewed exact-section fallback; do not
-flatten, guess a group, or shrink the uniqueness scan. Incomplete bounded traversal is a blocker. Patch/reference-only
+including grouped sections, and retain their parent.
+
+Optional page `indexParentRemId` selects the exact index root or one of its existing descendants for that page's
+index entry. A selector must agree with an existing entry's parent; it never moves the entry or creates a section.
+Without a selector, an existing entry keeps its parent and a new entry goes directly under a structurally flat
+index. If the index contains nested entries, a missing/new entry requires an explicit selector before any writes.
+For example, add `"indexParentRemId":"EXACT_SECTION_ID"` to the page object after reviewing the section ID.
+Foreign/missing targets and parent conflicts fail before writes. Ancestry is rechecked before each index mutation
+and the selected parent is included in final proof. These reads are not an atomic snapshot or rollback guarantee;
+late external changes can leave a partial batch that must be reconciled using its original key and IDs.
+Never flatten, guess a group, or shrink the uniqueness scan. Incomplete bounded traversal is a blocker. Patch/reference-only
 and no-op Wiki work does not write a Wiki log; only actual Wiki page/index changes do.
 
 Conservative IDs/facts budget (including patched card and answer pairs):
