@@ -70,6 +70,7 @@ export interface TaskReceipt {
   planHash: string;
   status: 'preview' | 'verified' | 'partial' | 'unknown' | 'incomplete' | 'conflict';
   complete: boolean;
+  verificationScope?: 'affected_objects';
   ids: Record<string, string>;
   facts: Array<{ remId: string; textHash: string; cardIds: string[]; reviewHash: string }>;
   created: Identity[];
@@ -309,6 +310,7 @@ export class TaskOperations {
       planHash,
       status: 'preview',
       complete: false,
+      ...(kind === 'wiki' ? { verificationScope: 'affected_objects' as const } : {}),
       ids: {},
       facts: [],
       created: [],
@@ -649,12 +651,22 @@ export class TaskOperations {
           'conflict',
           'Expected disabled WIKI folders and index/log documents within WIKI'
         );
-      const siblings = await partition.getChildrenRem();
+      const siblings = p.pages.length ? await partition.getChildrenRem() : [];
       if (siblings.length > 1000)
         throw new TaskError('incomplete', 'Partition duplicate scope exceeds limit');
-      const graph = await this.indexGraph(index),
+      const graph = p.pages.length ? await this.indexGraph(index) : undefined,
         names = new Map<string, string>(),
         normalize = (s: string) => s.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+      const siblingNames = new Map<string, Set<string>>();
+      for (const sibling of siblings) {
+        const texts = [sibling.text, ...(await sibling.getAliases()).map((a) => a.text)];
+        for (const text of texts) {
+          const name = normalize(await plainText(this.deps.plugin, text));
+          const owners = siblingNames.get(name) ?? new Set<string>();
+          owners.add(sibling._id);
+          siblingNames.set(name, owners);
+        }
+      }
       for (const pg of p.pages) {
         const choices = [pg.title, ...(pg.aliases ?? [])].map(normalize);
         for (const name of choices) {
@@ -664,17 +676,13 @@ export class TaskOperations {
         }
         const own = pg.remId ?? j.ids[`page:${pg.key}`];
         await this.indexTarget(index, pg, own, graph);
-        for (const sibling of siblings) {
-          if (sibling._id === own) continue;
-          const texts = [sibling.text, ...(await sibling.getAliases()).map((a) => a.text)];
-          const rendered = await Promise.all(
-            texts.map((text) => plainText(this.deps.plugin, text))
-          );
-          if (rendered.some((text) => choices.includes(normalize(text))))
+        for (const name of choices) {
+          const conflict = [...(siblingNames.get(name) ?? [])].find((id) => id !== own);
+          if (conflict)
             throw new TaskError(
               'conflict',
               'Canonical name or alias already exists; use exact page ID',
-              sibling._id
+              conflict
             );
         }
         if (own) {
@@ -1346,22 +1354,48 @@ export class TaskOperations {
         actual: { ownerCount: 1, indexRemId: entry._id, parentRemId: parentId },
       });
     }
-    const pageIds = p.pages.map((pg) => j.ids[`page:${pg.key}`]),
-      verified = await verifyScope(this.deps.plugin, {
+    const pageIds = p.pages.map((pg) => j.ids[`page:${pg.key}`]);
+    if (!(await (await this.rem(p.wikiRootId)).hasPowerup('u')))
+      throw new TaskError('incomplete', 'Wiki card generation is no longer disabled', p.wikiRootId);
+    receipt.checks.push({
+      kind: 'powerup',
+      remId: p.wikiRootId,
+      status: 'passed',
+      expected: { code: 'u', value: true },
+      actual: true,
+    });
+    const roots = [
+      ...new Set([
+        ...pageIds,
+        ...p.pages.map((pg) => j.ids[`index:${pg.key}`]),
+        ...(j.ids['log:batch'] ? [j.ids['log:batch']] : []),
+      ]),
+    ];
+    // Each affected subtree is complete; the caller owns final whole-Wiki proof.
+    for (let start = 0; start < roots.length; start += 10) {
+      const subtreeRootIds = roots.slice(start, start + 10);
+      const verified = await verifyScope(this.deps.plugin, {
         schemaVersion: 1,
-        inspect: { schemaVersion: 1, remIds: pageIds, subtreeRootIds: [p.wikiRootId] },
+        inspect: { schemaVersion: 1, subtreeRootIds },
         expectations: [
-          { kind: 'powerup', remId: p.wikiRootId, code: 'u', value: true },
-          { kind: 'zeroCards', remId: p.wikiRootId },
-          ...pageIds.flatMap((remId) => [
-            { kind: 'parent' as const, remId, value: p.partitionRemId },
-            { kind: 'remType' as const, remId, value: 'text' },
-          ]),
+          ...subtreeRootIds.map((remId) => ({
+            kind: 'zeroCards' as const,
+            remId,
+            noCardStructure: true,
+          })),
+          ...pageIds
+            .filter((id) => subtreeRootIds.includes(id))
+            .flatMap((remId) => [
+              { kind: 'parent' as const, remId, value: p.partitionRemId },
+              { kind: 'remType' as const, remId, value: 'text' },
+            ]),
         ],
       });
-    receipt.checks.push(...verified.checks);
-    if (verified.status !== 'passed')
-      throw new TaskError('incomplete', 'Complete Wiki verification failed');
+      receipt.checks.push(...verified.checks);
+      receipt.errors.push(...verified.errors);
+      if (verified.status !== 'passed')
+        throw new TaskError('incomplete', 'Affected Wiki subtree verification failed');
+    }
     await this.facts(Object.values(j.ids), receipt);
   }
 }

@@ -98,6 +98,17 @@ late external changes can leave a partial batch that must be reconciled using it
 Never flatten, guess a group, or shrink the uniqueness scan. Incomplete bounded traversal is a blocker. Patch/reference-only
 and no-op Wiki work does not write a Wiki log; only actual Wiki page/index changes do.
 
+Wiki receipts declare `verificationScope:"affected_objects"`. Every affected page,
+index entry and log entry subtree is checked completely for cards and card structure;
+aliases, index ownership, text, parents and references retain their existing guards.
+Answer-only plans validate their exact answers/card history/reference targets and Wiki
+prerequisites without traversing unrelated Wiki, index or partition objects.
+`verified`/`complete` certify only this batch, never the whole Wiki. After the last
+Wiki mutation, the caller must run `verify scope` with the Wiki root in
+`inspect.subtreeRootIds` and a `zeroCards` expectation with `noCardStructure:true`.
+Any later Wiki mutation invalidates that task-level proof. Pure reuse requires exact
+affected-page/reference proof, not an unrelated root scan. There is no skip-verification flag.
+
 Conservative IDs/facts budget (including patched card and answer pairs):
 
 `2 * pages.length + sum(page.nodes.length) + 1 + 2 * answerPatches.length <= 1000`
@@ -125,6 +136,11 @@ using selected exact IDs. Keep persistent workflow evidence metadata-only, never
 The CLI emits the complete receipt in JSON and text modes before exit. Zero requires `complete:true`, no errors,
 and `status:preview` for preview or `status:verified` for apply. All other outcomes are non-success. Applied steps
 alone are not a verified batch. A transport failure can occur before a receipt is returned.
+
+`flashcards apply --summary` and `wiki apply --summary` keep status, scope, IDs,
+hashes, read window and errors, replace identity arrays with counts, and retain
+only non-passing checks/non-verified steps. Omit the flag for full detail. Summary
+is output-only: it never changes execution, proof requirements or exit status.
 
 Each SDK call has a 15-second default deadline, with no task timeout input field. Interrupted applies
 may have changed data. Preserve the exact reviewed plan and stable key, inspect current receipts/IDs, and reconcile

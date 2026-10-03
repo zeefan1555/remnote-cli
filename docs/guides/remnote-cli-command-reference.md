@@ -590,15 +590,20 @@ remnote-cli --port 3005 status --text
 | CLI | Local business action |
 |-----|-----------------------|
 | `context --request <path or ->` | `inspectMany` |
-| `verify scope --expect <path or ->` | `verifyScope` |
-| `flashcards apply --plan <path or -> --idempotency-key KEY [--apply]` | `applyFlashcards` |
-| `wiki apply --plan <path or -> --idempotency-key KEY [--apply]` | `applyWiki` |
+| `verify scope --expect <path or -> [--summary]` | `verifyScope` |
+| `flashcards apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyFlashcards` |
+| `wiki apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyWiki` |
 
 [Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
 inner plan, bound, text segment and apply receipt. Leaf `--help` includes examples and schemas for installed agents.
 Read input is the whole request; apply files contain only the inner plan. Preview is default. Full receipts precede
 nonzero exits on failed/incomplete reads or nonverified apply. Required WIKI/card proof scopes must not be narrowed
 merely to pass. Raw context title/text/backText/aliases are limited to explicit remIds; task ids/facts contain metadata.
+
+`--summary` keeps status, IDs/hashes, scopes, counts and failures, without content/history
+bodies or passing-check detail. Exit semantics are unchanged. Wiki batch receipts use
+`verificationScope:affected_objects`; after the last Wiki mutation, final task acceptance
+still requires explicit whole-Wiki `verify scope` zero-card/card-structure proof.
 
 Preview/apply never look up dates or create daily documents. Native dailyDocument type does not prove calendar
 freshness without a date scalar. Caller revalidates intended dates before new batches/after midnight; replay keeps

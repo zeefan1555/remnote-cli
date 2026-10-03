@@ -4,15 +4,21 @@ import { createCommandClient } from '../client/command-client.js';
 import { EXIT } from '../config.js';
 import { formatError, formatResult } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
+import { summarizeReceipt } from '../output/receipt-summary.js';
 export function registerCompositeCommands(program: Command): void {
-  async function execute(action: 'inspect_many' | 'verify_scope', path: string): Promise<void> {
+  async function execute(
+    action: 'inspect_many' | 'verify_scope',
+    path: string,
+    summary = false
+  ): Promise<void> {
     const format = program.opts().text ? 'text' : 'json';
     const client = createCommandClient(program);
     try {
       const input: unknown = JSON.parse(await readContentFileOrStdin(path));
       const schema = action === 'inspect_many' ? InspectManySchema : VerifyScopeSchema;
       const result = (await client.execute(action, schema.parse(input))) as Record<string, unknown>;
-      console.log(formatResult(result, format, () => JSON.stringify(result, null, 2)));
+      const output = summary ? summarizeReceipt(result) : result;
+      console.log(formatResult(output, format, () => JSON.stringify(output, null, 2)));
       if (
         result.complete !== true ||
         !Array.isArray(result.errors) ||
@@ -57,6 +63,10 @@ export function registerCompositeCommands(program: Command): void {
       '--expect <path|->',
       'Read a schemaVersion=1 verification request from JSON file or stdin'
     )
+    .option(
+      '--summary',
+      'Emit scope, IDs, hashes, counts and failures without content/history bodies'
+    )
     .addHelpText(
       'after',
       [
@@ -74,5 +84,7 @@ export function registerCompositeCommands(program: Command): void {
         'never narrow away required WIKI or full-card scope merely to obtain a pass.',
       ].join('\n')
     )
-    .action(async (opts: { expect: string }) => execute('verify_scope', opts.expect));
+    .action(async (opts: { expect: string; summary?: boolean }) =>
+      execute('verify_scope', opts.expect, opts.summary)
+    );
 }

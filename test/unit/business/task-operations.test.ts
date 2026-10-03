@@ -3,6 +3,7 @@ import { BuiltInPowerupCodes, RemType } from '../../../src/business/sdk-constant
 import type { RichTextInterface } from '@remnote/plugin-sdk';
 import { RemAdapter } from '../../../src/business/rem-adapter';
 import { contentHash } from '../../../src/business/content-hash';
+import { verifyScope } from '../../../src/business/inspection';
 import type { FlashcardsPlan, WikiPlan, TaskReceipt } from '../../../src/business/task-operations';
 import { MockRem, MockCard, MockRemNotePlugin } from '../../helpers/business-mocks';
 
@@ -127,6 +128,138 @@ async function groupedPage(f: Fixture) {
 }
 
 describe('public task operation controls', () => {
+  it.each(['new', 'reuse', 'answer-only'] as const)(
+    'bounds %s verification independently of unrelated Wiki size',
+    async (mode) => {
+      const f = await fixture();
+      const unrelated = f.plugin.addTestRem('unrelated', 'Unrelated partition');
+      await unrelated.setParent(f.wiki);
+      for (let i = 0; i < 100; i++)
+        await f.plugin.addTestRem(`unrelated-${i}`, `Term ${i}`).setParent(unrelated);
+      let plan = wikiPlan();
+      if (mode === 'reuse') plan = (await existingPage(f)).plan;
+      if (mode === 'answer-only') {
+        const cards = await f.adapter.applyFlashcards(request(flashPlan(), 'cards'));
+        success(cards);
+        const answer = await rem(f, cards.ids['answer:a:0']);
+        plan = {
+          ...plan,
+          pages: [],
+          answerPatches: [
+            {
+              key: 'p',
+              cardRemId: cards.ids['card:a'],
+              remId: answer._id,
+              expectedTextHash: await contentHash(answer.text),
+              text: ['See ', { remId: 'source' }],
+            },
+          ],
+        };
+      }
+      const scan = vi.spyOn(unrelated, 'getChildrenRem');
+      f.plugin.rem.findOne.mockClear();
+      const started = performance.now();
+      const result = await f.adapter.applyWiki(request(plan));
+      success(result);
+      const affected = {
+        elapsedMs: performance.now() - started,
+        findOneCalls: f.plugin.rem.findOne.mock.calls.length,
+        unrelatedScans: scan.mock.calls.length,
+      };
+      expect(affected.unrelatedScans).toBe(0);
+      f.plugin.rem.findOne.mockClear();
+      const fullStarted = performance.now();
+      const full = await verifyScope(f.plugin as never, {
+        schemaVersion: 1,
+        inspect: { schemaVersion: 1, subtreeRootIds: ['wiki'] },
+        expectations: [{ kind: 'zeroCards', remId: 'wiki', noCardStructure: true }],
+      });
+      expect(full.status).toBe('passed');
+      const wholeWiki = {
+        elapsedMs: performance.now() - fullStarted,
+        findOneCalls: f.plugin.rem.findOne.mock.calls.length,
+        objects: full.objects.length,
+      };
+      expect(scan).toHaveBeenCalledOnce();
+      expect(wholeWiki.objects).toBeGreaterThan(100);
+      console.log(
+        JSON.stringify({
+          benchmark: 'Wiki mock scopes (not native latency)',
+          mode,
+          affected,
+          wholeWiki,
+        })
+      );
+    }
+  );
+  it('checks all ten page/index subtrees without increasing selector limits', async () => {
+    const f = await fixture();
+    const plan = wikiPlan();
+    plan.pages = Array.from({ length: 10 }, (_, i) => ({
+      key: `p${i}`,
+      title: `Page ${i}`,
+      nodes: [],
+      summary: ['Summary'],
+    }));
+    const result = await f.adapter.applyWiki(request(plan));
+    success(result);
+    expect(result.checks.filter((c) => c.kind === 'zeroCards')).toHaveLength(21);
+  });
+  it('verifies affected Wiki subtrees without scanning the entire Wiki', async () => {
+    const f = await fixture();
+    const scan = vi.spyOn(f.wiki, 'getChildrenRem');
+    const result = await f.adapter.applyWiki(request(wikiPlan()));
+    success(result);
+    expect(result).toHaveProperty('verificationScope', 'affected_objects');
+    expect(scan).not.toHaveBeenCalled();
+    expect(
+      result.checks.some((c) => c.kind === 'zeroCards' && c.remId === result.ids['page:p'])
+    ).toBe(true);
+    expect(
+      result.checks.some((c) => c.kind === 'zeroCards' && c.remId === result.ids['index:p'])
+    ).toBe(true);
+  });
+  it('answer-only patches do not scan Wiki/index/partition or alter card identity', async () => {
+    const f = await fixture();
+    const cards = await f.adapter.applyFlashcards(request(flashPlan(), 'cards'));
+    success(cards);
+    const answer = await rem(f, cards.ids['answer:a:0']);
+    const rootScan = vi.spyOn(f.wiki, 'getChildrenRem');
+    const indexScan = vi.spyOn(f.index, 'getChildrenRem');
+    const partitionScan = vi.spyOn(f.partition, 'getChildrenRem');
+    const result = await f.adapter.applyWiki(
+      request({
+        ...wikiPlan(),
+        pages: [],
+        answerPatches: [
+          {
+            key: 'answer',
+            cardRemId: cards.ids['card:a'],
+            remId: answer._id,
+            expectedTextHash: await contentHash(answer.text),
+            text: ['See ', { remId: 'source' }],
+          },
+        ],
+      })
+    );
+    success(result);
+    expect(rootScan).not.toHaveBeenCalled();
+    expect(indexScan).not.toHaveBeenCalled();
+    expect(partitionScan).not.toHaveBeenCalled();
+    expect(result.facts.find((v) => v.remId === cards.ids['card:a'])?.reviewHash).toBe(
+      cards.facts.find((v) => v.remId === cards.ids['card:a'])?.reviewHash
+    );
+  });
+  it('still rejects hidden card structure in a reused Wiki subtree', async () => {
+    const f = await fixture();
+    const existing = await existingPage(f);
+    const child = f.plugin.addTestRem('hidden-card', 'Hidden');
+    child.backText = ['Hidden answer'];
+    await child.setParent(existing.page);
+    const result = await f.adapter.applyWiki(request(existing.plan));
+    expect(result.complete).toBe(false);
+    expect(result.checks.some((c) => c.kind === 'zeroCards' && c.status === 'failed')).toBe(true);
+  });
   it('previews without mutation/storage/date APIs, even when writes are disabled', async () => {
     const f = await fixture();
     f.adapter.updateSettings({ acceptWriteOperations: false });

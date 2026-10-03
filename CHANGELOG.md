@@ -7,6 +7,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Bounded Wiki Verification And Summaries
+
+- Verify complete affected Wiki page/index/log subtrees per batch; keep final whole-Wiki
+  zero-card proof explicit. Receipts declare `verificationScope:affected_objects`.
+- Answer-only patches avoid unrelated Wiki/index/partition scans; preserve all write,
+  identity, history, reference and recovery guards. Read sibling aliases once per preflight.
+- Add output-only `--summary` for flashcards/wiki apply and verify scope, preserving
+  scope, hashes, IDs, failures and existing exit semantics without large success detail.
+
 ### Grouped Wiki Index Targets
 
 - Add optional per-page `indexParentRemId` for exact root/section insertion,

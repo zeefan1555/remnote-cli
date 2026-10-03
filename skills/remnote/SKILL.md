@@ -92,6 +92,13 @@ be narrowed merely to pass. Incomplete evidence is not success.
 require the current raw-text hash. Semantic receipt keys identify returned Rems;
 never infer IDs from creation order.
 
+Use `--summary` on task apply and `verify scope` when only IDs/hashes, scopes, counts
+and failures are needed. It does not change exit or recovery semantics. Wiki batch
+receipts certify `verificationScope:affected_objects`, not the whole Wiki. After
+the last Wiki mutation, explicitly verify the complete Wiki root with `zeroCards`
+and `noCardStructure:true`; later Wiki changes invalidate that proof. Answer-only
+patches do not cause a Wiki scan. Reuse already-reviewed content only if unchanged.
+
 Task commands do not look up dates or create daily documents. The caller validates
 the intended date before new batches/after midnight; same-key replay retains its
 original diary. Wiki plain-node/duplicate/grouped-index guards remain mandatory.

@@ -65,7 +65,10 @@ is insufficient. Missing/inaccessible data, truncation, read failures, or missin
 cannot pass. Verification reads fresh evidence rather than accepting an old receipt. It adds overall
 `status:passed|failed|incomplete` and checks `{kind,remId,status,expected?,actual?,message?}`.
 
-Both CLI modes preserve the full receipt. Context exits nonzero if incomplete or errors exist. Verification exits zero
+Both CLI modes preserve the full receipt by default. `verify scope --summary` retains status,
+scope membership/completeness, read window, truncation, IDs, text hashes, card IDs, counts and
+failure details while omitting object bodies/review histories and passing check detail.
+It changes output only; omit the flag for full detail. Context exits nonzero if incomplete or errors exist. Verification exits zero
 only with complete evidence, no errors, and `status:passed`. Keep required whole-WIKI/full-card scopes intact when
 retrying; never narrow them merely to obtain a pass. Narrow only optional discovery, otherwise report blocked or
 incomplete. Each SDK call has a 15-second default deadline. The CLI owns the complete read

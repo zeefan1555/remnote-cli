@@ -56,6 +56,71 @@ afterEach(() => {
   process.exitCode = 0;
 });
 describe('four composite commands', () => {
+  it.each(['flashcards', 'wiki'] as const)(
+    'summarizes %s without changing failed exit status',
+    async (kind) => {
+      vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans[kind]));
+      const result = {
+        ...taskReceipt,
+        kind,
+        status: 'partial',
+        complete: false,
+        verificationScope: 'affected_objects',
+        checks: [
+          { kind: 'parent', remId: 'r', status: 'passed' },
+          { kind: 'references', remId: 'r', status: 'failed', message: 'Missing target' },
+        ],
+        errors: [{ code: 'incomplete', message: 'Failed proof' }],
+      };
+      vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await createProgram('test').parseAsync(
+        [kind, 'apply', '--plan', '-', '--idempotency-key', 'batch', '--apply', '--summary'],
+        { from: 'user' }
+      );
+      const out = JSON.parse(log.mock.calls[0][0]);
+      expect(out.ids).toEqual(result.ids);
+      expect(out.facts).toEqual(result.facts);
+      expect(out.planHash).toBe(result.planHash);
+      expect(out.verificationScope).toBe('affected_objects');
+      expect(out.checks).toEqual([result.checks[1]]);
+      expect(out.counts.checks).toBe(2);
+      expect(out.errors).toEqual(result.errors);
+      expect(process.exitCode).toBe(1);
+    }
+  );
+  it('verification summary omits bodies/history but preserves scope, hashes and failures', async () => {
+    vi.mocked(readContentFileOrStdin).mockResolvedValue(
+      JSON.stringify({
+        schemaVersion: 1,
+        inspect,
+        expectations: [{ kind: 'parent', remId: 'r', value: 'p' }],
+      })
+    );
+    const result = {
+      ...receipt,
+      status: 'passed',
+      objects: [
+        {
+          remId: 'r',
+          textHash: 'hash',
+          text: ['body'],
+          cards: [{ cardId: 'c', repetitionHistory: [{ private: 'history' }] }],
+        },
+      ],
+      scopes: [{ rootRemId: 'r', remIds: ['r'], complete: true }],
+    };
+    vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createProgram('test').parseAsync(['verify', 'scope', '--expect', '-', '--summary'], {
+      from: 'user',
+    });
+    const out = JSON.parse(log.mock.calls[0][0]);
+    expect(out.objects).toEqual([{ remId: 'r', textHash: 'hash', cardIds: ['c'] }]);
+    expect(out.scopes).toEqual(result.scopes);
+    expect(out.counts.objects).toBe(1);
+    expect(process.exitCode ?? 0).toBe(0);
+  });
   it.each(['-', '/tmp/request.json'])('reads context from %s preserving receipt', async (path) => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(inspect));
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(receipt);

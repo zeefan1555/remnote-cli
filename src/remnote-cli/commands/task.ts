@@ -4,6 +4,7 @@ import { createCommandClient } from '../client/command-client.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { EXIT } from '../config.js';
 import { formatError, formatResult } from '../output/formatter.js';
+import { summarizeReceipt } from '../output/receipt-summary.js';
 const commonHelp = [
   'The file contains the inner plan, not a request envelope. schemaVersion must be 1.',
   'TextSegments = ["literal text", {"remId":"EXACT_ID"}, ...] (1..100 segments).',
@@ -46,6 +47,8 @@ const help = {
     'Index ancestry is rechecked before mutations and the exact parent is verified after writing; incomplete traversal is a blocker.',
     'summary is required TextSegments. WIKI TextSegments also allow {"pageKey":"page-a"} referring to an input page key.',
     'Receipt budget: 2*pages + total nodes + 1 + 2*answerPatches <=1000.',
+    'verificationScope=affected_objects: verified/complete certify this batch, never the whole WIKI.',
+    'After the last Wiki mutation, run verify scope with the WIKI root and zeroCards for final task acceptance.',
   ],
 };
 export function registerTaskCommands(program: Command): void {
@@ -64,37 +67,46 @@ export function registerTaskCommands(program: Command): void {
         'Stable key for this exact plan; never change it to blindly retry'
       )
       .option('--apply', 'Apply the plan (default: read-only preview)')
+      .option('--summary', 'Emit IDs, hashes, counts and failures without successful check details')
       .addHelpText('after', ['', ...help[kind], '', ...commonHelp].join('\n'))
-      .action(async (opts: { plan: string; idempotencyKey: string; apply?: boolean }) => {
-        const format = program.opts().text ? 'text' : 'json';
-        const client = createCommandClient(program);
-        try {
-          const plan: unknown = JSON.parse(await readContentFileOrStdin(opts.plan));
-          const schema = kind === 'flashcards' ? FlashcardsApplySchema : WikiApplySchema;
-          const result = (await client.execute(
-            `${kind}_apply`,
-            schema.parse({
-              schemaVersion: 1,
-              plan,
-              idempotencyKey: opts.idempotencyKey,
-              dryRun: !opts.apply,
-            })
-          )) as Record<string, unknown>;
-          console.log(formatResult(result, format, () => JSON.stringify(result, null, 2)));
-          if (
-            result.complete !== true ||
-            result.status !== (opts.apply ? 'verified' : 'preview') ||
-            !Array.isArray(result.errors) ||
-            result.errors.length > 0
-          )
+      .action(
+        async (opts: {
+          plan: string;
+          idempotencyKey: string;
+          apply?: boolean;
+          summary?: boolean;
+        }) => {
+          const format = program.opts().text ? 'text' : 'json';
+          const client = createCommandClient(program);
+          try {
+            const plan: unknown = JSON.parse(await readContentFileOrStdin(opts.plan));
+            const schema = kind === 'flashcards' ? FlashcardsApplySchema : WikiApplySchema;
+            const result = (await client.execute(
+              `${kind}_apply`,
+              schema.parse({
+                schemaVersion: 1,
+                plan,
+                idempotencyKey: opts.idempotencyKey,
+                dryRun: !opts.apply,
+              })
+            )) as Record<string, unknown>;
+            const output = opts.summary ? summarizeReceipt(result) : result;
+            console.log(formatResult(output, format, () => JSON.stringify(output, null, 2)));
+            if (
+              result.complete !== true ||
+              result.status !== (opts.apply ? 'verified' : 'preview') ||
+              !Array.isArray(result.errors) ||
+              result.errors.length > 0
+            )
+              process.exitCode = EXIT.ERROR;
+          } catch (error) {
+            console.error(
+              formatError(error instanceof Error ? error.message : String(error), format)
+            );
             process.exitCode = EXIT.ERROR;
-        } catch (error) {
-          console.error(
-            formatError(error instanceof Error ? error.message : String(error), format)
-          );
-          process.exitCode = EXIT.ERROR;
-        } finally {
-          await client.close();
+          } finally {
+            await client.close();
+          }
         }
-      });
+      );
 }
