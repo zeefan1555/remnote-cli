@@ -7,14 +7,12 @@ export function summarizeReceipt(receipt: Record<string, unknown>): Record<strin
     if (!Array.isArray(values)) continue;
     counts[field] = values.length;
     if (field === 'checks') summary[field] = values.filter((v) => v.status !== 'passed');
-    else if (field === 'steps') summary[field] = values.filter((v) => v.state !== 'verified');
     else if (field === 'objects')
       summary[field] = values.map((v) => ({
         remId: v.remId,
         textHash: v.textHash,
         cardIds: v.cards.map((c: { cardId: string }) => c.cardId),
       }));
-    else delete summary[field];
   }
   return { ...summary, counts };
 }

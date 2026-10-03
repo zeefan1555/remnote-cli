@@ -138,8 +138,9 @@ and `status:preview` for preview or `status:verified` for apply. All other outco
 alone are not a verified batch. A transport failure can occur before a receipt is returned.
 
 `flashcards apply --summary` and `wiki apply --summary` keep status, scope, IDs,
-hashes, read window and errors, replace identity arrays with counts, and retain
-only non-passing checks/non-verified steps. Omit the flag for full detail. Summary
+hashes, read window, all identity arrays/steps and errors, add counts, and omit
+passing check detail. Recovery identities are never discarded, even on partial writes.
+Omit the flag for full detail. Summary
 is output-only: it never changes execution, proof requirements or exit status.
 
 Each SDK call has a 15-second default deadline, with no task timeout input field. Interrupted applies

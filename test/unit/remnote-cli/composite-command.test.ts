@@ -2,6 +2,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { readContentFileOrStdin } from '../../../src/remnote-cli/commands/content-input.js';
+import { summarizeReceipt } from '../../../src/remnote-cli/output/receipt-summary.js';
 vi.mock('../../../src/remnote-cli/commands/content-input.js', () => ({
   readContentFileOrStdin: vi.fn(),
 }));
@@ -56,6 +57,30 @@ afterEach(() => {
   process.exitCode = 0;
 });
 describe('four composite commands', () => {
+  it('keeps every recovery identity when an answer write succeeds before facts fail', () => {
+    const partial = {
+      ...taskReceipt,
+      ids: {},
+      facts: [],
+      status: 'partial',
+      complete: false,
+      updated: [{ key: 'patch:p', remId: 'written-answer' }],
+      steps: [{ key: 'patch:p', state: 'verified', remIds: ['written-answer'] }],
+      errors: [{ code: 'operation_failed', message: 'Card facts read failed' }],
+    };
+    const summary = summarizeReceipt(partial);
+    for (const field of [
+      'created',
+      'updated',
+      'reused',
+      'skipped',
+      'steps',
+      'ids',
+      'facts',
+      'errors',
+    ] as const)
+      expect(summary[field]).toEqual(partial[field]);
+  });
   it.each(['flashcards', 'wiki'] as const)(
     'summarizes %s without changing failed exit status',
     async (kind) => {
