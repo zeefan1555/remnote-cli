@@ -179,7 +179,8 @@ export async function flashcardsWorkflow(
     assert.equal(new Set(ownedIds).size, 5);
     passed();
 
-    label = 'Fresh readback verifies text, parent edges, HOME tag, cluster, and full card scope';
+    label =
+      'Fresh readback verifies text, parent edges, HOME tag, no Card Cluster, and full card scope';
     start = Date.now();
     const expectation = await jsonFile('verify.json', {
       schemaVersion: 1,
@@ -192,7 +193,7 @@ export async function flashcardsWorkflow(
       expectations: [
         { kind: 'parent', remId: ids.root, value: dailyRemId },
         { kind: 'tag', remId: ids.root, value: tagRemId },
-        { kind: 'powerup', remId: ids.root, code: 'cc', value: true },
+        { kind: 'powerup', remId: ids.root, code: 'cc', value: false },
         { kind: 'children', remId: ids.root, value: cardIds },
         { kind: 'cardRemIds', remId: ids.root, value: cardIds },
       ],
@@ -201,6 +202,7 @@ export async function flashcardsWorkflow(
     assert.equal(verified.status, 'passed');
     const objects = new Map((verified.objects as InspectedRem[]).map((rem) => [rem.remId, rem]));
     assert.deepEqual(objects.get(ids.root)?.text, [plan.title]);
+    assert.equal(objects.get(ids.root)?.powerups.cc, false);
     const nativeCardIds: string[] = [];
     for (let i = 0; i < cards.length; i++) {
       const card = objects.get(cardIds[i])!;

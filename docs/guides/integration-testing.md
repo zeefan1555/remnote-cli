@@ -40,8 +40,9 @@ fail before live work. Do not invoke the TypeScript live runner directly.
    explicit host date's native daily document.
 2. Preview a two-card plan and read prerequisites again to check no content changed.
 3. Apply once with a stable recorded idempotency key.
-4. Verify cluster powerup, HOME tag, parent/child edges, exact question/answer text
-   and two distinct native card IDs.
+4. Verify HOME tag, parent/child edges, exact question/answer text
+   and two distinct native card IDs. Card Cluster (`cc`) stays off unless the
+   plan sets `cardCluster: true`.
 5. Replay the same plan/key and verify unchanged Rem IDs, card IDs, content, child
    lists and review history.
 6. Use only existing public `sdk` commands to read both card Rems and count the

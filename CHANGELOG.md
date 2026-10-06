@@ -7,6 +7,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Flashcard apply adds the Card Cluster powerup (`cc`) only when the plan sets
+  optional `cardCluster: true`, which still requires a title and at least two new
+  cards. Omitted or `false` never adds `cc`, and verification does not require it.
+
 ### Bounded Wiki Verification And Summaries
 
 - Verify complete affected Wiki page/index/log subtrees per batch; keep final whole-Wiki

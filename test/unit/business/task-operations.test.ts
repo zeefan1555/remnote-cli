@@ -288,16 +288,63 @@ describe('public task operation controls', () => {
     success(first);
     expect(first.ids.daily).toBe('daily');
     expect(first.facts.find((v) => v.remId === first.ids['card:a'])?.cardIds).toHaveLength(1);
-    expect(await (await rem(f, first.ids.root)).hasPowerup('cc')).toBe(true);
+    expect(await (await rem(f, first.ids.root)).hasPowerup('cc')).toBe(false);
+    expect(first.checks.some((check) => check.kind === 'powerup')).toBe(false);
     const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
     const replay = await adapter(f.plugin).applyFlashcards(request(plan));
     success(replay);
     expect(replay.ids).toEqual(first.ids);
     expect(replay.facts).toEqual(first.facts);
+    expect(await (await rem(f, replay.ids.root)).hasPowerup('cc')).toBe(false);
+    expect(replay.checks.some((check) => check.kind === 'powerup')).toBe(false);
     expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
     expect(f.plugin.date.getDailyDoc).not.toHaveBeenCalled();
     expect(f.plugin.date.getTodaysDoc).not.toHaveBeenCalled();
     expect(f.plugin.app.transaction).not.toHaveBeenCalled();
+  });
+  it.each([undefined, false] as const)(
+    'does not add Card Cluster when cardCluster is %s',
+    async (cardCluster) => {
+      const f = await fixture();
+      const plan = flashPlan();
+      if (cardCluster === false) plan.cardCluster = false;
+      const addPowerup = vi.spyOn(MockRem.prototype, 'addPowerup');
+      const result = await f.adapter.applyFlashcards(request(plan));
+      success(result);
+      expect(await (await rem(f, result.ids.root)).hasPowerup('cc')).toBe(false);
+      expect(addPowerup.mock.calls.some((call) => call[0] === 'cc')).toBe(false);
+      expect(
+        result.checks.some((check) => check.kind === 'powerup' && check.expected === true)
+      ).toBe(false);
+    }
+  );
+  it('adds Card Cluster when cardCluster is true for a titled multi-card plan', async () => {
+    const f = await fixture();
+    const addPowerup = vi.spyOn(MockRem.prototype, 'addPowerup');
+    const result = await f.adapter.applyFlashcards(request({ ...flashPlan(), cardCluster: true }));
+    success(result);
+    expect(await (await rem(f, result.ids.root)).hasPowerup('cc')).toBe(true);
+    expect(addPowerup.mock.calls.some((call) => call[0] === 'cc')).toBe(true);
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        kind: 'powerup',
+        status: 'passed',
+        expected: true,
+        actual: true,
+      })
+    );
+  });
+  it('rejects cardCluster without two new cards before any Card Cluster write', async () => {
+    const f = await fixture();
+    const plan = flashPlan();
+    plan.cardCluster = true;
+    plan.newCards = plan.newCards!.slice(0, 1);
+    const addPowerup = vi.spyOn(MockRem.prototype, 'addPowerup');
+    await expect(f.adapter.applyFlashcards(request(plan))).rejects.toThrow(
+      'cardCluster requires a title and two or more new cards'
+    );
+    expect(addPowerup).not.toHaveBeenCalled();
+    expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
   });
   it('persists scaffold IDs before a failed follow-up and never recreates them', async () => {
     const f = await fixture();
@@ -811,6 +858,7 @@ describe('durable journal and bounded recovery', () => {
     async (drift) => {
       const f = await fixture();
       const p = flashPlan();
+      if (drift === 'cc') p.cardCluster = true;
       const first = await f.adapter.applyFlashcards(request(p));
       success(first);
       const root = await rem(f, first.ids.root);
@@ -902,7 +950,7 @@ describe('live write gates after awaited reads', () => {
       return result;
     });
     const setter = vi.spyOn(MockRem.prototype, 'addPowerup');
-    const result = await f.adapter.applyFlashcards(request(flashPlan()));
+    const result = await f.adapter.applyFlashcards(request({ ...flashPlan(), cardCluster: true }));
     expect(result.status).not.toBe('verified');
     expect(setter).not.toHaveBeenCalled();
   });

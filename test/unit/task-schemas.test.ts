@@ -74,6 +74,10 @@ describe('task plan contract', () => {
     { reusedCardRemIds: Array(101).fill('r') },
     { answerPatches: Array(101).fill(patch) },
     { today: true },
+    { cardCluster: 'yes' },
+    { cardCluster: true },
+    { title: 'Topic', cardCluster: true },
+    { cardCluster: true, newCards: [card, { ...card, key: 'c2' }] },
   ])('rejects unsafe flashcard input %#', (v) =>
     expect(FlashcardsPlanSchema.safeParse({ ...flash, ...v }).success).toBe(false)
   );
@@ -99,6 +103,17 @@ describe('task plan contract', () => {
   ])('rejects unsafe Wiki input %#', (v) =>
     expect(WikiPlanSchema.safeParse({ ...wiki, ...v }).success).toBe(false)
   );
+  it('accepts an explicit Card Cluster opt-in and treats omit or false as off', () => {
+    const two = {
+      ...flash,
+      title: 'Topic',
+      newCards: [card, { ...card, key: 'c2' }],
+    };
+    expect(FlashcardsPlanSchema.parse(two)).toEqual(two);
+    expect(FlashcardsPlanSchema.parse({ ...two, cardCluster: false }).cardCluster).toBe(false);
+    expect(FlashcardsPlanSchema.parse({ ...two, cardCluster: true }).cardCluster).toBe(true);
+    expect(FlashcardsPlanSchema.parse(flash)).not.toHaveProperty('cardCluster');
+  });
   it('supports guarded patches/reuse and exact existing nodes', () => {
     expect(
       FlashcardsPlanSchema.safeParse({ ...flash, newCards: [], answerPatches: [patch] }).success

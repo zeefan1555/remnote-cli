@@ -595,7 +595,9 @@ remnote-cli --port 3005 status --text
 | `wiki apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyWiki` |
 
 [Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
-inner plan, bound, text segment and apply receipt. Leaf `--help` includes examples and schemas for installed agents.
+inner plan, bound, text segment and apply receipt. Flashcard `cardCluster` defaults off; `cc` is added only when the
+plan sets it to `true` with a title and at least two new cards. Leaf `--help` includes examples and schemas for
+installed agents.
 Read input is the whole request; apply files contain only the inner plan. Preview is default. Full receipts precede
 nonzero exits on failed/incomplete reads or nonverified apply. Required WIKI/card proof scopes must not be narrowed
 merely to pass. Raw context title/text/backText/aliases are limited to explicit remIds; task ids/facts contain metadata.

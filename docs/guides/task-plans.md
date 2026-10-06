@@ -50,9 +50,14 @@ hash is a conflict, not permission to bypass the guard.
 ```
 
 `dailyRemId`, `homeRootId`, and `tagRemId` are required existing IDs. `newCards`, `answerPatches`,
-`reusedCardRemIds`, and `title` are optional. At least one new/patch/reused card is required. `newCards` allows at most
+`reusedCardRemIds`, `title`, and `cardCluster` are optional. At least one new/patch/reused card is required. `newCards` allows at most
 7 entries; each requires `key`, `question`, and 1–100 answer lines, each a TextSegments array. Two or more new cards
 require a cluster title. Patches and reused Rem IDs allow at most 100 each. Reuse uses Rem IDs, not native card IDs.
+
+`cardCluster` is an optional boolean and defaults to off. A multi-card plan still creates a titled parent Rem, but
+apply adds and verifies the Card Cluster powerup (`cc`) only when `cardCluster` is `true`. That opt-in also requires
+the title and at least two new cards. Omitted or `false` never calls `addPowerup('cc')`, and verification does not
+require `cc: true`.
 
 `dailyRemId` must be an explicit existing native `dailyDocument`. Type validation receives no date scalar and cannot
 prove calendar freshness. The caller resolves/revalidates the intended calendar date before a new batch and after

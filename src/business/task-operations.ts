@@ -24,6 +24,7 @@ export interface FlashcardsPlan {
   homeRootId: string;
   tagRemId: string;
   title?: string;
+  cardCluster?: boolean;
   newCards?: Array<{ key: string; question: string; answer: TextSegment[][] }>;
   answerPatches?: AnswerPatch[];
   reusedCardRemIds?: string[];
@@ -186,6 +187,7 @@ export function validateTaskPlan(
       'homeRootId',
       'tagRemId',
       'title',
+      'cardCluster',
       'newCards',
       'answerPatches',
       'reusedCardRemIds',
@@ -193,6 +195,8 @@ export function validateTaskPlan(
     const plan = p as FlashcardsPlan;
     [plan.dailyRemId, plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
     if (plan.title !== undefined) string(plan.title, 1000);
+    if (plan.cardCluster !== undefined && typeof plan.cardCluster !== 'boolean')
+      throw new Error('Invalid cardCluster');
     if (plan.newCards !== undefined) {
       array(plan.newCards, 7);
       if (plan.newCards.length > 1 && !plan.title) throw new Error('Cluster title required');
@@ -206,6 +210,8 @@ export function validateTaskPlan(
         count += 1 + c.answer.length;
       }
     }
+    if (plan.cardCluster === true && ((plan.newCards?.length ?? 0) < 2 || !plan.title))
+      throw new Error('cardCluster requires a title and two or more new cards');
     if (plan.reusedCardRemIds !== undefined) {
       array(plan.reusedCardRemIds, 100);
       plan.reusedCardRemIds.forEach((v) => string(v));
@@ -1063,6 +1069,7 @@ export class TaskOperations {
     j.ids.daily = p.dailyRemId;
     j.ids.tag = p.tagRemId;
     const cards = p.newCards ?? [];
+    const cardCluster = p.cardCluster === true && cards.length > 1 && Boolean(p.title);
     if (cards.length) {
       const ids = await this.create('create:cards', j, save, async () => {
         const lines = cards
@@ -1109,7 +1116,7 @@ export class TaskOperations {
       }
       if (cards.length > 1) {
         await this.createdText(bound.root._id, [p.title!], j, save);
-        if (!(await bound.root.hasPowerup('cc'))) {
+        if (cardCluster && !(await bound.root.hasPowerup('cc'))) {
           if (j.completed)
             throw new TaskError('conflict', 'Completed cluster powerup changed', bound.root._id);
           const r = await this.rem(bound.root._id);
@@ -1138,10 +1145,9 @@ export class TaskOperations {
         { kind: 'cardRemIds', remId: bound.root._id, value: bound.cards.map((r) => r._id) },
       ];
       if (cards.length > 1)
-        expectations.push(
-          { kind: 'remType', remId: bound.root._id, value: 'text' },
-          { kind: 'powerup', remId: bound.root._id, code: 'cc', value: true }
-        );
+        expectations.push({ kind: 'remType', remId: bound.root._id, value: 'text' });
+      if (cardCluster)
+        expectations.push({ kind: 'powerup', remId: bound.root._id, code: 'cc', value: true });
       const verified = await verifyScope(this.deps.plugin, {
         schemaVersion: 1,
         inspect: {
