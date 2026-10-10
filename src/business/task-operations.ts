@@ -25,7 +25,7 @@ export interface FlashcardsPlan {
   tagRemId: string;
   title?: string;
   cardCluster?: boolean;
-  newCards?: Array<{ key: string; question: string; answer: TextSegment[][] }>;
+  newCards?: Array<{ key: string; question: string | TextSegment[]; answer: TextSegment[][] }>;
   answerPatches?: AnswerPatch[];
   reusedCardRemIds?: string[];
 }
@@ -157,6 +157,20 @@ function segments(v: unknown, pages?: Set<string>): asserts v is TextSegment[] {
     }
   }
 }
+const LITERAL_REF_ERROR =
+  'Plain-string question contains literal [[ or ]]; pass question as TextSegment[] with {"remId":"<title Rem ID>"} for each reference';
+function question(v: unknown): asserts v is string | TextSegment[] {
+  if (typeof v === 'string') {
+    string(v, 1000);
+    if (v.includes('[[') || v.includes(']]')) throw new Error(LITERAL_REF_ERROR);
+    return;
+  }
+  segments(v);
+  const text = v.map((s) => (typeof s === 'string' ? s : '')).join('');
+  if (text.length > 1000) throw new Error('Invalid bounded string');
+  if (!v.some((s) => typeof s !== 'string') && !text.trim())
+    throw new Error('Invalid bounded string');
+}
 export function validateTaskPlan(
   kind: 'flashcards' | 'wiki',
   input: TaskApplyParams<FlashcardsPlan | WikiPlan>
@@ -204,7 +218,7 @@ export function validateTaskPlan(
         object(c);
         keys(c, ['key', 'question', 'answer']);
         unique(c.key);
-        string(c.question, 1000);
+        question(c.question);
         array(c.answer, 100, 1);
         c.answer.forEach((v) => segments(v));
         count += 1 + c.answer.length;
@@ -630,8 +644,10 @@ export class TaskOperations {
           'conflict',
           'Expected existing daily document and HOME descendant Concept Tag'
         );
-      for (const card of p.newCards ?? [])
+      for (const card of p.newCards ?? []) {
+        if (Array.isArray(card.question)) await this.checkSegments(card.question);
         for (const line of card.answer) await this.checkSegments(line);
+      }
       for (const id of p.reusedCardRemIds ?? [])
         if (!(await (await this.rem(id)).getCards()).length)
           throw new TaskError('conflict', 'Reused Rem is not a card', id);
@@ -1105,7 +1121,13 @@ export class TaskOperations {
       });
       const bound = await this.boundScaffold(p, ids, j);
       for (let i = 0; i < cards.length; i++) {
-        await this.createdText(bound.cards[i]._id, [cards[i].question], j, save);
+        const q = cards[i].question;
+        await this.createdText(
+          bound.cards[i]._id,
+          typeof q === 'string' ? [q] : await this.richText(q, j),
+          j,
+          save
+        );
         for (let n = 0; n < cards[i].answer.length; n++)
           await this.createdText(
             bound.answers[i][n]._id,

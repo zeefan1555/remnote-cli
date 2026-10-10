@@ -9,6 +9,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Write `TextSegment[]` flashcard questions as native rich text, reject literal bracket references in plain strings,
+  and validate question reference targets before any journal or card write.
 - Flashcard apply adds the Card Cluster powerup (`cc`) only when the plan sets
   optional `cardCluster: true`, which still requires a title and at least two new
   cards. Omitted or `false` never adds `cc`, and verification does not require it.

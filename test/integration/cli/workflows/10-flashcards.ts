@@ -144,7 +144,11 @@ export async function flashcardsWorkflow(
           },
           {
             key: 'replay',
-            question: '[CLI-TEST] What must a verified same-key replay preserve?',
+            question: [
+              '[CLI-TEST] What must a verified same-key replay preserve for ',
+              { remId: tagRemId },
+              '?',
+            ],
             answer: [['The same Rem IDs, native card IDs, content, and review history.']],
           },
         ],
@@ -172,6 +176,13 @@ export async function flashcardsWorkflow(
     assert.equal(ids.daily, dailyRemId);
     assert.equal(ids.tag, tagRemId);
     const cards = plan.newCards!;
+    const expectedQuestions = cards.map((card) =>
+      typeof card.question === 'string'
+        ? [card.question]
+        : card.question.map((segment) =>
+            typeof segment === 'string' ? segment : { i: 'q', _id: segment.remId }
+          )
+    );
     const cardIds = cards.map((card) => ids[`card:${card.key}`]);
     const answerIds = cards.map((card) => ids[`answer:${card.key}:0`]);
     const ownedIds = [ids.root, ...cardIds, ...answerIds];
@@ -207,7 +218,7 @@ export async function flashcardsWorkflow(
     for (let i = 0; i < cards.length; i++) {
       const card = objects.get(cardIds[i])!;
       const answer = objects.get(answerIds[i])!;
-      assert.deepEqual(card.text, [cards[i].question]);
+      assert.deepEqual(card.text, expectedQuestions[i]);
       assert.equal(card.parentRemId, ids.root);
       assert.deepEqual(card.childrenRemIds, [answerIds[i]]);
       assert.ok(!card.tags.includes(tagRemId), 'Cluster children must not repeat the HOME tag');
@@ -247,7 +258,7 @@ export async function flashcardsWorkflow(
         '--args-json',
         JSON.stringify([cardIds[index]]),
       ]);
-      assert.deepEqual((rem.value as { text: unknown }).text, [cards[index].question]);
+      assert.deepEqual((rem.value as { text: unknown }).text, expectedQuestions[index]);
       const result = await run(['sdk', 'rem', 'object-get-cards', '--target-id', cardIds[index]]);
       assert.ok(Array.isArray(result.value));
       assert.equal(result.value.length, 1);

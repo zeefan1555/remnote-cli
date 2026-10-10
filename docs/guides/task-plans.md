@@ -26,7 +26,8 @@ approval. A denied identity lookup stops preview/apply before any content write;
 - Exact IDs: nonblank strings, at most 256 characters
 - Object/patch `key`: 1–64 characters matching `^[A-Za-z0-9._-]+$`, unique across all keyed entries in the plan
 - `idempotencyKey`: 1–128 characters with the same pattern
-- Titles/questions: nonblank, at most 1000 characters
+- Titles and plain-string questions: nonblank, at most 1000 characters
+- Question `TextSegments`: combined literal text at most 1000 characters and either nonblank text or a native reference
 - Aliases: at most 20 nonblank strings, at most 200 characters each
 - `TextSegments`: array of 1–100 entries; each is a string (at most 10000 characters, empty allowed), or exact `{remId}`
 - Wiki text additionally accepts exact `{pageKey}` objects, resolving to a page key declared in the same plan
@@ -46,12 +47,12 @@ hash is a conflict, not permission to bypass the guard.
 ## Flashcard inner plan
 
 ```json
-{"schemaVersion":1,"dailyRemId":"daily-rem","homeRootId":"home-root","tagRemId":"tag-rem","title":"Topic","newCards":[{"key":"card-a","question":"Question?","answer":[["Answer."]]},{"key":"card-b","question":"Source?","answer":[["See ",{"remId":"source-rem"}]]}],"answerPatches":[],"reusedCardRemIds":[]}
+{"schemaVersion":1,"dailyRemId":"daily-rem","homeRootId":"home-root","tagRemId":"tag-rem","title":"Topic","newCards":[{"key":"card-a","question":"Question?","answer":[["Answer."]]},{"key":"card-b","question":["How does ",{"remId":"source-rem"}," apply?"],"answer":[["See ",{"remId":"source-rem"}]]}],"answerPatches":[],"reusedCardRemIds":[]}
 ```
 
 `dailyRemId`, `homeRootId`, and `tagRemId` are required existing IDs. `newCards`, `answerPatches`,
 `reusedCardRemIds`, `title`, and `cardCluster` are optional. At least one new/patch/reused card is required. `newCards` allows at most
-7 entries; each requires `key`, `question`, and 1–100 answer lines, each a TextSegments array. Two or more new cards
+7 entries; each requires `key`, a plain string or TextSegments `question`, and 1–100 answer lines, each a TextSegments array. Plain-string questions containing `[[` or `]]` are rejected because RemNote stores those brackets as literal text. Native reference IDs in questions and answers are checked before any write. Two or more new cards
 require a cluster title. Patches and reused Rem IDs allow at most 100 each. Reuse uses Rem IDs, not native card IDs.
 
 `cardCluster` is an optional boolean and defaults to off. A multi-card plan still creates a titled parent Rem, but

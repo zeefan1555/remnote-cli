@@ -10,6 +10,22 @@ const Title = z.string().min(1).max(1000).regex(/\S/);
 const PlainSegment = z.union([z.string().max(10000), z.object({ remId: RemId }).strict()]);
 const WikiSegment = z.union([PlainSegment, z.object({ pageKey: Key }).strict()]);
 const PlainText = z.array(PlainSegment).min(1).max(100);
+const QuestionSegments = PlainText.superRefine((segments, ctx) => {
+  const text = segments
+    .filter((segment): segment is string => typeof segment === 'string')
+    .join('');
+  if (text.length > 1000)
+    ctx.addIssue({ code: 'custom', message: 'Question text exceeds 1000 characters' });
+  if (!segments.some((segment) => typeof segment !== 'string') && !text.trim())
+    ctx.addIssue({ code: 'custom', message: 'Question must contain text or a native reference' });
+});
+const Question = z.union([
+  Title.refine((v) => !v.includes('[[') && !v.includes(']]'), {
+    message:
+      'Plain-string question contains literal [[ or ]]; pass question as TextSegment[] with {"remId":"<title Rem ID>"} for each reference',
+  }),
+  QuestionSegments,
+]);
 const WikiText = z.array(WikiSegment).min(1).max(100);
 const patch = { key: Key, cardRemId: RemId, remId: RemId, expectedTextHash: Hash };
 const PlainPatch = z.object({ ...patch, text: PlainText }).strict();
@@ -36,7 +52,9 @@ export const FlashcardsPlanSchema = z
     cardCluster: z.boolean().optional(),
     newCards: z
       .array(
-        z.object({ key: Key, question: Title, answer: z.array(PlainText).min(1).max(100) }).strict()
+        z
+          .object({ key: Key, question: Question, answer: z.array(PlainText).min(1).max(100) })
+          .strict()
       )
       .max(7)
       .optional(),

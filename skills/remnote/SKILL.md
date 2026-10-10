@@ -93,6 +93,8 @@ require the current raw-text hash. Semantic receipt keys identify returned Rems;
 never infer IDs from creation order. Multi-card flashcards do not receive the
 Card Cluster powerup unless the plan sets `cardCluster: true` together with a
 title and at least two new cards. Omitted or `false` leaves `cc` unset.
+Flashcard questions accept a plain string or `TextSegments`. Use `{"remId":"EXACT_ID"}`
+segments for native references. A plain string containing `[[` or `]]` is invalid.
 
 Use `--summary` on task apply and `verify scope` when only IDs/hashes, scopes, counts
 and failures are needed. It does not change exit or recovery semantics. Wiki batch

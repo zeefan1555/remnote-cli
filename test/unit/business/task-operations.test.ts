@@ -334,6 +334,46 @@ describe('public task operation controls', () => {
       })
     );
   });
+  it('writes a rich-text question as a native reference on the front', async () => {
+    const f = await fixture();
+    const plan = flashPlan();
+    plan.newCards![1].question = ['Compare ', { remId: 'source' }, ' and PB?'];
+    const result = await f.adapter.applyFlashcards(request(plan));
+    success(result);
+    expect((await rem(f, result.ids['card:b'])).text).toEqual([
+      'Compare ',
+      ref('source'),
+      ' and PB?',
+    ]);
+    expect((await rem(f, result.ids['card:a'])).text).toEqual(['Question A?']);
+  });
+  it('rejects a missing rich-text question reference before any write', async () => {
+    const f = await fixture();
+    const plan = flashPlan();
+    plan.newCards![0].question = ['See ', { remId: 'missing' }, '?'];
+    const result = await f.adapter.applyFlashcards(request(plan));
+    expect(result.status).toBe('incomplete');
+    expect(result.errors).toContainEqual({
+      remId: 'missing',
+      code: 'missing_rem',
+      message: 'Rem missing or inaccessible',
+    });
+    expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+    expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+  });
+  it.each(['[[能力圈]] 和长远怎么取舍？', '能力圈]] 是什么？'])(
+    'rejects literal bracket plain-string question %s before any write',
+    async (q) => {
+      const f = await fixture();
+      const plan = flashPlan();
+      plan.newCards![0].question = q;
+      await expect(f.adapter.applyFlashcards(request(plan))).rejects.toThrow(
+        /TextSegment\[\] with \{"remId"/
+      );
+      expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+      expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+    }
+  );
   it('rejects cardCluster without two new cards before any Card Cluster write', async () => {
     const f = await fixture();
     const plan = flashPlan();

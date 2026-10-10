@@ -62,6 +62,12 @@ describe('task plan contract', () => {
     { newCards: [card, { ...card, key: 'c2' }] },
     { newCards: Array(8).fill(card) },
     { newCards: [{ ...card, question: ' ' }] },
+    { newCards: [{ ...card, question: '[[能力圈]] 和长远怎么取舍？' }] },
+    { newCards: [{ ...card, question: 'x ]]' }] },
+    { newCards: [{ ...card, question: [] }] },
+    { newCards: [{ ...card, question: [' '] }] },
+    { newCards: [{ ...card, question: ['x'.repeat(1001)] }] },
+    { newCards: [{ ...card, question: [{ pageKey: 'p' }] }] },
     { newCards: [{ ...card, answer: [] }] },
     { newCards: [{ ...card, answer: [[]] }] },
     { newCards: [{ ...card, answer: [[{ pageKey: 'p' }]] }] },
@@ -103,6 +109,20 @@ describe('task plan contract', () => {
   ])('rejects unsafe Wiki input %#', (v) =>
     expect(WikiPlanSchema.safeParse({ ...wiki, ...v }).success).toBe(false)
   );
+  it('accepts a TextSegment question and names the fix for literal brackets', () => {
+    expect(
+      FlashcardsPlanSchema.safeParse({
+        ...flash,
+        newCards: [{ ...card, question: ['Compare ', { remId: 'pe' }, '?'] }],
+      }).success
+    ).toBe(true);
+    const bad = FlashcardsPlanSchema.safeParse({
+      ...flash,
+      newCards: [{ ...card, question: '[[能力圈]]' }],
+    });
+    expect(bad.success).toBe(false);
+    expect(JSON.stringify(bad.error?.issues)).toContain('{\\"remId\\"');
+  });
   it('accepts an explicit Card Cluster opt-in and treats omit or false as off', () => {
     const two = {
       ...flash,
