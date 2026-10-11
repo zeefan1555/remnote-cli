@@ -1,18 +1,6 @@
-# OpenClaw Skill: RemNote
+# CLI Skill
 
-This directory contains an OpenClaw skill package for using RemNote through `remnote-cli`.
-
-- Skill path: `skills/remnote/SKILL.md`
-- Primary use: read-first RemNote automation (`status`, `search`, `search-by-tag`, `read`)
-- Write safety: mutating commands are gated and require exact user phrase `confirm write`
-- Setup focus: private pairing, exact KB identity and generated SDK capabilities (no product-version coupling)
-- KB navigation template path: `skills/remnote-kb-navigation/SKILL.md`
-- KB navigation template setup guide: `skills/remnote-kb-navigation/CUSTOMIZATION.md`
-- "Skill creator" skill which adds skill validation - see skills/README-skill-creator.md
-
-Important:
-
-- `skills/remnote-kb-navigation/SKILL.md` is a template only.
-- It must be customized with real user-specific Rem IDs and branch map before use.
-
-The skill is intended for OpenClaw agents and follows OpenClaw skill frontmatter conventions.
+`remnote/` 和 `remnote-kb-navigation/` 随 CLI 行为一起维护，真值留在本仓库，路径不变。
+所有 Bot 的 Skill 总索引在 [zeefan1555/second-brain-skills](https://github.com/zeefan1555/second-brain-skills)，
+这两个 Skill 以只读镜像出现在它的 `remnote/` 目录。改完这里后，在 skills 仓库运行
+`scripts/sync-repo-skills.sh` 更新镜像。`skill-creator/` 是第三方打包副本，不镜像。
