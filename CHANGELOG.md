@@ -55,6 +55,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Register the source-built local `remnote-cli` for direct daily use; retain the
+  integration wrapper for development suites and report native rollback separately.
 - Move into `remnote-direct/packages/cli`, with shared repository CI/ADRs and
   independent locked dependencies. Preserve upstream attribution and the failed
   native rollback acceptance gate; no runtime behavior changes in this move.

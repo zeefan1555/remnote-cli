@@ -70,3 +70,24 @@ plugin and leave its MCP service stopped. On failure, restore only the recorded
 pre-adoption environment. This replaces temporary-test restoration on success.
 
 No commit, push, merge or publishing is part of this adoption authorization.
+
+## Local Command Registration Amendment
+
+On 2026-10-02, after the normal two-card write/readback/replay test passed and the
+native abort failure was reported, the maintainer explicitly requested replacing
+the old local CLI with this repository's build for ongoing use. This authorizes
+local registration separately from full native acceptance; it does not establish
+working rollback or authorize publication.
+
+Use the existing CLI `link-cli.sh` once to register `remnote-cli` in the existing
+npm prefix. Daily operations and installed-command smoke checks invoke that
+command directly, not the integration wrapper. The wrapper remains the entrypoint
+for development integration suites. Keep preview, explicit writes, exact KB
+binding and unknown-outcome recovery unchanged.
+
+Keep the independent plugin enabled with the verified static assets served by a
+user LaunchAgent. Remove obsolete global MCP command links and disable old MCP
+autostart. Preserve old source repositories and recorded test evidence; they are
+not dependencies of the installed command. On an installation/smoke failure,
+restore the recorded environment. The known native abort failure remains a
+separate failed acceptance gate; do not rerun the hanging abort scenario.

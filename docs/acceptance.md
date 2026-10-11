@@ -5,7 +5,8 @@ same-key replay and normal restart readback. Native transactions are disabled,
 not repaired; see [the safety decision](adr/0003-disable-unsafe-native-transactions.md)
 and the latest verification below. Historical checks describe their own candidates.
 
-The imported implementation is not accepted for daily installation.
+Full native acceptance remains incomplete. The maintainer subsequently authorized
+local command registration separately; see the latest local-use results below.
 
 Before this repository migration, real RemNote desktop testing established:
 
@@ -32,7 +33,8 @@ limitation or establish a working daily stack.
 
 Private plans, keys, IDs and raw logs remain outside this repository. Do not
 delete uncertain artifacts, narrow the proof scope, or blindly rerun the saved
-write plan. Resolve the supported SDK abort behavior before another live write.
+write plan. Resolve supported SDK abort behavior before resuming that failed
+transaction test.
 
 This migration requires fresh offline checks and builds of the relocated code.
 Previous test counts, source hashes and real-card evidence are provenance only,
@@ -102,8 +104,9 @@ native rollback test or a repair. The SDK's current public release is still
 ignored `.local/sdk-callback-repro.json`.
 
 Do not patch private SDK transport, swallow an abort as a commit, or repeat the
-known hanging write scenario. Native writes and daily adoption remain blocked
-until supported abort handling is resolved and tested on RemNote desktop.
+known hanging write scenario. At that checkpoint native writes and daily adoption
+remained blocked. The later normal-path test and local registration below do not
+repair or pass native abort handling.
 
 The repaired commit `25770b06b820ebb1e0e44307bad6970d3b94d003` passed
 all four [remote CI jobs](https://github.com/zeefan1555/remnote-direct/actions/runs/36987608092).
@@ -137,6 +140,47 @@ took 6.00 s including the build. The complete context command took 1012 ms
 No new card creation, same-key write replay or native abort was attempted in this
 recheck. The old pre-restart whole-context difference and native rollback gate
 remain unresolved. A passing read path does not establish full write acceptance.
+
+## New Normal-Path Writes And Local Use
+
+On 2026-10-02 the maintainer requested further real writes. Candidate `04dd83e`
+passed all six two-card workflow steps with no skips: preview nonmutation, apply,
+exact text/native-card readback, same-key replay, and CLI-only card counting.
+Apply took 1479 ms; the workflow took 11.0 s (13.21 s including its build wrapper).
+Both answers were observed in RemNote desktop. All eight requested objects were
+unchanged after desktop inspection. Plans, IDs and command results are retained
+privately under `.local/native-write-20261002.u2bJVA/`.
+
+The maintainer then explicitly requested direct local command use, replacement of
+the old CLI, and keeping CLI/plugin together in this repository. The existing
+`link-cli.sh` installed and tested this source build; `remnote-cli` in the existing
+local npm prefix now resolves to `packages/cli/dist/remnote-cli/index.js` here.
+The old global MCP packages/command links were removed, old MCP autostart disabled,
+and old source repositories preserved. A stale skill-sync job with a missing
+script was also disabled; no global skills were changed.
+
+The existing static host and 12 verified plugin assets were copied to
+`~/.local/share/remnote-sdk-bridge/` and are served by the user LaunchAgent
+`com.zeefan.remnote-sdk-bridge` on `127.0.0.1:8090`. It serves files only and holds
+no pairing credentials. All 123 CLI and 12 plugin build files match the tested
+candidate hashes; this local registration changes documentation, not runtime code.
+
+After stopping the temporary host, restarting the LaunchAgent and normally
+quitting/reopening RemNote, direct installed-command checks passed from outside
+the repository: status (0.71 s), eight-object context equality (2.59 s), full
+scope verification (1.89 s), saved-plan/key replay (1.90 s), and final context
+equality (2.23 s). All 12 scope objects and five verification checks matched;
+Rem/card IDs, content, child lists and review histories were unchanged. The
+pairing file remains mode 0600. Evidence is private under
+`.local/local-install-20261002/`.
+Full quality checks passed again: 719 CLI tests, 78 plugin tests, type/lint/format,
+coverage thresholds and generated SDK freshness checks.
+
+Post-restart desktop image/accessibility inspection could not complete because
+the computer-use tool timed out; native CLI access and persistence checks did
+complete. The known native abort failure, older unexplained empty daily Rem and
+uncovered SDK methods remain unresolved. No hanging abort retest, private SDK
+patch, marketplace publication or full-acceptance claim was made.
 
 ## Freeze Regression Fix: 0.24.1
 

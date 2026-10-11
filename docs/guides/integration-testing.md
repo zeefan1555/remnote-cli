@@ -18,7 +18,12 @@ leaves the old plugin disabled and MCP service stopped. Do not kill unknown list
 
 ## Entrypoints
 
-AI agents use only the guarded wrapper, including for one-off live CLI commands:
+Development integration suites use the guarded wrapper. Ordinary local operations
+and installed-command smoke checks invoke the registered `remnote-cli` directly;
+they still require current status, explicit write authorization and exact-ID
+readback. They are not a substitute for the complete native acceptance suite.
+
+Wrapper entrypoints:
 
 ```bash
 ./run-agent-integration-test.sh --preflight-only

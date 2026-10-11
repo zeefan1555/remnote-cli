@@ -40,7 +40,8 @@ If Node is unavailable, first run `source ./node-check.sh`.
 SDK constants are generated from the installed official declaration files; do not
 hand-edit generated files or load the browser SDK runtime in Node.
 
-Live validation requires explicit human authorization and only uses this wrapper:
+Daily operations and installed-command smoke checks invoke `remnote-cli` directly.
+Development integration suites require explicit authorization and use this wrapper:
 
 ```bash
 ./run-agent-integration-test.sh --preflight-only
@@ -55,10 +56,11 @@ Preflight checks the paired loopback port before any build or mutation. The wrap
 never stops listeners or starts a daemon. Identify an occupied port before acting;
 under explicit full-operation authority, record, stop and later restore only a
 confirmed project-owned obsolete companion. Never stop unrelated services.
-For the approved local adoption, success keeps the independent SDK plugin and
-direct CLI installed, the old plugin disabled and the MCP service stopped;
-failure restores the recorded prior environment. Do not restore the old service
-on successful adoption. Record source/build hashes and restart smoke evidence.
+The maintainer explicitly requested replacing the daily command with this build.
+Successful local registration keeps the independent SDK plugin and direct CLI
+installed, the old plugin disabled and MCP autostart disabled; installation/smoke
+failure restores the recorded prior environment. Native rollback remains failed,
+not waived as a test result. Record source/build hashes and restart smoke evidence.
 
 Reload changed plugin code through Computer Use before live verification, subject
 to its action-time confirmation rules. Preserve real test IDs and recovery plans.
@@ -78,5 +80,6 @@ The retained [fork adoption workflow](../plugin/docs/workflows/pr-validation-and
 is historical guidance for the original forks, not this repository's delivery
 contract; do not modify the existing forks or their PRs. Commit and push to this
 independent repository are now explicitly authorized. Package publication is not
-authorized; daily installation requires all native acceptance gates. Preserve
-dirty work, upstream licenses and existing trailers.
+authorized. Local registration is separately authorized by the shared ADR amendment;
+it does not establish full native acceptance. Preserve dirty work, upstream licenses
+and existing trailers.

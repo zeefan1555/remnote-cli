@@ -25,6 +25,21 @@ adoption. If it belongs to the old MCP package, replace only that link; never
 force-overwrite an unrelated command. Check `command -v remnote-cli`, the resolved
 symlink, version and build hash against the candidate after linking.
 
+When the old `remnote-mcp-server` package owns the existing command, remove that
+global npm link/install before running `./link-cli.sh`. This does not require
+deleting its source repository. Daily use after registration is simply:
+
+```bash
+remnote-cli --version
+remnote-cli status --text
+remnote-cli read REM_ID --content-mode structured --depth 1
+```
+
+The integration wrapper is for development suites, not a daily command launcher.
+No shell alias, secondary command name or runtime compatibility fallback is used.
+The npm link points at this repository, so subsequent `npm run build` runs in
+`packages/cli` update the same installed command without relinking the plugin.
+
 ## Plugin
 
 Version 0.24.1 requires rebuilding and reloading the existing plugin assets as
@@ -43,6 +58,9 @@ Do not reuse the old MCP plugin installation: a JavaScript reload cannot refresh
 its stored manifest permissions. The approved local deployment keeps a static
 asset host at `127.0.0.1:8090` running through a user LaunchAgent. It does not
 execute business calls or hold credentials, and it requires no upload/publication.
+The local deployment stores `dist/` and the existing `serve-dist.js` under
+`~/.local/share/remnote-sdk-bridge/`; its LaunchAgent label is
+`com.zeefan.remnote-sdk-bridge`. No old source repository is needed to serve it.
 
 In RemNote plugin settings:
 
@@ -65,11 +83,14 @@ are informational; they do not need to match. Confirm the new plugin ID and SDK
 version as well. Reuse an existing private pairing file instead of creating or
 printing another token; enter it only in the new plugin's settings.
 
-After real two-card, same-key replay and native transaction acceptance, keep the
-new CLI/plugin as defaults, disable the old plugin and leave its MCP service
-stopped. Restart the static host and RemNote, then verify exact test IDs again.
-On failure, stop and restore the recorded pre-adoption environment; do not add
-runtime compatibility fallback or silently reconnect old MCP clients.
+The maintainer separately authorized local registration after the normal two-card
+write/readback/replay test passed. Native transaction abort remains failed; local
+use does not establish full acceptance. See the shared
+[ADR amendment](../../../../docs/adr/0001-direct-cli.md#local-command-registration-amendment).
+Keep the new CLI/plugin as defaults, disable the old plugin and old MCP autostart.
+Restart the static host and RemNote, then directly invoke the installed command
+to verify exact test IDs again. On installation/smoke failure, stop and restore
+the recorded prior environment; do not add runtime fallback or reconnect MCP.
 
 An old daemon occupying the port must be identified before it is stopped. The CLI
 never stops listeners or rewrites existing MCP client configuration automatically.
