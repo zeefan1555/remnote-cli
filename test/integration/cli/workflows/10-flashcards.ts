@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ACCEPTED_PLUGIN_IDS } from '../../../../src/remnote-cli/client/connection.js';
 import { FlashcardsApplySchema } from '../../../../src/schemas/task-schemas.js';
 import type { StepResult, WorkflowContext, WorkflowResult } from '../types.js';
 
@@ -97,7 +98,10 @@ export async function flashcardsWorkflow(
     assert.equal(status.connected, true);
     assert.equal(status.acceptWriteOperations, true);
     assert.equal(status.protocolVersion, 1);
-    assert.equal(status.pluginId, 'zeefan-remnote-sdk-bridge');
+    assert.ok(
+      (ACCEPTED_PLUGIN_IDS as readonly string[]).includes(String(status.pluginId)),
+      `plugin id must be remnote-cli-bridge (or zeefan-remnote-sdk-bridge during the rename), got ${String(status.pluginId)}`
+    );
     assert.ok(typeof status.knowledgeBaseId === 'string' && status.knowledgeBaseId);
     assert.match(String(status.sdkCatalogHash), /^[a-f0-9]{64}$/);
     const platform = await run(['sdk', 'app', 'get-platform']);

@@ -2,7 +2,7 @@
   "name": "remnote-cli",
   "private": true,
   "version": "0.24.1",
-  "description": "Direct CLI automation for the RemNote Plugin SDK",
+  "description": "Direct CLI automation for RemNote through the RemNote CLI Bridge plugin",
   "type": "module",
   "main": "dist/remnote-cli/index.js",
   "bin": {
@@ -50,13 +50,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zeefan1555/remnote-direct.git",
-    "directory": "packages/cli"
+    "url": "git+https://github.com/zeefan1555/remnote-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/zeefan1555/remnote-direct/issues"
+    "url": "https://github.com/zeefan1555/remnote-cli/issues"
   },
-  "homepage": "https://github.com/zeefan1555/remnote-direct#readme",
+  "homepage": "https://github.com/zeefan1555/remnote-cli#readme",
   "dependencies": {
     "commander": "^15.0.0",
     "ws": "^8.20.0",

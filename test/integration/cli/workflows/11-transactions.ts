@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Connection } from '../../../../src/remnote-cli/client/connection.js';
+import { ACCEPTED_PLUGIN_IDS, Connection } from '../../../../src/remnote-cli/client/connection.js';
 import { readConnectionConfig } from '../../../../src/remnote-cli/client/connection-config.js';
 import { remoteSdk } from '../../../../src/remnote-cli/client/remote-sdk.js';
 import { verifiedCatalog } from '../../../../src/remnote-cli/client/sdk-capabilities.js';
@@ -35,7 +35,10 @@ export async function transactionsWorkflow(ctx: WorkflowContext): Promise<Workfl
         pluginId: string;
         nativeTransactions?: boolean;
       };
-      assert.equal(status.pluginId, 'zeefan-remnote-sdk-bridge');
+      assert.ok(
+        (ACCEPTED_PLUGIN_IDS as readonly string[]).includes(status.pluginId),
+        `plugin id must be remnote-cli-bridge (or zeefan-remnote-sdk-bridge during the rename), got ${status.pluginId}`
+      );
       assert.equal(
         status.nativeTransactions,
         true,

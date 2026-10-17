@@ -4,9 +4,7 @@ import vitestConfig from '../../vitest.config.js';
 
 describe('project config', () => {
   it('uses public registry tarballs so CI does not require a private network', () => {
-    for (const config of ['.npmrc', '../../.npmrc']) {
-      expect(readFileSync(config, 'utf-8').trim()).toBe('registry=https://registry.npmjs.org/');
-    }
+    expect(readFileSync('.npmrc', 'utf-8').trim()).toBe('registry=https://registry.npmjs.org/');
     const lock = JSON.parse(readFileSync('package-lock.json', 'utf-8')) as {
       packages: Record<string, { resolved?: string }>;
     };
@@ -25,16 +23,17 @@ describe('project config', () => {
       packages: { '': { engines: { node: string } } };
     };
     const nvmVersion = readFileSync('.nvmrc', 'utf-8').trim();
-    const ciWorkflow = readFileSync('../../.github/workflows/ci.yml', 'utf-8');
+    const ciWorkflow = readFileSync('.github/workflows/ci.yml', 'utf-8');
 
     expect(packageJson.engines.node).toBe('>=22.13.0');
     expect(packageLock.packages[''].engines.node).toBe(packageJson.engines.node);
     expect(nvmVersion).toBe('24');
     expect(ciWorkflow).toContain("node: ['22.13.0', '24']");
-    expect(ciWorkflow).toContain('package: [cli, plugin]');
-    expect(ciWorkflow).toContain('working-directory: packages/${{ matrix.package }}');
     expect(ciWorkflow).toContain('node-version: ${{ matrix.node }}');
-    expect(ciWorkflow).toContain('run: npm run quality');
+    expect(ciWorkflow).toContain('run: npm run typecheck');
+    expect(ciWorkflow).toContain('run: npm run lint');
+    expect(ciWorkflow).toContain('run: npm run format:check');
+    expect(ciWorkflow).toContain('run: npm test');
     expect(ciWorkflow).toContain('run: npm run build');
   });
 

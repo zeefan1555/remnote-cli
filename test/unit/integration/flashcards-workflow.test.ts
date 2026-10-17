@@ -21,12 +21,12 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
       case 'status':
         json = {
           connected: true,
-          pluginId: 'zeefan-remnote-sdk-bridge',
+          pluginId: 'remnote-cli-bridge',
           protocolVersion: 1,
           knowledgeBaseId: 'test-kb',
           sdkCatalogHash: 'a'.repeat(64),
           acceptWriteOperations: true,
-          pluginVersion: '0.24.0',
+          pluginVersion: '0.25.0',
           cliVersion: '0.24.0',
         };
         break;

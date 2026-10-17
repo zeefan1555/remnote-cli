@@ -11,7 +11,8 @@ transaction before admitting another session. Unlike the old plugin-local
 business callbacks, the direct begin/end scope made connection loss, request
 expiry and CLI decoding errors trigger the broken abort path.
 
-`packages/plugin/test/unit/sdk-callback.test.ts` reproduces the SDK behavior
+[remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge)
+`test/unit/sdk-callback.test.ts` reproduces the SDK behavior
 offline. It is not native rollback acceptance and does not patch the SDK.
 
 ## Decision

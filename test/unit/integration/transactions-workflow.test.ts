@@ -38,7 +38,7 @@ it.each([false, true, 'unavailable'])(
       acceptReplaceOperation: false,
     });
     vi.spyOn(Connection.prototype, 'request').mockResolvedValue({
-      pluginId: 'zeefan-remnote-sdk-bridge',
+      pluginId: 'remnote-cli-bridge',
       nativeTransactions: broken === 'unavailable' ? false : true,
     });
     const close = vi.spyOn(Connection.prototype, 'close').mockResolvedValue();

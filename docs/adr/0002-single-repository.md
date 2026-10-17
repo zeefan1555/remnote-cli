@@ -1,24 +1,26 @@
-# One Repository, Two Packages
+# CLI And Plugin Repositories
 
-Status: accepted in the maintainer conversation, 2026-10-02.
+Status: accepted in the maintainer conversation, 2026-10-02. Amended when the
+CLI and plugin moved into separate repositories.
 
 ## Decision
 
-Maintain the CLI and plugin in the independent `zeefan1555/remnote-direct`
-repository. Import the existing improved forks rather than rewriting them.
+The CLI lives in [zeefan1555/remnote-cli](https://github.com/zeefan1555/remnote-cli).
+The plugin lives in
+[zeefan1555/remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge).
+Import the existing improved forks rather than rewriting them.
 Retain their licenses, authorship and exact source provenance.
 
-`packages/cli` owns business composition. `packages/plugin` owns official SDK
-access. Both components still communicate only through the authenticated
-loopback protocol. This changes repository topology, not the runtime boundary
-or safety contract in [0001-direct-cli](0001-direct-cli.md).
+This CLI owns business composition. The plugin owns official SDK access. Both
+components still communicate only through the authenticated loopback protocol.
+The repository split does not change the runtime boundary or safety contract in
+[0001-direct-cli](0001-direct-cli.md).
 
-Keep each package's existing dependency lock, toolchain and output. Root npm
-scripts coordinate both packages; GitHub Actions validates both from the same
-commit. No workspace dependency hoisting, shared runtime package, submodule,
-subtree synchronization service or additional build framework is needed.
-Both packages use the public npm registry. Their lockfiles must not depend on a
-developer's private registry or network.
+Each repository keeps its own dependency lock, toolchain and output. GitHub
+Actions in this repository validates the CLI. No workspace dependency hoisting,
+shared runtime package, submodule, subtree synchronization service or additional
+build framework is used. Both repositories use the public npm registry. Lockfiles
+must not depend on a developer's private registry or network.
 
 Product versions remain independent. A CLI-only business addition must not
 require a plugin release when its required SDK capability is already available.
@@ -26,8 +28,9 @@ require a plugin release when its required SDK capability is already available.
 ## Verification
 
 Preserve runtime source and SDK generated output during this import. Verify
-both lockfile installs, full quality checks, SDK freshness and production builds.
-Check cross-package paths, CI ownership and the preserved upstream licenses.
+each repository's lockfile install, full quality checks, SDK freshness and
+production builds. Check cross-repository links, CI ownership and the preserved
+upstream licenses.
 
 The existing failed native rollback gate remains failed. Migration alone did not
 authorize new real-card writes, install replacement, commit, push or publication.

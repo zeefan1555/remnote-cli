@@ -1,6 +1,6 @@
 # Integration Testing
 
-Live tests exercise the candidate CLI directly against the candidate SDK Bridge.
+Live tests exercise the candidate CLI directly against RemNote CLI Bridge.
 There are no MCP or stdio suites.
 
 ## Prerequisites
@@ -54,7 +54,8 @@ fail before live work. Do not invoke the TypeScript live runner directly.
    same native card IDs. Keep the plugin asset hash unchanged throughout this
    CLI-only composition; compare status identity/catalog before and after.
 
-The workflow requires the independent plugin ID `zeefan-remnote-sdk-bridge` and
+The workflow requires plugin ID `remnote-cli-bridge` (or `zeefan-remnote-sdk-bridge`
+during the rename) and
 native `app.getPlatform() === 'app'`; web sessions are not desktop acceptance.
 
 The runner creates a private temporary evidence directory and prints its path.

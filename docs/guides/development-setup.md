@@ -38,5 +38,5 @@ Update `CHANGELOG.md` for functional or documentation changes. Preserve unrelate
 worktree edits. The current direct-architecture adoption does not authorize commits,
 pushes, merges or publication.
 
-See [architecture](../architecture.md) and the companion
-[contribution workflow](../../../plugin/docs/workflows/pr-validation-and-adoption.md).
+See [architecture](../architecture.md). Plugin source and its own checks live in
+[remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge).

@@ -7,6 +7,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- This CLI is its own repository. The companion plugin is
+  [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge)
+  (npm name and manifest id `remnote-cli-bridge`, display name RemNote CLI Bridge,
+  version 0.25.0). Handshake accepts that id and name, and still accepts
+  `zeefan-remnote-sdk-bridge` / RemNote SDK Bridge during the rename. Plugin
+  version 0.25.0 is accepted. Compatibility remains protocol 1 and the SDK catalog.
+
 ### Added
 
 - `inspect [ids...]` reads generic Rem state in one bridge session: rich-text element
@@ -92,7 +101,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Register the source-built local `remnote-cli` for direct daily use; retain the
   integration wrapper for development suites and report native rollback separately.
-- Move into `remnote-direct/packages/cli`, with shared repository CI/ADRs and
+- Move into the former combined repository, with shared repository CI/ADRs and
   independent locked dependencies. Preserve upstream attribution and the failed
   native rollback acceptance gate; no runtime behavior changes in this move.
 - Show the independent plugin identity and SDK in status output. Adopt the local

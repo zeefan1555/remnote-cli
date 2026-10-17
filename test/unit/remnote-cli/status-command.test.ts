@@ -19,8 +19,8 @@ describe('status command', () => {
   it('prints the independent plugin identity, protocol, SDK and exact KB', async () => {
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
       connected: true,
-      pluginVersion: '0.24.0',
-      pluginId: 'zeefan-remnote-sdk-bridge',
+      pluginVersion: '0.25.0',
+      pluginId: 'remnote-cli-bridge',
       protocolVersion: 1,
       sdkVersion: '0.0.46',
       knowledgeBaseId: 'kb',
@@ -29,9 +29,7 @@ describe('status command', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       await createProgram('test').parseAsync(['node', 'remnote-cli', '--text', 'status']);
-      expect(log).toHaveBeenCalledWith(
-        expect.stringContaining('Plugin ID: zeefan-remnote-sdk-bridge')
-      );
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Plugin ID: remnote-cli-bridge'));
       expect(log).toHaveBeenCalledWith(expect.stringContaining('SDK: 0.0.46'));
       expect(log).toHaveBeenCalledWith(expect.stringContaining('KB: Test (kb)'));
     } finally {

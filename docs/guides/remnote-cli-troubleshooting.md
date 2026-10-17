@@ -2,8 +2,8 @@
 
 ## Connection Fails
 
-Run `remnote-cli status --text`. Check that RemNote is open with the direct SDK
-Bridge enabled, the private tokens match and the URL uses the paired loopback port.
+Run `remnote-cli status --text`. Check that RemNote is open with RemNote CLI Bridge
+enabled, the private tokens match and the URL uses the paired loopback port.
 An idle plugin is normally disconnected because no command owns a listener.
 
 The connection deadline is 15 seconds. Browser background timer throttling can
@@ -45,7 +45,7 @@ Native transactions are disabled: SDK 0.0.46 cannot acknowledge a rejected callb
 and can leave the editor blocked. Atomic commands fail before their callbacks run.
 Additive commands retain a private per-attempt recovery key and known IDs; task
 commands retain their stable idempotency key. Neither supplies automatic rollback.
-See [the exact boundary](../../../../docs/adr/0003-disable-unsafe-native-transactions.md).
+See [the exact boundary](../adr/0003-disable-unsafe-native-transactions.md).
 
 ## Exit Status
 

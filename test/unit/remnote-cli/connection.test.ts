@@ -2,6 +2,8 @@ import { once } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACCEPTED_PLUGIN_IDS,
+  ACCEPTED_PLUGIN_NAMES,
   Connection,
   proof,
   type BridgeIdentity,
@@ -100,6 +102,43 @@ describe('command-owned loopback session', () => {
       await expect(connection.request('sdk_call', {})).rejects.toThrow();
     }
   );
+
+  it('accepts RemNote CLI Bridge 0.25.0 and the previous plugin id', async () => {
+    const { opened, port } = await listen();
+    await plugin(port, {
+      pluginVersion: '0.25.0',
+      pluginId: ACCEPTED_PLUGIN_IDS[0],
+      pluginName: ACCEPTED_PLUGIN_NAMES[0],
+    });
+    await expect(opened).resolves.toMatchObject({
+      pluginVersion: '0.25.0',
+      pluginId: 'remnote-cli-bridge',
+      pluginName: 'RemNote CLI Bridge',
+    });
+  });
+
+  it('keeps accepting the previous plugin id and name during the rename', async () => {
+    const { opened, port } = await listen();
+    await plugin(port, {
+      pluginVersion: '0.24.1',
+      pluginId: ACCEPTED_PLUGIN_IDS[1],
+      pluginName: ACCEPTED_PLUGIN_NAMES[1],
+    });
+    await expect(opened).resolves.toMatchObject({
+      pluginId: 'zeefan-remnote-sdk-bridge',
+      pluginName: 'RemNote SDK Bridge',
+    });
+  });
+
+  it('rejects an unknown plugin id before an operation can start', async () => {
+    const { connection, opened, port } = await listen();
+    const rejected = expect(opened).rejects.toThrow('Unsupported plugin handshake');
+    await plugin(port, { pluginId: 'other-plugin' as never });
+    await rejected;
+    await expect(connection.request('sdk_call', {})).rejects.toThrow(
+      'Unsupported plugin handshake'
+    );
+  });
 
   it('identifies unsupported plugin handshakes without accepting a legacy session', async () => {
     const { connection, opened, port } = await listen();

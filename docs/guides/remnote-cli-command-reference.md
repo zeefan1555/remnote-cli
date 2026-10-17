@@ -8,7 +8,7 @@
 remnote-cli [global-options] <command> [command-options]
 ```
 
-Commands require RemNote open with the authenticated SDK Bridge enabled. Each command
+Commands require RemNote open with the authenticated RemNote CLI Bridge enabled. Each command
 owns a short-lived loopback connection; no daemon or MCP endpoint is used.
 Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
 See [configuration](configuration.md) for permissions and private pairing-file handling.
@@ -20,7 +20,7 @@ SDK 0.0.46 cannot safely abort a native transaction. `update`, `replace-children
 `create`, `journal` and `insert-children` perform sequential additive writes with
 private recovery journals, not atomic transactions. A failure can leave partial
 content: retain the reported key/IDs and read back before retrying. Use the task
-commands for stable-key replay. See [ADR 0003](../../../../docs/adr/0003-disable-unsafe-native-transactions.md).
+commands for stable-key replay. See [ADR 0003](../adr/0003-disable-unsafe-native-transactions.md).
 
 ## Global Options
 
