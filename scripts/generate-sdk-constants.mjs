@@ -19,8 +19,85 @@ const declarations = source.statements.filter(
   (node) => ts.isEnumDeclaration(node) && names.has(node.name.text)
 );
 if (declarations.length !== names.size) throw new Error('Official SDK enum declarations changed');
+
+function propertyName(node) {
+  if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node))
+    return node.text;
+  throw new Error('Unsupported SDK property name');
+}
+
+function declaredSlotNames(file) {
+  let literal;
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'PowerupSlotCodeMap' &&
+      node.type &&
+      ts.isTypeLiteralNode(node.type)
+    )
+      literal = node.type;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (!literal) throw new Error('PowerupSlotCodeMap declaration missing');
+  const declared = new Map();
+  for (const member of literal.members) {
+    if (!ts.isPropertySignature(member) || !member.name) throw new Error('Malformed slot map');
+    const slots = [];
+    if (!member.type || !ts.isTypeLiteralNode(member.type))
+      throw new Error('Malformed slot map entry');
+    for (const slot of member.type.members) {
+      if (!ts.isPropertySignature(slot) || !slot.name) throw new Error('Malformed slot name');
+      slots.push(propertyName(slot.name));
+    }
+    declared.set(propertyName(member.name), slots.sort());
+  }
+  return declared;
+}
+
+function runtimeSlotMap(bundle) {
+  const marker = 'sp:{Query:"q",Filter:"f"';
+  const at = bundle.indexOf(marker);
+  if (at < 0) throw new Error('SDK bundle is missing built-in powerup slot codes');
+  const start = bundle.lastIndexOf('={', at);
+  if (start < 0) throw new Error('SDK bundle slot map start missing');
+  let depth = 0;
+  let end = start + 1;
+  for (; end < bundle.length; end += 1) {
+    if (bundle[end] === '{') depth += 1;
+    else if (bundle[end] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end += 1;
+        break;
+      }
+    }
+  }
+  const json = bundle.slice(start + 1, end).replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '"$1":');
+  const value = JSON.parse(json);
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('SDK bundle slot map did not parse');
+  return value;
+}
+
+const declaredSlots = declaredSlotNames(source);
+const slotMap = runtimeSlotMap(readFileSync(resolve(sdk, 'dist/index.js'), 'utf8'));
+const declaredKeys = [...declaredSlots.keys()].sort();
+const runtimeKeys = Object.keys(slotMap).sort();
+if (declaredKeys.join('\n') !== runtimeKeys.join('\n'))
+  throw new Error('PowerupSlotCodeMap keys diverged from the SDK declarations');
+for (const key of declaredKeys) {
+  const namesForPowerup = Object.keys(slotMap[key]).sort();
+  if (namesForPowerup.join('\n') !== declaredSlots.get(key).join('\n'))
+    throw new Error(`Powerup slot names diverged for ${key}`);
+  for (const name of namesForPowerup)
+    if (typeof slotMap[key][name] !== 'string' || !slotMap[key][name])
+      throw new Error(`Powerup slot code missing for ${key}.${name}`);
+}
+
 const output = await prettier.format(
-  '// Generated from official SDK declarations. Do not import the browser SDK into Node.\n' +
+  '// Generated from official SDK declarations and the SDK bundle slot-code table. Do not import the browser SDK into Node.\n' +
     declarations
       .map((node) => {
         let last = -1;
@@ -43,7 +120,8 @@ const output = await prettier.format(
         const cast = name === 'RemType' ? 'unknown as ' : '';
         return `export const ${name} = {${entries.join(',')}} as ${cast}typeof import('@remnote/plugin-sdk').${name};\nexport type ${name} = import('@remnote/plugin-sdk').${name};`;
       })
-      .join('\n'),
+      .join('\n') +
+    `\nexport const PowerupSlotCodeMap = ${JSON.stringify(slotMap)} as typeof import('@remnote/plugin-sdk').PowerupSlotCodeMap;\n`,
   { ...(await prettier.resolveConfig(path)), parser: 'typescript' }
 );
 if (process.argv.includes('--check')) {

@@ -27,6 +27,8 @@ import {
   type InspectManyParams,
   type VerifyScopeParams,
 } from './inspection.js';
+import { inspectState, type InspectStateParams } from './state-inspect.js';
+import { getPowerupSlot, type PowerupGetParams } from './powerup-read.js';
 import {
   TaskOperations,
   type TaskApplyParams,
@@ -655,6 +657,12 @@ export class RemAdapter {
   }
   verifyScope(params: VerifyScopeParams) {
     return verifyScope(this.plugin, params);
+  }
+  inspectState(params: InspectStateParams) {
+    return inspectState(this.plugin, params);
+  }
+  getPowerupSlot(params: PowerupGetParams) {
+    return getPowerupSlot(this.plugin, params);
   }
   private tasks(): TaskOperations {
     return (this.taskOperations ??= new TaskOperations({

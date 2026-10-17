@@ -50,6 +50,9 @@ describe('createProgram', () => {
     expect(commandNames).toContain('search-by-tag');
     expect(commandNames).not.toContain('search-tag');
     expect(commandNames).toContain('read');
+    expect(commandNames).toContain('inspect');
+    expect(commandNames).toContain('assert');
+    expect(commandNames).toContain('powerup');
     expect(commandNames).toContain('get-media');
     expect(commandNames).toContain('outline');
     expect(commandNames).toContain('todo');

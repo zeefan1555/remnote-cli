@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { RemAdapter } from '../../business/rem-adapter.js';
 import * as schemas from '../../schemas/remnote-schemas.js';
 import { InspectManySchema, VerifyScopeSchema } from '../../schemas/composite-schemas.js';
+import { InspectStateSchema, PowerupGetSchema } from '../../schemas/state-schemas.js';
 import { FlashcardsApplySchema, WikiApplySchema } from '../../schemas/task-schemas.js';
 import { resolveManagedImage } from '../../media.js';
 import { Connection } from './connection.js';
@@ -35,6 +36,8 @@ const operations = {
   read_table: ['readTable', schemas.ReadTableSchema],
   inspect_many: ['inspectMany', InspectManySchema],
   verify_scope: ['verifyScope', VerifyScopeSchema],
+  inspect_state: ['inspectState', InspectStateSchema],
+  powerup_get: ['getPowerupSlot', PowerupGetSchema],
   flashcards_apply: ['applyFlashcards', FlashcardsApplySchema],
   wiki_apply: ['applyWiki', WikiApplySchema],
 } as const;

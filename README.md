@@ -48,6 +48,9 @@ protocol and generated SDK capabilities determine compatibility.
 remnote-cli search "topic"
 remnote-cli read REM_ID --content-mode structured --depth 1
 remnote-cli read REM_ID OTHER_ID --content-mode none
+remnote-cli inspect REM_ID --fields elements,portal,cards
+remnote-cli assert --file rules.json --strict
+remnote-cli powerup get --rem REM_ID --powerup sp --slot f
 remnote-cli list-children PARENT_ID OTHER_PARENT_ID
 remnote-cli batch --file commands.jsonl
 remnote-cli review-stats REM_ID

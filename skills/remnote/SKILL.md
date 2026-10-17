@@ -62,6 +62,9 @@ remnote-cli read REM_ID OTHER_ID --content-mode none
 remnote-cli list-children ROOT_ID
 remnote-cli list-children ROOT_ID OTHER_ID
 remnote-cli batch --file commands.jsonl
+remnote-cli inspect REM_ID --fields elements,markdown,tags,parent,portal,cards
+remnote-cli assert --file rules.json --strict
+remnote-cli powerup get --rem REM_ID --powerup sp --slot q
 remnote-cli review-stats REM_ID
 remnote-cli read-table --rem-id TABLE_ID
 remnote-cli todo list --tag-id TAG_ID
@@ -71,6 +74,15 @@ remnote-cli sdk rem object-get-children-rem --help
 
 JSON is preferred for ID-based follow-up work. Use shallow structured reads for
 navigation, Markdown for presentation. Increase bounds only when needed.
+`inspect` is the generic state read: one session, many IDs, optional descendants.
+Code blocks are rich-text elements with `code:true`, not `rem.isCode`. Tag and parent
+chains include names, ids, and types. Portal query/filter slots are `sp`/`q` and `sp`/`f`;
+the CLI maps those codes to `Query` and `Filter` before the SDK call. The plugin does not.
+`assert --file rules.json` checks that JSON with generic path rules, including `rems[*].field`.
+Its report includes `complete` and read `errors`; `ok` is false when the read failed.
+Add `--strict` when a failed rule or an incomplete read must exit 1. Compare `cards[].hash` to a baseline file to see that card
+identity and history did not change. See
+[state verification](../../docs/guides/state-verification.md).
 SDK command help comes from the live catalog. Callback/private/stateful-handle
 methods are unsupported; do not substitute arbitrary JavaScript.
 

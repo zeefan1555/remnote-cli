@@ -11,6 +11,8 @@ import {
   registerSearchCommand,
 } from './commands/search.js';
 import { registerReadCommand } from './commands/read.js';
+import { registerAssertCommand, registerInspectCommand } from './commands/state.js';
+import { registerPowerupCommand } from './commands/powerup.js';
 import { registerUpdateCommand } from './commands/update.js';
 import {
   registerInsertChildrenCommand,
@@ -73,6 +75,9 @@ export function createProgram(version: string): Command {
   registerSearchByTagCommand(program);
   registerListChildrenCommand(program);
   registerReadCommand(program);
+  registerInspectCommand(program);
+  registerAssertCommand(program);
+  registerPowerupCommand(program);
   registerCompositeCommands(program);
   registerTaskCommands(program);
   registerBatchCommand(program, version);

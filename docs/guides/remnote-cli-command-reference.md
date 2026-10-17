@@ -246,6 +246,113 @@ remnote-cli read abc123def --content-mode none --depth 2 --child-limit 30 --max-
 remnote-cli read abc123def --content-mode structured --depth 2 --child-limit 30
 ```
 
+## inspect
+
+Read generic Rem state as JSON. One command uses one bridge session. Requested IDs are loaded
+with `findMany`; descendants, tags, and ancestors use further batches in that same session.
+
+```bash
+remnote-cli inspect <rem-id...> [options]
+remnote-cli inspect --from-file ids.txt --descendants 1 --expect rules.json --strict
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--from-file <path\|->` | none | JSON array or whitespace-separated IDs, combined with positional IDs |
+| `--descendants <n>` | `0` | Include descendants to this depth (0-20, at most 1000 Rems) |
+| `--fields <list>` | all | Comma-separated fields to fetch and return |
+| `--summary` | off | Omit `text`, `backText`, and markdown unless `--fields` is set |
+| `--expect <path\|->` | none | Evaluate a rules file against this result |
+| `--strict` | off | Exit 1 when a rule fails or the read is incomplete |
+
+`id` is always returned. Field names: `type`, `text`, `backText`, `elements`, `markdown`,
+`isCardItem`, `hasCardStructure`, `practiceDirection`, `enablePractice`, `cards`, `tags`,
+`parent`, `children`, `aliases`, `sources`, `portal`.
+
+`elements.text` and `elements.backText` each have `counts` and `items`. A code block is a
+rich-text element with `code: true` and an optional `language`. `rem.isCode` is a different
+flag and is false for a code element inside text, so inspect does not use it. Literal `[[`
+occurrences are counted separately from rem-reference elements. One element can contribute
+several items (a code span can also be bold and a cloze).
+
+`tags[]` and `parent` are root-first `{id,name,type}` chains. `tags[].ancestors` does not
+include the tag itself. `cards[]` has `id`, `type`, `due`, `nextRepetition` (the same
+timestamp), `historyLength`, and `hash`. The hash covers card id, rem id, type, and
+repetition history, so a due-date-only change does not change it.
+
+`portal` is present for a portal Rem or a Rem carrying powerup `sp`. `query` is slot `q`
+and `filter` is slot `f` (search-portal queries and table filters). A recognized
+`getPortalType` code sets `portalType`. Any other value is unclassified (`portalType: null`)
+and kept in `portalTypeRaw`; that is not a read error. Other Rems have `portal: null`.
+When `complete` is false, top-level `errors` lists the reason, including each Rem field
+error as `{id, field, message}`.
+
+Rule failures are included as `assertions` and do not change the exit code unless `--strict`.
+Usage and connection errors still exit 1. See [state verification](state-verification.md).
+
+## assert
+
+Evaluate the same generic rules against a live inspect or a saved inspect file.
+
+```bash
+remnote-cli assert --file rules.json --strict
+remnote-cli assert --file rules.json --against inspect.json
+```
+
+| Option | Description |
+| --- | --- |
+| `--file <path\|->` | Rules JSON, `schemaVersion` 1 |
+| `--against <path>` | Saved inspect JSON. Skips the bridge |
+| `--strict` | Exit 1 when a rule fails or a live read is incomplete |
+
+A live file includes `remIds` and may include `descendants`, `fields`, and `summary`.
+`--against` does not need `remIds`. The rule language has no domain-specific kinds:
+
+| Op | Meaning |
+| --- | --- |
+| `equals` | Deep-equal the selected value to `expect` |
+| `contains` | Substring, or an array element deep-equal to `expect` |
+| `startsWith` | String prefix |
+| `regex` | `RegExp` test (search). Invalid patterns are a usage error |
+| `notContains` | Literal substring or element is absent. A missing path fails |
+| `count` | Array length, or a number, equals `expect`. Optional `match` filters objects first |
+| `all` / `any` / `none` | Partial object match on listed keys, or scalar equality. `all` requires a non-empty array |
+| `hashEquals` | Selected string equals a baseline file or `expect` |
+
+Paths use dots. `[0]` is an index. `[field=value]` keeps matching array items.
+`rems[id=REM][0].markdown` selects one Rem. A property after an array maps that property.
+`[*]` visits every element and flattens one nested array, so `rems[*].isCardItem` and
+`rems[*].tags[*].name` do not need a path per index. Child ids are strings;
+`rems[*].isCardItem` checks every loaded Rem, including descendants included in `rems`.
+
+The report is `{ok, complete, errors, rules}`. `complete` and `errors` come from the inspect
+document (`errors` also lists each Rem's field errors). `ok` is false when a rule fails,
+`complete` is false, or `errors` is non-empty. `--strict` exits 1 in that case.
+Each rule result is `{id, status: pass|fail, actual, expected}`.
+
+## powerup get
+
+Read one powerup slot by code. Read-only.
+
+```bash
+remnote-cli powerup get --rem REM_ID --powerup sp --slot f
+remnote-cli powerup get --rem REM_ID --powerup sp --slot q --as richtext
+```
+
+| Option | Description |
+| --- | --- |
+| `--rem <id>` | Rem that carries the slot |
+| `--powerup <code>` | Powerup code, such as `sp` |
+| `--slot <code>` | Slot code or name, such as `q`, `Query`, `f`, or `Filter` |
+| `--as <kind>` | `value` (default), `richtext`, or `rem` |
+
+SDK 0.0.46 looks up built-in slots by name (`Filter`) and drops a raw code (`f`), which the
+host reports as `powerupSlot parameter: Required`. The CLI maps a known code to that name
+and calls `rem.getPowerupProperty`. The plugin passes the arguments through unchanged.
+A name, a custom powerup, or an unknown code is sent as given, and the host error is returned.
+`getPowerupByCode("sp")` can return undefined for a built-in powerup; read the slot on the
+Rem that carries it. This command does not open RemNote's local database.
+
 ## review-stats
 
 Read native RemNote review facts from exactly one scope:

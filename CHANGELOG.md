@@ -9,6 +9,22 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `inspect [ids...]` reads generic Rem state in one bridge session: rich-text element
+  features (including `code:true` blocks), markdown, card identity hash, tag and parent
+  chains, and search-portal query/filter slots. `--fields` and `--summary` limit the read.
+  `assert --file` and `inspect --expect` evaluate a small generic rule language.
+  Rule failures exit 0 unless `--strict`.
+- `powerup get --rem ID --powerup CODE --slot CODE` reads a slot by code or name.
+  The CLI maps a known built-in slot code to the SDK slot name (`f` → `Filter`, `q` → `Query`)
+  and calls `getPowerupProperty`. Unknown codes are passed through. The plugin does not translate them.
+- `assert` and `inspect --expect` report the read's `complete` flag and read errors.
+  `ok` is false when a rule fails, the read is incomplete, or any read error is present.
+  `--strict` is what makes that a non-zero exit.
+- Rule paths accept `[*]` to map every array element (`rems[*].isCardItem`, `rems[*].tags[*].name`).
+- `inspect` measures the JSON size once per Rem and overlaps SDK reads in one session
+  (bounded in-flight calls, shared ancestor chains, parallel fields). An unrecognized
+  portal type is `portalType: null` plus `portalTypeRaw`, and does not fail the read.
+  When `complete` is false, top-level `errors` includes each Rem field error.
 - Flashcard answer lines accept one code-block segment, `{"code":"<text>","language":"plaintext"}`.
   `language` is optional and defaults to `plaintext`. Apply stores it as one RichText element
   `{i:"m",code:true,language,text}` and sets `isCardItem` so the line is on the card back.

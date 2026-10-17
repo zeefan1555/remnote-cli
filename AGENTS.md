@@ -7,10 +7,14 @@ repository guidance lives in [the root agent map](../../AGENTS.md).
 CLI commands <-> authenticated loopback WebSocket <-> ../plugin <-> SDK
 ```
 
+## Design principle
+
+The SDK bridge plugin exposes only atomic RemNote SDK capabilities (one SDK method per bridge call, args passed through unchanged). It must not contain composition, translation, workarounds or business logic, and should rarely change. All composite commands, argument normalization (e.g. powerup slot code→name), retries, verification and workflow-specific logic live in the CLI, which composes multiple atomic plugin calls.
+
 ## Ownership And Contracts
 
 - `src/remnote-cli/`: command parsing, output, connection and private state.
-- `src/business/`: note/card/wiki/todo workflows, inspection and recovery.
+- `src/business/`: note/card/wiki/todo workflows, task inspection, generic state inspection, and recovery.
 - `src/schemas/`: Zod input/output contracts.
 - `../plugin`: generated official SDK allowlist, serialization,
   live permissions and exact KB binding. Native transactions are disabled by shared ADR 0003.
