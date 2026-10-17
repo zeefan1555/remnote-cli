@@ -13,7 +13,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 async function directory() {
-  const dir = await mkdtemp(join(tmpdir(), 'remnote-direct-state-'));
+  const dir = await mkdtemp(join(tmpdir(), 'remnote-cli-state-'));
   directories.push(dir);
   return dir;
 }

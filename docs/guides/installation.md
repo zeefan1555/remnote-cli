@@ -1,7 +1,8 @@
 # Installation
 
-The direct CLI and SDK Bridge are source candidates. No registry or marketplace
-publication is assumed.
+Install this CLI from source. Install the companion plugin, RemNote CLI Bridge,
+from the RemNote marketplace. Its repository is
+[remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge).
 
 ## CLI
 
@@ -37,30 +38,31 @@ remnote-cli read REM_ID --content-mode structured --depth 1
 
 The integration wrapper is for development suites, not a daily command launcher.
 No shell alias, secondary command name or runtime compatibility fallback is used.
-The npm link points at this repository, so subsequent `npm run build` runs in
-`packages/cli` update the same installed command without relinking the plugin.
+The npm link points at this repository, so subsequent `npm run build` runs here
+update the same installed command without relinking the plugin.
 
 ## Plugin
 
-Version 0.24.1 requires rebuilding and reloading the existing plugin assets as
-well as the CLI. Confirm `status.pluginVersion`, `status.sdkCatalogHash` and
+Install **RemNote CLI Bridge** from the RemNote marketplace. The manifest id and
+npm name are `remnote-cli-bridge`; the display name is RemNote CLI Bridge.
+Plugin version 0.25.0 is compatible with this CLI. A build that still reports
+`zeefan-remnote-sdk-bridge` or RemNote SDK Bridge is accepted during the rename.
+Confirm `status.pluginVersion`, `status.pluginId`, `status.sdkCatalogHash` and
 `status.nativeTransactions === false`; the installed manifest panel alone does
 not prove which JavaScript is running. Atomic update/replacement/property/TODO
 commands are unavailable until native abort is safe. Additive writes and
-journaled flashcards remain available with exact readback and recovery records.
+journaled tasks remain available with exact readback and recovery records.
 
-Build and load the companion SDK Bridge from source using its
-[local plugin guide](../../../plugin/docs/guides/development-run-plugin-locally.md).
-Install independent plugin ID `zeefan-remnote-sdk-bridge` in RemNote desktop.
-Enter `http://localhost:8090/` in its local-plugin installer, not the numeric IP;
+Source builds of the plugin come from
+[remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge).
+For a local installer, enter `http://localhost:8090/`, not the numeric IP, and
 verify that it appears under **Build** with that local URL and SDK settings.
 Do not reuse the old MCP plugin installation: a JavaScript reload cannot refresh
-its stored manifest permissions. The approved local deployment keeps a static
-asset host at `127.0.0.1:8090` running through a user LaunchAgent. It does not
-execute business calls or hold credentials, and it requires no upload/publication.
-The local deployment stores `dist/` and the existing `serve-dist.js` under
-`~/.local/share/remnote-sdk-bridge/`; its LaunchAgent label is
-`com.zeefan.remnote-sdk-bridge`. No old source repository is needed to serve it.
+its stored manifest permissions. A local static asset host at `127.0.0.1:8090`
+can run through a user LaunchAgent. It does not execute business calls or hold
+credentials. That deployment stores plugin `dist/` and `serve-dist.js` under
+`~/.local/share/remnote-cli-bridge/`; its LaunchAgent label is
+`com.zeefan.remnote-cli-bridge`.
 
 In RemNote plugin settings:
 
@@ -86,7 +88,7 @@ printing another token; enter it only in the new plugin's settings.
 The maintainer separately authorized local registration after the normal two-card
 write/readback/replay test passed. Native transaction abort remains failed; local
 use does not establish full acceptance. See the shared
-[ADR amendment](../../../../docs/adr/0001-direct-cli.md#local-command-registration-amendment).
+[ADR amendment](../adr/0001-direct-cli.md#local-command-registration-amendment).
 Keep the new CLI/plugin as defaults, disable the old plugin and old MCP autostart.
 Restart the static host and RemNote, then directly invoke the installed command
 to verify exact test IDs again. On installation/smoke failure, stop and restore

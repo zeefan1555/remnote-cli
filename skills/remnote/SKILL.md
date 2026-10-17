@@ -1,7 +1,7 @@
 ---
 name: remnote
 description: Search, read, and write RemNote through remnote-cli. Require confirm write before mutating commands.
-homepage: https://github.com/zeefan1555/remnote-direct
+homepage: https://github.com/zeefan1555/remnote-cli
 metadata:
   openclaw:
     requires:
@@ -16,7 +16,7 @@ IDs from an unconfigured template.
 
 ## Preconditions
 
-- RemNote desktop is open with independent plugin `zeefan-remnote-sdk-bridge` enabled.
+- RemNote desktop is open with RemNote CLI Bridge (`remnote-cli-bridge`) enabled. A plugin that still reports `zeefan-remnote-sdk-bridge` is accepted during the rename.
 - CLI and plugin are paired with a private token for the exact intended KB.
 - Official content and `KnowledgeBaseInfo: Read` permissions are granted.
 - Run `remnote-cli status` and verify plugin ID, KB, protocol, SDK and live write flags.
@@ -88,7 +88,7 @@ methods are unsupported; do not substitute arbitrary JavaScript.
 
 ## Authorized Writes
 
-First check [ADR 0003](../../../../docs/adr/0003-disable-unsafe-native-transactions.md):
+First check [ADR 0003](../../docs/adr/0003-disable-unsafe-native-transactions.md):
 native transactions are disabled. Atomic update/replace/property/TODO apply commands
 are unavailable. Additive create/journal/insert commands retain per-attempt recovery
 keys and known IDs on failure; they are not atomic and must not be blindly replayed.

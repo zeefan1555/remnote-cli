@@ -1,29 +1,37 @@
 # Agent Map
 
-This package contains `remnote-cli` in the RemNote Direct repository. Shared
-repository guidance lives in [the root agent map](../../AGENTS.md).
+This repository is `remnote-cli`. The companion plugin is
+[RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge)
+(manifest id `remnote-cli-bridge`).
 
 ```text
-CLI commands <-> authenticated loopback WebSocket <-> ../plugin <-> SDK
+CLI commands <-> authenticated loopback WebSocket <-> RemNote CLI Bridge <-> SDK
 ```
 
 ## Design principle
 
-The SDK bridge plugin exposes only atomic RemNote SDK capabilities (one SDK method per bridge call, args passed through unchanged). It must not contain composition, translation, workarounds or business logic, and should rarely change. All composite commands, argument normalization (e.g. powerup slot code→name), retries, verification and workflow-specific logic live in the CLI, which composes multiple atomic plugin calls.
+The plugin exposes only atomic RemNote SDK capabilities (one SDK method per bridge call, args passed through). All composition, argument normalization, verification and workflow logic lives in this CLI. CLI commands stay generic (no flashcard/workflow-specific concepts).
+
+The bridge must not contain composition, translation, workarounds or business logic, and should rarely change. The CLI composes multiple atomic plugin calls.
 
 ## Ownership And Contracts
 
 - `src/remnote-cli/`: command parsing, output, connection and private state.
-- `src/business/`: note/card/wiki/todo workflows, task inspection, generic state inspection, and recovery.
+- `src/business/`: composition, inspection, task journals and recovery.
 - `src/schemas/`: Zod input/output contracts.
-- `../plugin`: generated official SDK allowlist, serialization,
-  live permissions and exact KB binding. Native transactions are disabled by shared ADR 0003.
+- [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge): generated official SDK allowlist, serialization, live permissions and exact KB binding. Native transactions are disabled by ADR 0003.
 - [Architecture](docs/architecture.md) and [approved ADR](docs/adr/0001-direct-cli.md).
 
 Business changes belong in the CLI and must not require a plugin update when the
 needed SDK capability already exists. No MCP transport, proxy, daemon, remote
 endpoint, compatibility shim or product-version matching is maintained.
 Callbacks, private SDK methods and persistent SDK object handles are not supported.
+
+Handshake accepts plugin id `remnote-cli-bridge` and, during the rename, the
+previous id `zeefan-remnote-sdk-bridge`. The same transition applies to the
+display names `RemNote CLI Bridge` and `RemNote SDK Bridge` when the plugin
+sends them. Plugin version `0.25.0` is accepted. Compatibility is protocol 1
+plus the SDK catalog, not matching product versions.
 
 Task plans default to preview, require current hashes for patches and use durable
 metadata-only journals scoped to the paired KB. Unknown write outcomes must not
@@ -61,7 +69,7 @@ never stops listeners or starts a daemon. Identify an occupied port before actin
 under explicit full-operation authority, record, stop and later restore only a
 confirmed project-owned obsolete companion. Never stop unrelated services.
 The maintainer explicitly requested replacing the daily command with this build.
-Successful local registration keeps the independent SDK plugin and direct CLI
+Successful local registration keeps the RemNote CLI Bridge plugin and direct CLI
 installed, the old plugin disabled and MCP autostart disabled; installation/smoke
 failure restores the recorded prior environment. Native rollback remains failed,
 not waived as a test result. Record source/build hashes and restart smoke evidence.
@@ -75,15 +83,14 @@ access the RemNote database directly. Unit mocks are not native persistence proo
 
 Keep this map, the [CLI reference](docs/guides/remnote-cli-command-reference.md),
 [read receipts](docs/guides/read-receipts.md), [task plans](docs/guides/task-plans.md)
-and [agent skill](skills/remnote/SKILL.md) aligned with behavior. Update both packages'
-contracts/changelogs for protocol changes. Record functional and documentation
-changes in `CHANGELOG.md`.
+and [agent skill](skills/remnote/SKILL.md) aligned with behavior. Protocol changes
+belong in this repository and in
+[remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge). Record
+functional and documentation changes in `CHANGELOG.md`.
 
-Use the root quality/build commands and shared CI for changes in this repository.
-The retained [fork adoption workflow](../plugin/docs/workflows/pr-validation-and-adoption.md)
-is historical guidance for the original forks, not this repository's delivery
-contract; do not modify the existing forks or their PRs. Commit and push to this
-independent repository are now explicitly authorized. Package publication is not
-authorized. Local registration is separately authorized by the shared ADR amendment;
-it does not establish full native acceptance. Preserve dirty work, upstream licenses
-and existing trailers.
+Use this repository's quality and build commands and its GitHub Actions CI.
+The original fork adoption workflow is historical guidance for the original forks,
+not this repository's delivery contract; do not modify those forks or their PRs.
+Commit and push to this repository are authorized. Package publication is not
+authorized. Local registration is separately authorized by the ADR amendment;
+it does not establish full native acceptance. Preserve dirty work and upstream licenses.

@@ -1,12 +1,12 @@
-# remnote-direct 验证地图
+# remnote-cli 验证地图
 
-本目录是验证 remnote-cli 用户可见行为的维护源。先读本索引，再按 feature 文件操作。
+本目录是验证 remnote-cli 用户可见行为的维护源。先读本索引，再按 feature 文件操作。插件仓库是 [remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge)。
 
 ## 基线
 
-- 仓库根运行 `.cursor/skills/verify-remnote-direct/scripts/verify.sh`；node ≥ 22.13。
+- 仓库根运行 `.cursor/skills/verify-remnote-cli/scripts/verify.sh`；node ≥ 22.13。
 - 临时 `REMNOTE_CLI_CONFIG` 与空闲回环端口，不碰真实配对文件和已安装的 remnote-cli。
-- 用 `packages/cli/dist/remnote-cli/index.js` 驱动。
+- 用 `dist/remnote-cli/index.js` 驱动。
 
 ## 证明与跳过
 

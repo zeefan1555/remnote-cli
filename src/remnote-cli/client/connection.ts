@@ -5,6 +5,9 @@ import type { ConnectionConfig } from './connection-config.js';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+/** Current RemNote CLI Bridge manifest id. The previous id stays valid during the rename. */
+export const ACCEPTED_PLUGIN_IDS = ['remnote-cli-bridge', 'zeefan-remnote-sdk-bridge'] as const;
+export const ACCEPTED_PLUGIN_NAMES = ['RemNote CLI Bridge', 'RemNote SDK Bridge'] as const;
 export const IdentitySchema = z
   .object({
     protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -15,6 +18,8 @@ export const IdentitySchema = z
     knowledgeBaseName: z.string(),
     acceptWriteOperations: z.boolean(),
     acceptReplaceOperation: z.boolean(),
+    pluginId: z.enum(ACCEPTED_PLUGIN_IDS).optional(),
+    pluginName: z.enum(ACCEPTED_PLUGIN_NAMES).optional(),
   })
   .strict();
 export type BridgeIdentity = z.infer<typeof IdentitySchema>;
@@ -125,7 +130,7 @@ export class Connection {
               const parsed = IdentitySchema.safeParse(message.identity);
               if (!parsed.success)
                 throw new Error(
-                  'Unsupported plugin handshake. Load the paired SDK Bridge using direct protocol 1.'
+                  'Unsupported plugin handshake. Load the paired RemNote CLI Bridge using direct protocol 1.'
                 );
               const identity = parsed.data;
               if (

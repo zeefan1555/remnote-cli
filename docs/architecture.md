@@ -45,7 +45,7 @@ factories are materialized with the native `value()` method within one call.
 
 SDK calls have a 15-second default deadline. Native transactions are disabled because
 SDK 0.0.46 does not acknowledge a rejected callback and can block the editor. See
-[ADR 0003](../../../docs/adr/0003-disable-unsafe-native-transactions.md) for the
+[ADR 0003](adr/0003-disable-unsafe-native-transactions.md) for the
 additive-write and rejected atomic-command boundary. Timeout or disconnect does
 not prove cancellation or rollback. No running command reconnects or replays writes
 automatically. New plugin sessions wait only for prior individual SDK calls to settle.

@@ -1,6 +1,6 @@
 # Agent Setup Validation
 
-Use the installed direct CLI and paired SDK Bridge, not an MCP client.
+Use the installed direct CLI and paired RemNote CLI Bridge, not an MCP client.
 
 1. Run `remnote-cli status`; verify the intended KB, protocol and write-policy flags.
 2. Run `remnote-cli sdk capabilities --status supported --mode read`.

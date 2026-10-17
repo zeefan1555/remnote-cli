@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# verify-remnote-direct：构建并驱动本仓库的 remnote-cli（packages/cli），离线、隔离配置，不连真实 RemNote。
+# verify-remnote-cli：构建并驱动本仓库的 remnote-cli，离线、隔离配置，不连真实 RemNote。
 # 用法: verify.sh [all|build|unit|cli|pair|status] [证据目录]
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
-CLI="$ROOT/packages/cli"
+CLI="$ROOT"
 MODE="${1:-all}"
 ER="${VERIFY_EVIDENCE_ROOT:-/workspace/verify-evidence}"; [ -w "$(dirname "$ER")" ] || ER="$HOME/verify-evidence"
-EV="${2:-$ER/remnote-direct/$(date +%Y%m%d-%H%M%S)}"
+EV="${2:-$ER/remnote-cli/$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$EV"; chmod 700 "$EV"
 # 需要 node >= 22.13：优先 REMNOTE_NODE_BIN 目录，其次 box 上的便携 node24，最后 PATH 里的 node
 for d in "${REMNOTE_NODE_BIN:-}" "$HOME/.local/opt/node-v24.21.0-linux-x64/bin"; do [ -n "$d" ] && [ -x "$d/node" ] && { export PATH="$d:$PATH"; break; }; done
@@ -38,7 +38,7 @@ case "$MODE" in
   *) echo "未知模式 $MODE"; exit 2 ;;
 esac
 outcome=passed; [ ${#fails[@]} = 0 ] || outcome=failed
-printf '{"repo":"remnote-direct","head":"%s","mode":"%s","outcome":"%s","failed":"%s","node":"%s","time":"%s"}\n' \
+printf '{"repo":"remnote-cli","head":"%s","mode":"%s","outcome":"%s","failed":"%s","node":"%s","time":"%s"}\n' \
   "$(git -C "$ROOT" rev-parse HEAD)" "$MODE" "$outcome" "${fails[*]:-}" "$(node --version)" "$(date -Iseconds)" >"$EV/manifest.json"
 echo "outcome=$outcome evidence=$EV"
 [ "$outcome" = passed ]

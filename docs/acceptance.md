@@ -77,7 +77,7 @@ open; this delivery authorization does not establish a passing live result.
 
 The independent repository is private and its default branch is `master`.
 Commit `9ecf91b9c2bfedd04db56ff198ed19ee279b9d3f` was pushed successfully.
-Its first [CI run](https://github.com/zeefan1555/remnote-direct/actions/runs/36986337235)
+Its first [CI run](https://github.com/zeefan1555/remnote-cli/actions)
 passed both plugin jobs, but both CLI jobs failed during dependency installation:
 15 CLI lockfile tarballs pointed at a developer's private npm mirror.
 
@@ -109,7 +109,7 @@ remained blocked. The later normal-path test and local registration below do not
 repair or pass native abort handling.
 
 The repaired commit `25770b06b820ebb1e0e44307bad6970d3b94d003` passed
-all four [remote CI jobs](https://github.com/zeefan1555/remnote-direct/actions/runs/36987608092).
+all four remote CI jobs on [zeefan1555/remnote-cli](https://github.com/zeefan1555/remnote-cli).
 Post-commit local quality and production builds passed again. A subsequent
 root-command check found that npm forwards its parent registry into child npm
 commands, overriding package-local settings. The repository root therefore also
@@ -154,14 +154,14 @@ privately under `.local/native-write-20261002.u2bJVA/`.
 The maintainer then explicitly requested direct local command use, replacement of
 the old CLI, and keeping CLI/plugin together in this repository. The existing
 `link-cli.sh` installed and tested this source build; `remnote-cli` in the existing
-local npm prefix now resolves to `packages/cli/dist/remnote-cli/index.js` here.
+local npm prefix now resolves to `dist/remnote-cli/index.js` here.
 The old global MCP packages/command links were removed, old MCP autostart disabled,
 and old source repositories preserved. A stale skill-sync job with a missing
 script was also disabled; no global skills were changed.
 
 The existing static host and 12 verified plugin assets were copied to
-`~/.local/share/remnote-sdk-bridge/` and are served by the user LaunchAgent
-`com.zeefan.remnote-sdk-bridge` on `127.0.0.1:8090`. It serves files only and holds
+`~/.local/share/remnote-cli-bridge/` and are served by the user LaunchAgent
+`com.zeefan.remnote-cli-bridge` on `127.0.0.1:8090`. It serves files only and holds
 no pairing credentials. All 123 CLI and 12 plugin build files match the tested
 candidate hashes; this local registration changes documentation, not runtime code.
 

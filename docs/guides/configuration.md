@@ -14,7 +14,7 @@ The default path is `$XDG_CONFIG_HOME/remnote-cli/connection.json`, or
 file. It must be a regular, non-symlink file, at most 8 KiB, with no group/other
 permission bits. Pairing refuses to overwrite it.
 
-Enter the token only in the trusted SDK Bridge plugin. The plugin never returns
+Enter the token only in the trusted RemNote CLI Bridge plugin. The plugin never returns
 the token through SDK calls and cannot change its own security settings over RPC.
 
 ## CLI Overrides

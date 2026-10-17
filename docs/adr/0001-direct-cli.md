@@ -1,4 +1,4 @@
-# Direct CLI and SDK Bridge
+# Direct CLI and RemNote CLI Bridge
 
 Status: approved in the maintainer conversation, 2026-10-02.
 
@@ -41,8 +41,9 @@ still require a plugin update; business changes do not.
 Risk: high (transport, authorization and write ownership).
 
 Run focused negative/lifecycle tests, moved business regression tests, complete
-quality checks and production builds in both packages. Repository topology is
-amended by [One Repository, Two Packages](0002-single-repository.md). Through the guarded
+quality checks and production builds in this CLI and in
+[remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge). Repository
+topology is amended by [CLI And Plugin Repositories](0002-single-repository.md). Through the guarded
 integration wrapper, load the candidate plugin, create two real flashcards, verify
 native cards and text by exact IDs, replay the same key without duplicates, exercise
 KB/auth/write/timeout boundaries, and record cold-connect/task durations. Verify a
@@ -50,15 +51,17 @@ CLI-only business addition against unchanged plugin assets.
 
 ## Independent Local Installation
 
-The implementation plan approved on 2026-10-02 assigns the independent plugin ID
-`zeefan-remnote-sdk-bridge` and name `RemNote SDK Bridge`. Do not reuse the old
-plugin installation: reloading JavaScript does not refresh installed scopes.
+The plugin id is `remnote-cli-bridge` and the display name is `RemNote CLI Bridge`
+(npm name `remnote-cli-bridge`). Handshake still accepts the previous id
+`zeefan-remnote-sdk-bridge` and name `RemNote SDK Bridge` during the rename.
+Plugin version 0.25.0 is accepted. Do not reuse the old MCP plugin installation:
+reloading JavaScript does not refresh installed scopes.
 The desktop installation must grant both `All: ReadCreateModifyDelete` and
 `KnowledgeBaseInfo: Read`. Status and the sidebar expose plugin identity,
 protocol, SDK, KB and authorization failures, never the pairing token.
 
 Local loading uses the existing static asset host on `127.0.0.1:8090`, serving a
-verified copy under `~/.local/share/remnote-sdk-bridge/`. A user LaunchAgent keeps
+verified copy under `~/.local/share/remnote-cli-bridge/`. A user LaunchAgent keeps
 this file-only host available; it is not a business daemon or an MCP endpoint.
 The existing private CLI pairing config is reused without logging its token.
 
