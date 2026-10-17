@@ -10,7 +10,18 @@ import {
   type InspectionCheck,
   type ScopeExpectation,
 } from './inspection.js';
-export type TextSegment = string | { remId: string } | { pageKey: string };
+export type CodeSegment = { code: string; language?: string };
+export type TextSegment = string | { remId: string } | { pageKey: string } | CodeSegment;
+export interface AnswerLineReceipt {
+  key: string;
+  remId: string;
+  isCardItem: boolean;
+  hasCardStructure: boolean;
+  /** False until the post-write card-identity check passes. */
+  verified: boolean;
+  /** Set only when that check fails. Same text as the receipt error. */
+  error?: string;
+}
 export interface AnswerPatch {
   key: string;
   cardRemId: string;
@@ -82,6 +93,8 @@ export interface TaskReceipt {
   checks: InspectionCheck[];
   readWindow: { startedAt: string; finishedAt: string };
   errors: Array<{ remId?: string; code: string; message: string }>;
+  /** Present after flashcards apply writes or patches answer lines. */
+  answerLines?: AnswerLineReceipt[];
 }
 interface Journal {
   schemaVersion: 1;
@@ -139,7 +152,11 @@ function key(v: unknown, max = 64): asserts v is string {
 function hash(v: unknown): asserts v is string {
   if (typeof v !== 'string' || !/^[a-f0-9]{64}$/.test(v)) throw new Error('Expected SHA-256 hash');
 }
-function segments(v: unknown, pages?: Set<string>): asserts v is TextSegment[] {
+const CODE_LANGUAGE = /^[A-Za-z0-9_+#.-]{1,64}$/;
+function isCodeSegment(s: TextSegment): s is CodeSegment {
+  return typeof s === 'object' && 'code' in s;
+}
+function segments(v: unknown, pages?: Set<string>, allowCode = false): asserts v is TextSegment[] {
   array(v, 100, 1);
   for (const s of v) {
     if (typeof s === 'string') {
@@ -153,9 +170,23 @@ function segments(v: unknown, pages?: Set<string>): asserts v is TextSegment[] {
         keys(s, ['pageKey']);
         key(s.pageKey);
         if (!pages.has(s.pageKey)) throw new Error('Unknown pageKey');
+      } else if (allowCode && 'code' in s) {
+        keys(s, ['code', 'language']);
+        if (typeof s.code !== 'string' || s.code.length < 1 || s.code.length > 10000)
+          throw new Error('Invalid code block');
+        if (
+          s.language !== undefined &&
+          (typeof s.language !== 'string' || !CODE_LANGUAGE.test(s.language))
+        )
+          throw new Error('Invalid code language');
       } else throw new Error('Expected literal text or exact native reference');
     }
   }
+}
+function answerLine(v: unknown): asserts v is TextSegment[] {
+  segments(v, undefined, true);
+  if (v.length !== 1 && v.some((s) => isCodeSegment(s)))
+    throw new Error('Code-block answer line must be a single segment');
 }
 const LITERAL_REF_ERROR =
   'Plain-string question contains literal [[ or ]]; pass question as TextSegment[] with {"remId":"<title Rem ID>"} for each reference';
@@ -220,7 +251,7 @@ export function validateTaskPlan(
         unique(c.key);
         question(c.question);
         array(c.answer, 100, 1);
-        c.answer.forEach((v) => segments(v));
+        c.answer.forEach((v) => answerLine(v));
         count += 1 + c.answer.length;
       }
     }
@@ -290,7 +321,8 @@ export function validateTaskPlan(
       string(patch.cardRemId);
       string(patch.remId);
       hash(patch.expectedTextHash);
-      segments(patch.text, pages);
+      if (kind === 'flashcards') answerLine(patch.text);
+      else segments(patch.text, pages);
     }
     count += 2 * p.answerPatches.length;
   }
@@ -545,7 +577,11 @@ export class TaskOperations {
     const out: RichTextInterface = [];
     for (const p of text) {
       if (typeof p === 'string') out.push(p);
-      else {
+      else if (isCodeSegment(p)) {
+        if (text.length !== 1)
+          throw new TaskError('conflict', 'Code-block answer line must be a single segment');
+        out.push({ i: 'm', text: p.code, code: true, language: p.language ?? 'plaintext' });
+      } else {
         const id = 'remId' in p ? p.remId : j.ids[`page:${p.pageKey}`];
         if (!id) throw new TaskError('incomplete', 'Unresolved page binding');
         const target = await this.rem(id);
@@ -919,15 +955,92 @@ export class TaskOperations {
       });
     }
   }
+  private codeLine(line: TextSegment[]): CodeSegment | undefined {
+    return line.length === 1 && isCodeSegment(line[0]) ? line[0] : undefined;
+  }
+  private async noteAnswer(
+    receipt: TaskReceipt,
+    key: string,
+    id: string,
+    line: TextSegment[]
+  ): Promise<void> {
+    const code = this.codeLine(line);
+    let rem = await this.rem(id);
+    if (code) {
+      const expected: RichTextInterface = [
+        { i: 'm', text: code.code, code: true, language: code.language ?? 'plaintext' },
+      ];
+      if (!same(rem.text, expected))
+        throw new TaskError('incomplete', 'Code-block answer readback mismatch', id);
+      if (!(await rem.isCardItem())) {
+        await this.mutate(() => rem.setIsCardItem(true));
+        rem = await this.rem(id);
+        if (!(await rem.isCardItem()) || !same(rem.text, expected))
+          throw new TaskError('incomplete', 'Code-block answer is not a card item', id);
+      }
+    }
+    // Plain text, including a code answer patched back to text, keeps its current card-item flag.
+    const isCardItem = await rem.isCardItem();
+    (receipt.answerLines ??= []).push({
+      key,
+      remId: id,
+      isCardItem,
+      hasCardStructure: hasCardStructure(rem.text, rem.backText, isCardItem),
+      verified: false,
+    });
+  }
+  private async cardIdentityHash(cardId: string): Promise<string> {
+    return contentHash(canonical(await this.cardFacts(await this.rem(cardId))));
+  }
+  private async assertCardIdentity(cardId: string, before: string): Promise<void> {
+    if ((await this.cardIdentityHash(cardId)) !== before)
+      throw new TaskError(
+        'incomplete',
+        'Card identity or history changed while writing an answer line',
+        cardId
+      );
+  }
+  private markAnswerLine(
+    receipt: TaskReceipt,
+    key: string,
+    verified: boolean,
+    error?: string
+  ): void {
+    const entry = receipt.answerLines?.find((line) => line.key === key);
+    if (!entry) return;
+    entry.verified = verified;
+    if (error) entry.error = error;
+    else delete entry.error;
+  }
+  private async guardAnswerLine(
+    receipt: TaskReceipt,
+    key: string,
+    cardId: string,
+    before: string
+  ): Promise<void> {
+    try {
+      await this.assertCardIdentity(cardId, before);
+    } catch (error) {
+      this.markAnswerLine(
+        receipt,
+        key,
+        false,
+        error instanceof Error ? error.message : String(error)
+      );
+      throw error;
+    }
+    this.markAnswerLine(receipt, key, true);
+  }
   private async patchAnswers(
     patches: AnswerPatch[],
     j: Journal,
     save: () => Promise<void>,
-    receipt: TaskReceipt
+    receipt: TaskReceipt,
+    capture: boolean
   ): Promise<void> {
     for (const p of patches) {
       const card = await this.rem(p.cardRemId),
-        before = await contentHash(canonical(await this.cardFacts(card)));
+        before = await this.cardIdentityHash(card._id);
       j.cardBaselines[card._id] ??= before;
       if (j.cardBaselines[card._id] !== before)
         throw new TaskError('conflict', 'Card identity or review facts changed', card._id);
@@ -942,12 +1055,12 @@ export class TaskOperations {
         p.cardRemId,
         false
       );
-      if ((await contentHash(canonical(await this.cardFacts(await this.rem(card._id))))) !== before)
-        throw new TaskError(
-          'incomplete',
-          'Card identity or history changed during answer patch',
-          card._id
-        );
+      await this.assertCardIdentity(card._id, before);
+      if (capture) {
+        const key = `patch:${p.key}`;
+        await this.noteAnswer(receipt, key, p.remId, p.text);
+        await this.guardAnswerLine(receipt, key, card._id, before);
+      }
       await this.facts([p.cardRemId, p.remId], receipt);
     }
   }
@@ -1128,13 +1241,19 @@ export class TaskOperations {
           j,
           save
         );
-        for (let n = 0; n < cards[i].answer.length; n++)
+        for (let n = 0; n < cards[i].answer.length; n++) {
+          const before = await this.cardIdentityHash(bound.cards[i]._id);
           await this.createdText(
             bound.answers[i][n]._id,
             await this.richText(cards[i].answer[n], j),
             j,
             save
           );
+          await this.assertCardIdentity(bound.cards[i]._id, before);
+          const key = `answer:${cards[i].key}:${n}`;
+          await this.noteAnswer(receipt, key, bound.answers[i][n]._id, cards[i].answer[n]);
+          await this.guardAnswerLine(receipt, key, bound.cards[i]._id, before);
+        }
       }
       if (cards.length > 1) {
         await this.createdText(bound.root._id, [p.title!], j, save);
@@ -1188,7 +1307,7 @@ export class TaskOperations {
       await save();
       await this.facts(ids, receipt);
     }
-    await this.patchAnswers(p.answerPatches ?? [], j, save, receipt);
+    await this.patchAnswers(p.answerPatches ?? [], j, save, receipt, true);
     for (const id of p.reusedCardRemIds ?? []) {
       this.add(j, 'reused', `reuse:${id}`, id);
       await this.facts([id], receipt);
@@ -1346,7 +1465,7 @@ export class TaskOperations {
       }
       await save();
     }
-    await this.patchAnswers(p.answerPatches ?? [], j, save, receipt);
+    await this.patchAnswers(p.answerPatches ?? [], j, save, receipt, false);
     const activity = [...j.created, ...j.updated].some((e) =>
       /^(page|node|index|aliases):/.test(e.key)
     );

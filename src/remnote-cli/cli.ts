@@ -1,3 +1,4 @@
+import { registerBatchCommand } from './commands/batch.js';
 import { registerCompositeCommands } from './commands/composite.js';
 import { registerTaskCommands } from './commands/task.js';
 import { Command } from 'commander';
@@ -74,6 +75,7 @@ export function createProgram(version: string): Command {
   registerReadCommand(program);
   registerCompositeCommands(program);
   registerTaskCommands(program);
+  registerBatchCommand(program, version);
   registerReviewStatsCommand(program);
   registerOutlineCommand(program);
   registerTodoCommand(program);

@@ -5,6 +5,8 @@ import { RemAdapter } from '../../../src/business/rem-adapter';
 import { contentHash } from '../../../src/business/content-hash';
 import { verifyScope } from '../../../src/business/inspection';
 import type { FlashcardsPlan, WikiPlan, TaskReceipt } from '../../../src/business/task-operations';
+import { FlashcardsPlanSchema } from '../../../src/schemas/task-schemas';
+import { summarizeReceipt } from '../../../src/remnote-cli/output/receipt-summary';
 import { MockRem, MockCard, MockRemNotePlugin } from '../../helpers/business-mocks';
 
 function adapter(plugin: MockRemNotePlugin): RemAdapter {
@@ -1208,5 +1210,298 @@ describe('immediate native reference proof', () => {
     expect(out.errors[0].code).toBe('incomplete');
     expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
     expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+  });
+});
+
+describe('code-block flashcard answers', () => {
+  it('stores a multiline code answer as one card item and reports it', async () => {
+    const f = await fixture();
+    const code = 'alpha\nbeta';
+    const plan: FlashcardsPlan = {
+      schemaVersion: 1,
+      dailyRemId: 'daily',
+      homeRootId: 'home',
+      tagRemId: 'tag',
+      newCards: [
+        {
+          key: 'code',
+          question: 'Show the snippet',
+          answer: [[{ code }], ['plain line']],
+        },
+      ],
+    };
+    expect(FlashcardsPlanSchema.parse(plan)).toMatchObject({
+      newCards: [{ answer: [[{ code }], ['plain line']] }],
+    });
+    const setter = vi.spyOn(MockRem.prototype, 'setIsCardItem');
+    const result = await f.adapter.applyFlashcards(request(plan, 'code-batch'));
+    success(result);
+    const codeId = result.ids['answer:code:0'];
+    const plainId = result.ids['answer:code:1'];
+    const codeRem = await rem(f, codeId);
+    const plainRem = await rem(f, plainId);
+    expect(codeRem.text).toEqual([{ i: 'm', text: code, code: true, language: 'plaintext' }]);
+    expect(await codeRem.isCardItem()).toBe(true);
+    expect(plainRem.text).toEqual(['plain line']);
+    expect(await plainRem.isCardItem()).toBe(false);
+    expect(setter).toHaveBeenCalledTimes(1);
+    expect(result.answerLines).toEqual([
+      {
+        key: 'answer:code:0',
+        remId: codeId,
+        isCardItem: true,
+        hasCardStructure: true,
+        verified: true,
+      },
+      {
+        key: 'answer:code:1',
+        remId: plainId,
+        isCardItem: false,
+        hasCardStructure: false,
+        verified: true,
+      },
+    ]);
+    expect(summarizeReceipt(result as unknown as Record<string, unknown>).answerLines).toEqual(
+      result.answerLines
+    );
+    expect(result).not.toHaveProperty('answerLines', undefined);
+  });
+
+  it('patches an answer into a card-item code block with an explicit language', async () => {
+    const f = await fixture();
+    const cards = await f.adapter.applyFlashcards(request(flashPlan(), 'cards'));
+    success(cards);
+    const answer = await rem(f, cards.ids['answer:a:0']);
+    expect(await answer.isCardItem()).toBe(false);
+    const plan: FlashcardsPlan = {
+      schemaVersion: 1,
+      dailyRemId: 'daily',
+      homeRootId: 'home',
+      tagRemId: 'tag',
+      answerPatches: [
+        {
+          key: 'snippet',
+          cardRemId: cards.ids['card:a'],
+          remId: answer._id,
+          expectedTextHash: await contentHash(answer.text),
+          text: [{ code: 'print(1)\nprint(2)', language: 'python' }],
+        },
+      ],
+    };
+    const result = await f.adapter.applyFlashcards(request(plan, 'patch-code'));
+    success(result);
+    expect(answer.text).toEqual([
+      { i: 'm', text: 'print(1)\nprint(2)', code: true, language: 'python' },
+    ]);
+    expect(await answer.isCardItem()).toBe(true);
+    expect(result.answerLines).toEqual([
+      {
+        key: 'patch:snippet',
+        remId: answer._id,
+        isCardItem: true,
+        hasCardStructure: true,
+        verified: true,
+      },
+    ]);
+  });
+
+  it('does not verify a patch when setIsCardItem changes card identity', async () => {
+    const f = await fixture();
+    const cards = await f.adapter.applyFlashcards(request(flashPlan(), 'cards'));
+    success(cards);
+    const answer = await rem(f, cards.ids['answer:a:0']);
+    vi.spyOn(MockRem.prototype, 'setIsCardItem').mockImplementation(async function (
+      this: MockRem,
+      isCardItem: boolean
+    ) {
+      this.setIsCardItemMock(isCardItem);
+      const parent = await this.getParentRem();
+      parent?.setCardsMock([new MockCard('replaced-card', parent._id, 'forward', 2, [])]);
+    });
+    const result = await f.adapter.applyFlashcards(
+      request(
+        {
+          schemaVersion: 1,
+          dailyRemId: 'daily',
+          homeRootId: 'home',
+          tagRemId: 'tag',
+          answerPatches: [
+            {
+              key: 'snippet',
+              cardRemId: cards.ids['card:a'],
+              remId: answer._id,
+              expectedTextHash: await contentHash(answer.text),
+              text: [{ code: 'print(1)', language: 'python' }],
+            },
+          ],
+        },
+        'identity-shift'
+      )
+    );
+    expect(result.status).toBe('partial');
+    expect(result.complete).toBe(false);
+    expect(result.errors[0]?.message).toBe(
+      'Card identity or history changed while writing an answer line'
+    );
+    expect(result.facts.some((fact) => fact.cardIds.includes('replaced-card'))).toBe(false);
+    expect(result.answerLines).toEqual([
+      {
+        key: 'patch:snippet',
+        remId: answer._id,
+        isCardItem: true,
+        hasCardStructure: true,
+        verified: false,
+        error: 'Card identity or history changed while writing an answer line',
+      },
+    ]);
+  });
+
+  it('does not verify a new card when setIsCardItem changes card identity', async () => {
+    const f = await fixture();
+    vi.spyOn(MockRem.prototype, 'setIsCardItem').mockImplementation(async function (
+      this: MockRem,
+      isCardItem: boolean
+    ) {
+      this.setIsCardItemMock(isCardItem);
+      const parent = await this.getParentRem();
+      parent?.setCardsMock([new MockCard('replaced-card', parent._id, 'forward', 2, [])]);
+    });
+    const result = await f.adapter.applyFlashcards(
+      request(
+        {
+          schemaVersion: 1,
+          dailyRemId: 'daily',
+          homeRootId: 'home',
+          tagRemId: 'tag',
+          newCards: [
+            {
+              key: 'code',
+              question: 'Show the snippet',
+              answer: [['plain first'], [{ code: 'body' }]],
+            },
+          ],
+        },
+        'create-identity'
+      )
+    );
+    expect(result.status).toBe('partial');
+    expect(result.complete).toBe(false);
+    expect(result.errors[0]).toMatchObject({
+      remId: result.ids['card:code'],
+      code: 'incomplete',
+      message: 'Card identity or history changed while writing an answer line',
+    });
+    expect(result.facts.some((fact) => fact.cardIds.includes('replaced-card'))).toBe(false);
+    expect(result.answerLines).toEqual([
+      {
+        key: 'answer:code:0',
+        remId: result.ids['answer:code:0'],
+        isCardItem: false,
+        hasCardStructure: false,
+        verified: true,
+      },
+      {
+        key: 'answer:code:1',
+        remId: result.ids['answer:code:1'],
+        isCardItem: true,
+        hasCardStructure: true,
+        verified: false,
+        error: 'Card identity or history changed while writing an answer line',
+      },
+    ]);
+  });
+
+  it('keeps isCardItem when a code answer is patched back to plain text', async () => {
+    const f = await fixture();
+    const created = await f.adapter.applyFlashcards(
+      request(
+        {
+          schemaVersion: 1,
+          dailyRemId: 'daily',
+          homeRootId: 'home',
+          tagRemId: 'tag',
+          newCards: [
+            {
+              key: 'code',
+              question: 'Show the snippet',
+              answer: [[{ code: 'print(1)', language: 'python' }]],
+            },
+          ],
+        },
+        'code-card'
+      )
+    );
+    success(created);
+    const answer = await rem(f, created.ids['answer:code:0']);
+    expect(await answer.isCardItem()).toBe(true);
+    const result = await f.adapter.applyFlashcards(
+      request(
+        {
+          schemaVersion: 1,
+          dailyRemId: 'daily',
+          homeRootId: 'home',
+          tagRemId: 'tag',
+          answerPatches: [
+            {
+              key: 'plain',
+              cardRemId: created.ids['card:code'],
+              remId: answer._id,
+              expectedTextHash: await contentHash(answer.text),
+              text: ['See the note'],
+            },
+          ],
+        },
+        'back-to-plain'
+      )
+    );
+    success(result);
+    expect(answer.text).toEqual(['See the note']);
+    expect(await answer.isCardItem()).toBe(true);
+    expect(result.answerLines).toEqual([
+      {
+        key: 'patch:plain',
+        remId: answer._id,
+        isCardItem: true,
+        hasCardStructure: true,
+        verified: true,
+      },
+    ]);
+  });
+
+  it('rejects a mixed code-block answer line before writing', async () => {
+    const f = await fixture();
+    const plan: FlashcardsPlan = {
+      ...flashPlan(),
+      newCards: [
+        {
+          key: 'bad',
+          question: 'Question?',
+          answer: [['prefix', { code: 'body', language: 'plaintext' }]],
+        },
+      ],
+      title: undefined,
+    };
+    await expect(f.adapter.applyFlashcards(request(plan, 'bad-code'))).rejects.toThrow(
+      /single segment/
+    );
+    expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when setIsCardItem does not make the code answer a card item', async () => {
+    const f = await fixture();
+    vi.spyOn(MockRem.prototype, 'setIsCardItem').mockImplementation(async () => {});
+    const plan: FlashcardsPlan = {
+      schemaVersion: 1,
+      dailyRemId: 'daily',
+      homeRootId: 'home',
+      tagRemId: 'tag',
+      newCards: [{ key: 'code', question: 'Show the snippet', answer: [[{ code: 'body' }]] }],
+    };
+    const result = await f.adapter.applyFlashcards(request(plan, 'stuck-card-item'));
+    expect(result.status).toBe('partial');
+    expect(result.errors[0].message).toMatch(/not a card item/);
+    const answer = await rem(f, result.ids['answer:code:0']);
+    expect(answer.text).toEqual([{ i: 'm', text: 'body', code: true, language: 'plaintext' }]);
+    expect(await answer.isCardItem()).toBe(false);
   });
 });

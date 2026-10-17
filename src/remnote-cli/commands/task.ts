@@ -8,6 +8,11 @@ import { summarizeReceipt } from '../output/receipt-summary.js';
 const commonHelp = [
   'The file contains the inner plan, not a request envelope. schemaVersion must be 1.',
   'TextSegments = ["literal text", {"remId":"EXACT_ID"}, ...] (1..100 segments).',
+  'A flashcard answer line may instead be one code block: [{"code":"line1\\nline2","language":"plaintext"}]. language is optional and defaults to plaintext.',
+  'That line is stored as one RichText element {i:"m",code:true,language,text} and forced to isCardItem true so it is on the card back.',
+  'Patching a code answer back to plain text keeps isCardItem true and does not call setIsCardItem(false).',
+  'New-card answers and flashcard answer patches hash card facts before the text write and again after noteAnswer. A change throws "Card identity or history changed while writing an answer line" and is not verified.',
+  'Applied flashcard receipts include answerLines: [{key,remId,isCardItem,hasCardStructure,verified,error?}] for each recorded answer line. verified is true only after that second check. A failed check leaves verified false and error set to the same message.',
   'AnswerPatch = {"key":"patch-key","cardRemId":"CARD_REM_ID","remId":"ANSWER_REM_ID","expectedTextHash":"64 lowercase SHA256 hex characters","text":TextSegments}.',
   'Keys: 1..64 ASCII letters/digits/._- and unique across all plan objects/patches.',
   'Idempotency key: 1..128 of the same characters. Plan JSON <=100KiB; IDs <=256 chars.',

@@ -216,7 +216,8 @@ function registerCapabilityGroup(
       if (opts.targetId !== undefined) payload.targetId = opts.targetId as string;
       const args = await readArgs(opts as { argsJson?: string; argsFile?: string });
       if (args !== undefined) payload.args = args;
-      if (program.opts().allowDestructive) payload.allowDestructive = true;
+      if (program.opts().allowDestructive || client.allowsDestructive())
+        payload.allowDestructive = true;
 
       const callResult = await client.execute('sdk_call', payload);
       console.log(formatResult(callResult, format));

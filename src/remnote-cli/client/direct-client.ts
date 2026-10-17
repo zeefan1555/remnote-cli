@@ -51,7 +51,20 @@ export class DirectClient {
   private state?: LocalState;
   private startedAt = performance.now();
   private readonly configPath = connectionConfigPath();
+  private holds = 0;
   constructor(private readonly options: ClientOptions = {}) {}
+
+  /** Keep the bridge open while an outer batch runs inner commands. */
+  retain(): void {
+    this.holds += 1;
+  }
+  /** Outer batch --allow-destructive, shared with inner sdk calls. */
+  allowsDestructive(): boolean {
+    return this.options.allowDestructive === true;
+  }
+  release(): void {
+    this.holds = Math.max(0, this.holds - 1);
+  }
 
   private async connect(): Promise<void> {
     if (this.adapter) return;
@@ -96,6 +109,13 @@ export class DirectClient {
       throw new Error('Unknown CLI action: ' + action);
     const input = operation ? operation[1].parse(payload) : payload;
     await this.connect();
+    if (action === 'read_note' && Array.isArray((input as { remIds?: unknown }).remIds))
+      return this.adapter!.readNotes(input as Parameters<RemAdapter['readNotes']>[0]);
+    if (
+      action === 'list_children' &&
+      Array.isArray((input as { parentRemIds?: unknown }).parentRemIds)
+    )
+      return this.adapter!.listChildrenMany(input as Parameters<RemAdapter['listChildrenMany']>[0]);
     if (action === 'get_status')
       return {
         ...((await this.connection!.request('get_status', {})) as object),
@@ -123,6 +143,7 @@ export class DirectClient {
     return Reflect.apply(Reflect.get(this.adapter!, operation![0]), this.adapter!, [input]);
   }
   async close(): Promise<void> {
+    if (this.holds > 0) return;
     try {
       if (this.adapter && this.state)
         await this.state.setLocal('search-snapshots', this.adapter.exportSearchSnapshots());

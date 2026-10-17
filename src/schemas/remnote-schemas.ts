@@ -150,7 +150,13 @@ export const SearchByTagSchema = z
 
 export const ReadNoteSchema = z
   .object({
-    remId: z.string().describe('The Rem ID to read'),
+    remId: z.string().optional().describe('The Rem ID to read'),
+    remIds: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(50)
+      .optional()
+      .describe('Read these Rem IDs in one call; results are keyed by ID'),
     depth: z
       .number()
       .int()
@@ -184,7 +190,22 @@ export const ReadNoteSchema = z
       .default(false)
       .describe('Include ordered image metadata from the root Rem text and backText fields'),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.remId !== undefined ? 1 : 0) + (value.remIds !== undefined ? 1 : 0) !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one of remId or remIds',
+      });
+    }
+    if (value.remIds && new Set(value.remIds).size !== value.remIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Duplicate Rem IDs',
+        path: ['remIds'],
+      });
+    }
+  });
 
 export const ReviewStatsSchema = z
   .object({
@@ -299,7 +320,19 @@ export const GetMediaSchema = z
 
 export const ListChildrenSchema = z
   .object({
-    parentRemId: z.string().min(1).describe('Parent Rem ID whose direct children should be listed'),
+    parentRemId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Parent Rem ID whose direct children should be listed'),
+    parentRemIds: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(50)
+      .optional()
+      .describe(
+        'List direct children for these parents in one call; results are keyed by parent ID'
+      ),
     limit: z.number().int().min(1).max(150).default(50).describe('Maximum direct children'),
     cursor: z
       .string()
@@ -310,7 +343,32 @@ export const ListChildrenSchema = z
     ),
     ancestorDepth: AncestorDepthSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      (value.parentRemId !== undefined ? 1 : 0) + (value.parentRemIds !== undefined ? 1 : 0) !==
+      1
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one of parentRemId or parentRemIds',
+      });
+    }
+    if (value.parentRemIds && value.cursor !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'cursor pages one parent; omit it when passing parentRemIds',
+        path: ['cursor'],
+      });
+    }
+    if (value.parentRemIds && new Set(value.parentRemIds).size !== value.parentRemIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Duplicate Rem IDs',
+        path: ['parentRemIds'],
+      });
+    }
+  });
 
 export const InsertChildrenPositionSchema = z.enum(['first', 'last', 'before', 'after']);
 

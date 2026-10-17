@@ -85,6 +85,7 @@ export interface SearchByTagParams {
 
 export interface ReadNoteParams {
   remId: string;
+  remIds?: string[];
   depth?: number;
   contentMode?: ContentMode;
   childLimit?: number;
@@ -179,6 +180,7 @@ export interface SetPropertyResult {
 
 export interface ListChildrenParams {
   parentRemId: string;
+  parentRemIds?: string[];
   limit?: number;
   cursor?: string;
   ancestorDepth?: number;
@@ -3571,6 +3573,21 @@ export class RemAdapter {
     };
   }
 
+  async readNotes(params: Omit<ReadNoteParams, 'remId'> & { remIds: string[] }): Promise<{
+    results: Record<string, Awaited<ReturnType<RemAdapter['readNote']>> | { error: string }>;
+  }> {
+    const results: Record<string, Awaited<ReturnType<RemAdapter['readNote']>> | { error: string }> =
+      Object.create(null);
+    for (const remId of params.remIds) {
+      try {
+        results[remId] = await this.readNote({ ...params, remId });
+      } catch (error) {
+        results[remId] = { error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    return { results };
+  }
+
   async getMediaLocator(params: GetMediaLocatorParams): Promise<MediaLocatorResult> {
     const remId = this.requireString(params.remId, 'remId');
     const mediaId = this.requireString(params.mediaId, 'mediaId');
@@ -3639,6 +3656,22 @@ export class RemAdapter {
       nextCursor,
       totalChildren: children.length,
     };
+  }
+
+  async listChildrenMany(
+    params: Omit<ListChildrenParams, 'parentRemId' | 'cursor'> & { parentRemIds: string[] }
+  ): Promise<{
+    results: Record<string, ListChildrenResult | { error: string }>;
+  }> {
+    const results: Record<string, ListChildrenResult | { error: string }> = Object.create(null);
+    for (const parentRemId of params.parentRemIds) {
+      try {
+        results[parentRemId] = await this.listChildren({ ...params, parentRemId });
+      } catch (error) {
+        results[parentRemId] = { error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    return { results };
   }
 
   async moveNote(params: MoveNoteParams): Promise<MoveNoteResult> {

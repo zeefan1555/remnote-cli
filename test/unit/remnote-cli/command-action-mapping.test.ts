@@ -149,6 +149,16 @@ describe('command bridge action mapping', () => {
     executeSpy.mockRestore();
   });
 
+  it('maps several read ids to one read_note call keyed by remIds', async () => {
+    const executeSpy = await runCommand(['read', 'abc123', 'def456', '--content-mode', 'none']);
+    expect(executeSpy).toHaveBeenCalledWith('read_note', {
+      remIds: ['abc123', 'def456'],
+      depth: 5,
+      contentMode: 'none',
+    });
+    executeSpy.mockRestore();
+  });
+
   it('maps review-stats command to get_review_stats', async () => {
     const executeSpy = await runCommand(['review-stats', 'rem-1', 'rem-2']);
     expect(executeSpy).toHaveBeenCalledWith('get_review_stats', {
@@ -566,6 +576,15 @@ describe('command bridge action mapping', () => {
       limit: 25,
       view: 'compact',
       ancestorDepth: 3,
+    });
+    executeSpy.mockRestore();
+  });
+
+  it('maps several list-children parents to one list_children call', async () => {
+    const executeSpy = await runCommand(['list-children', 'parent-a', 'parent-b', '--limit', '10']);
+    expect(executeSpy).toHaveBeenCalledWith('list_children', {
+      parentRemIds: ['parent-a', 'parent-b'],
+      limit: 10,
     });
     executeSpy.mockRestore();
   });

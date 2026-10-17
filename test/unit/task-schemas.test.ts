@@ -72,6 +72,11 @@ describe('task plan contract', () => {
     { newCards: [{ ...card, answer: [[]] }] },
     { newCards: [{ ...card, answer: [[{ pageKey: 'p' }]] }] },
     { newCards: [{ ...card, answer: [[{ remId: 'r', extra: true }]] }] },
+    { newCards: [{ ...card, answer: [[{ code: '' }]] }] },
+    { newCards: [{ ...card, answer: [[{ code: 'x', language: 'bad language' }]] }] },
+    { newCards: [{ ...card, answer: [[{ code: 'x', remId: 'r' }]] }] },
+    { newCards: [{ ...card, answer: [['prefix', { code: 'body' }]] }] },
+    { newCards: [{ ...card, question: [{ code: 'not a question' }] }] },
     { newCards: [{ ...card, answer: [['x'.repeat(10001)]] }] },
     { dailyRemId: ' ' },
     { tagRemId: 'x'.repeat(257) },
@@ -133,6 +138,23 @@ describe('task plan contract', () => {
     expect(FlashcardsPlanSchema.parse({ ...two, cardCluster: false }).cardCluster).toBe(false);
     expect(FlashcardsPlanSchema.parse({ ...two, cardCluster: true }).cardCluster).toBe(true);
     expect(FlashcardsPlanSchema.parse(flash)).not.toHaveProperty('cardCluster');
+    const coded = {
+      ...flash,
+      newCards: [
+        {
+          key: 'code',
+          question: 'Show it',
+          answer: [[{ code: 'alpha\nbeta' }], [{ code: 'print(1)', language: 'python' }]],
+        },
+      ],
+    };
+    expect(FlashcardsPlanSchema.parse(coded)).toEqual(coded);
+    expect(
+      WikiPlanSchema.safeParse({
+        ...wiki,
+        pages: [{ ...page, nodes: [{ key: 'n', text: [{ code: 'nope' }] }] }],
+      }).success
+    ).toBe(false);
   });
   it('supports guarded patches/reuse and exact existing nodes', () => {
     expect(

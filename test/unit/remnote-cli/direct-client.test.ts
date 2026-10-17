@@ -95,6 +95,16 @@ describe('local business dispatch', () => {
     await expect(client.execute('get_status', {})).rejects.toThrow('Invalid loopback port');
   });
 
+  it('does not close a retained connection until the batch releases it', async () => {
+    await client.execute('get_status', {});
+    client.retain();
+    await client.close();
+    expect(wire.close).not.toHaveBeenCalled();
+    client.release();
+    await client.close();
+    expect(wire.close).toHaveBeenCalledOnce();
+  });
+
   it('honors explicit KB and port requirements without product version matching', async () => {
     client = new DirectClient({ kbId: 'requested', port: '4002', verbose: true });
     await client.execute('get_status', {});

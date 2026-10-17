@@ -7,8 +7,27 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Flashcard answer lines accept one code-block segment, `{"code":"<text>","language":"plaintext"}`.
+  `language` is optional and defaults to `plaintext`. Apply stores it as one RichText element
+  `{i:"m",code:true,language,text}` and sets `isCardItem` so the line is on the card back.
+  Applied flashcard receipts add `answerLines` (`key`, `remId`, `isCardItem`, `hasCardStructure`)
+  for each written or patched answer line. Preview receipts stay unchanged.
+- `batch --file <path|->` runs a JSON array, `{commands:[{argv}]}` object, or JSONL command list
+  on one bridge connection and returns per-command results.
+- `read` and `list-children` accept multiple Rem IDs. One ID keeps the previous JSON shape;
+  several IDs return `results` keyed by ID, including a per-ID error when one lookup fails.
+
 ### Fixed
 
+- `batch` treats subcommand help and usage errors as item results, captures `--help` and `--version`
+  inside the JSON envelope, and applies `batch --allow-destructive` to inner `sdk` calls.
+- Flashcard answer patches and new-card answers hash card facts before the text write and again after
+  `setIsCardItem`. A mismatch is not `verified`. The recorded `answerLines` entry keeps `verified: false`
+  and `error` `Card identity or history changed while writing an answer line`.
+  Patching a code answer back to plain text keeps `isCardItem` true.
+- Multi-id `read` and `list-children` results keep an id of `__proto__`.
 - Write `TextSegment[]` flashcard questions as native rich text, reject literal bracket references in plain strings,
   and validate question reference targets before any journal or card write.
 - Flashcard apply adds the Card Cluster powerup (`cc`) only when the plan sets

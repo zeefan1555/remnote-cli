@@ -9,6 +9,7 @@ import {
   SearchSchema,
   SearchByTagSchema,
   ReadNoteSchema,
+  ListChildrenSchema,
   ReviewStatsSchema,
   SetOutlineCollapsedSchema,
   ListTodosSchema,
@@ -321,6 +322,34 @@ describe('ReadNoteSchema', () => {
 
   it('should reject missing remId', () => {
     expect(() => ReadNoteSchema.parse({})).toThrow();
+  });
+
+  it('accepts several rem ids and keeps a single rem id unchanged', () => {
+    expect(ReadNoteSchema.parse({ remId: 'rem-123' }).remIds).toBeUndefined();
+    const many = ReadNoteSchema.parse({ remIds: ['a', 'b'], contentMode: 'none' });
+    expect(many.remIds).toEqual(['a', 'b']);
+    expect(many.remId).toBeUndefined();
+    expect(many.contentMode).toBe('none');
+    expect(() => ReadNoteSchema.parse({ remId: 'a', remIds: ['b'] })).toThrow(/exactly one/);
+    expect(() => ReadNoteSchema.parse({ remIds: ['a', 'a'] })).toThrow(/Duplicate/);
+    expect(() => ReadNoteSchema.parse({ remIds: [] })).toThrow();
+  });
+});
+
+describe('ListChildrenSchema', () => {
+  it('keeps one parent on the original field and keys several parents', () => {
+    expect(ListChildrenSchema.parse({ parentRemId: 'parent' })).toMatchObject({
+      parentRemId: 'parent',
+      limit: 50,
+    });
+    const many = ListChildrenSchema.parse({ parentRemIds: ['a', 'b'], limit: 10 });
+    expect(many.parentRemIds).toEqual(['a', 'b']);
+    expect(many.parentRemId).toBeUndefined();
+    expect(() => ListChildrenSchema.parse({})).toThrow(/exactly one/);
+    expect(() =>
+      ListChildrenSchema.parse({ parentRemIds: ['a', 'b'], cursor: 'list_children:v1:a:1:hash' })
+    ).toThrow(/cursor/);
+    expect(() => ListChildrenSchema.parse({ parentRemIds: ['a', 'a'] })).toThrow(/Duplicate/);
   });
 });
 

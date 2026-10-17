@@ -34,9 +34,18 @@ in the same turn before ordinary mutating commands. Preview is not write consent
 Destructive changes also require explicit replacement/deletion intent, both plugin
 write gates and `--allow-destructive`.
 
-Run one command per execution. Do not chain commands or restart unrelated
-processes. Prefer file payloads (`--content-file`, `--plan`, `--request`,
-`--expect`) over shell interpolation; inputs are bounded to 100 KiB.
+Prefer one `remnote-cli` process per turn. Do not shell-chain separate processes:
+each process owns the loopback port, and the next process can fail with
+`CLI port occupied`. Use `batch --file commands.jsonl` to run several argv
+commands on one connection, in order, and read each `results[]` entry.
+Help, `--version`, and usage errors stay inside that envelope and later commands
+still run. Put `--allow-destructive` on `batch` when an inner `sdk` call needs it.
+`read` and `list-children` also accept multiple Rem IDs in one call. One ID keeps
+the previous JSON object; several IDs return `results` keyed by ID.
+Prefer file payloads (`--content-file`, `--plan`, `--request`,
+`--expect`, `--file`) over shell interpolation. Write payloads are bounded to
+100 KiB; a batch file is bounded to 1 MB and 100 commands. Inner batch commands
+must not read stdin.
 Use exact Rem IDs, not ambiguous tag names. Respect repository policy: live
 development/acceptance tests run only through the guarded integration wrapper
 after explicit authorization.
@@ -49,7 +58,10 @@ remnote-cli search "topic" --parent-id ROOT_ID
 remnote-cli search "topic" --cards-only --include-review-stats
 remnote-cli search-by-tag --tag-id TAG_ID
 remnote-cli read REM_ID --content-mode structured --depth 1 --child-limit 100
+remnote-cli read REM_ID OTHER_ID --content-mode none
 remnote-cli list-children ROOT_ID
+remnote-cli list-children ROOT_ID OTHER_ID
+remnote-cli batch --file commands.jsonl
 remnote-cli review-stats REM_ID
 remnote-cli read-table --rem-id TABLE_ID
 remnote-cli todo list --tag-id TAG_ID
@@ -95,6 +107,17 @@ Card Cluster powerup unless the plan sets `cardCluster: true` together with a
 title and at least two new cards. Omitted or `false` leaves `cc` unset.
 Flashcard questions accept a plain string or `TextSegments`. Use `{"remId":"EXACT_ID"}`
 segments for native references. A plain string containing `[[` or `]]` is invalid.
+An answer line may be one code block, `[{"code":"line1\nline2","language":"plaintext"}]`.
+`language` defaults to `plaintext`. Apply stores `{i:"m",code:true,language,text}` and
+sets `isCardItem` so the line is on the card back. Do not create that child with
+`create` plus `object-set-text`; that child defaults to `isCardItem` false and is
+omitted from the card back. Patching a code answer back to plain text keeps
+`isCardItem` true. New-card and patch writes compare card facts before the text
+write and again after `setIsCardItem`. On a mismatch, that `answerLines` entry has
+`verified: false` and `error` set to the receipt message, and the receipt is not
+verified. A passed line has `verified: true`. After apply, `answerLines` reports
+each answer's `remId`, `isCardItem`, `hasCardStructure`, and `verified`. Preview
+omits `answerLines`.
 
 Use `--summary` on task apply and `verify scope` when only IDs/hashes, scopes, counts
 and failures are needed. It does not change exit or recovery semantics. Wiki batch

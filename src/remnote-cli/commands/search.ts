@@ -204,22 +204,27 @@ export function registerSearchByTagCommand(program: Command): void {
 
 export function registerListChildrenCommand(program: Command): void {
   program
-    .command('list-children <parent-rem-id>')
-    .description('List direct child Rems under a parent')
+    .command('list-children <parent-rem-id...>')
+    .description('List direct child Rems under one or more parents')
     .option('-l, --limit <n>', 'Maximum direct children (default: 50)', '50')
     .option('--cursor <cursor>', 'Opaque cursor returned by a previous list-children page')
     .option('--view <view>', 'Output detail level: compact, standard, or full')
     .option('--ancestor-depth <n>', 'Number of parent Rems to include, direct parent first')
-    .action(async (parentRemId: string, opts) => {
+    .action(async (parentRemIds: string[], opts) => {
       const globalOpts = program.opts();
       const format: OutputFormat = globalOpts.text ? 'text' : 'json';
       const client = createCommandClient(program);
 
       try {
+        if (new Set(parentRemIds).size !== parentRemIds.length)
+          throw new Error('Duplicate Rem IDs');
+        if (parentRemIds.length > 1 && opts.cursor)
+          throw new Error('cursor pages one parent; omit it when listing several parents');
         const payload: Record<string, unknown> = {
-          parentRemId,
           limit: parseInt(opts.limit, 10),
         };
+        if (parentRemIds.length === 1) payload.parentRemId = parentRemIds[0];
+        else payload.parentRemIds = parentRemIds;
         if (opts.cursor) payload.cursor = opts.cursor;
         if (opts.view) payload.view = opts.view;
         if (opts.ancestorDepth) payload.ancestorDepth = parseInt(opts.ancestorDepth, 10);
@@ -227,6 +232,19 @@ export function registerListChildrenCommand(program: Command): void {
         const result = await client.execute('list_children', payload);
         console.log(
           formatResult(result, format, (data) => {
+            const many = (data as { results?: Record<string, Record<string, unknown>> }).results;
+            if (many && typeof many === 'object') {
+              return Object.entries(many)
+                .map(([id, value]) => {
+                  if (typeof value.error === 'string') return `# ${id}\nError: ${value.error}`;
+                  return `# ${id}\n${formatSearchText({
+                    results: value.children,
+                    hasMore: value.hasMore,
+                    nextCursor: value.nextCursor,
+                  })}`;
+                })
+                .join('\n\n');
+            }
             const r = data as Record<string, unknown>;
             return formatSearchText({
               results: r.children,
@@ -235,6 +253,9 @@ export function registerListChildrenCommand(program: Command): void {
             });
           })
         );
+        const many = (result as { results?: Record<string, { error?: string }> }).results;
+        if (many && Object.values(many).some((value) => typeof value?.error === 'string'))
+          process.exitCode = EXIT.ERROR;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(formatError(message, format));

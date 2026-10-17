@@ -12,6 +12,9 @@ remnote-cli <-> authenticated loopback WebSocket <-> SDK Bridge <-> RemNote SDK
 
 There is no MCP endpoint, stdio proxy, resident daemon, or cloud relay. Each command
 opens its own loopback listener, performs its task, and closes the connection.
+`batch --file` keeps that listener open across a list of commands so back-to-back
+calls do not collide on the CLI port. Help, version, and usage errors stay inside
+the batch JSON envelope. `batch --allow-destructive` covers inner `sdk` calls.
 Keep RemNote open with the paired plugin enabled. An idle plugin waiting for a CLI
 command is normal.
 
@@ -44,6 +47,9 @@ protocol and generated SDK capabilities determine compatibility.
 ```bash
 remnote-cli search "topic"
 remnote-cli read REM_ID --content-mode structured --depth 1
+remnote-cli read REM_ID OTHER_ID --content-mode none
+remnote-cli list-children PARENT_ID OTHER_PARENT_ID
+remnote-cli batch --file commands.jsonl
 remnote-cli review-stats REM_ID
 remnote-cli context --request context.json
 remnote-cli verify scope --expect expectations.json

@@ -208,10 +208,10 @@ remnote-cli search-by-tag --tag-id <tag-rem-id> --content-mode markdown --depth 
 
 ## read
 
-Read one note by Rem ID.
+Read one or more notes by Rem ID.
 
 ```bash
-remnote-cli read <rem-id> [options]
+remnote-cli read <rem-id> [more-rem-ids...] [options]
 ```
 
 | Option                     | Default    | Description                          |
@@ -233,11 +233,15 @@ Behavior rules:
 - `--content-mode none` suppresses rendered content.
 - `tags` is optional and present when the returned Rem has readable tag identity metadata. JSON output preserves
   `{ tagRemId, name }` objects.
+- One Rem ID returns the same JSON object as before.
+- Two to fifty IDs return `{"results":{"<id>": <note or {"error":"..."}>}}` in request order. Options apply to every ID.
+  A per-ID miss stays in `results` and the command exits 1. Duplicate IDs are rejected.
 
 Examples:
 
 ```bash
 remnote-cli read abc123def
+remnote-cli read abc123def def456 --content-mode none
 remnote-cli read abc123def --content-mode none --depth 2 --child-limit 30 --max-content-length 5000 --text
 remnote-cli read abc123def --content-mode structured --depth 2 --child-limit 30
 ```
@@ -415,18 +419,27 @@ Accepted `--expected-old-rem-type` values: `folder`, `document`, `dailyDocument`
 
 ## list-children
 
-List direct children under a parent without rendering a whole subtree.
+List direct children under one or more parents without rendering a whole subtree.
 
 ```bash
-remnote-cli list-children <parent-rem-id> --limit 50 --ancestor-depth 1
+remnote-cli list-children <parent-rem-id> [more-parent-ids...] --limit 50 --ancestor-depth 1
 ```
 
 | Option                 | Default | Description                                  |
 | ---------------------- | ------- | -------------------------------------------- |
-| `--limit <n>`          | `50`    | Maximum direct children                      |
-| `--cursor <cursor>`    | none    | Continue a previous page                     |
+| `--limit <n>`          | `50`    | Maximum direct children per parent           |
+| `--cursor <cursor>`    | none    | Continue a previous page for one parent      |
 | `--view <view>`        | compact | `compact`, `standard`, or `full`             |
 | `--ancestor-depth <n>` | `0`     | Parent Rems to include for each child        |
+
+One parent returns the same `{children,hasMore,nextCursor,totalChildren}` object as before. `--cursor` is only valid
+for that single-parent call. Two to fifty parents return `results` keyed by parent ID, each value the same page object
+or `{"error":"..."}`. The shared limit, view, and ancestor depth apply to every parent. A per-ID error exits 1 after
+printing the map. Duplicate IDs are rejected.
+
+```bash
+remnote-cli list-children parent-a parent-b --limit 50
+```
 
 ## insert-children
 
@@ -564,6 +577,39 @@ remnote-cli journal --content-file /tmp/entry.md --text
 cat /tmp/entry.md | remnote-cli journal --content-file - --text
 ```
 
+## batch
+
+Run several commands on one loopback connection. Use this instead of starting a process per command when those
+processes would otherwise hit `CLI port occupied`.
+
+```bash
+remnote-cli batch --file commands.jsonl
+remnote-cli batch --file commands.json --stop-on-error
+cat commands.jsonl | remnote-cli batch --file -
+```
+
+Input is a JSON array of `{"argv":["read","REM_ID"]}`, a `{"commands":[...]}` object, one such object, or JSONL with
+one object per line. `argv` is the command and its arguments, not the `remnote-cli` program name. The file is at most
+1 MB and 100 commands. Commands run in order on one listener; later commands see earlier writes. Do not pass `-` for
+an inner stdin payload, and do not put `--port`, `--kb-id`, `--allow-destructive`, or `--verbose` on an inner command.
+Those flags belong on `batch`. `batch --allow-destructive` is the approval for inner `sdk` calls; repeating the flag
+inside `argv` is still rejected.
+
+Help, `--version`, and usage errors (a missing option argument, or `flashcards` without `apply`) are results for that
+item. They do not call `process.exit`, do not print outside the JSON envelope, and do not skip later commands.
+Commander exit code 0, including root and subcommand `--help` and `--version`, is `ok: true`; the captured text is
+`result`. The bridge closes after the batch finishes or fails while reading the file.
+
+JSON output:
+
+```json
+{"schemaVersion":1,"count":2,"ok":true,"stoppedEarly":false,"results":[{"index":0,"argv":["read","REM_ID"],"ok":true,"exitCode":0,"result":{}}]}
+```
+
+`result` is the command's parsed JSON stdout, or the raw text when it was not JSON. `error` carries stderr or the
+thrown message. Exit 0 only when every executed command succeeds. `--stop-on-error` returns the results collected
+before the first failure and sets `stoppedEarly` when commands remain.
+
 ## status
 
 Check bridge connection state.
@@ -597,7 +643,14 @@ remnote-cli --port 3005 status --text
 [Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
 inner plan, bound, text segment and apply receipt. Flashcard `cardCluster` defaults off; `cc` is added only when the
 plan sets it to `true` with a title and at least two new cards. Flashcard questions accept a plain string or
-`TextSegments`; native references use `{"remId":"EXACT_ID"}`, and plain strings containing `[[` or `]]` are rejected. Leaf `--help` includes examples and schemas for
+`TextSegments`; native references use `{"remId":"EXACT_ID"}`, and plain strings containing `[[` or `]]` are rejected.
+A flashcard answer line may be one code-block segment `{"code":"...","language":"plaintext"}`. Apply stores the SDK
+code-block element and sets `isCardItem` so the line is on the card back. Applied receipts include `answerLines`
+with `verified`. New cards and flashcard patches compare card facts before the text write and again after
+`setIsCardItem`. A mismatch sets that line's `verified` to false and `error` to
+`Card identity or history changed while writing an answer line`, and the receipt is not `verified`.
+Patching that line back to plain text leaves `isCardItem` true.
+Leaf `--help` includes examples and schemas for
 installed agents.
 Read input is the whole request; apply files contain only the inner plan. Preview is default. Full receipts precede
 nonzero exits on failed/incomplete reads or nonverified apply. Required WIKI/card proof scopes must not be narrowed

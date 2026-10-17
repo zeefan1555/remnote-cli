@@ -79,6 +79,9 @@ export class MockRem {
   async isCardItem(): Promise<boolean> {
     return this._isCardItem;
   }
+  async setIsCardItem(isCardItem: boolean): Promise<void> {
+    this._isCardItem = isCardItem;
+  }
   async addPowerup(code: string): Promise<void> {
     if (!this._powerups.includes(code)) this._powerups.push(code);
   }

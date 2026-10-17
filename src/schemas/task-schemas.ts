@@ -8,8 +8,32 @@ const Key = z
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Title = z.string().min(1).max(1000).regex(/\S/);
 const PlainSegment = z.union([z.string().max(10000), z.object({ remId: RemId }).strict()]);
+const CodeSegment = z
+  .object({
+    code: z.string().min(1).max(10000),
+    language: z
+      .string()
+      .regex(/^[A-Za-z0-9_+#.-]{1,64}$/)
+      .optional(),
+  })
+  .strict();
+const AnswerSegment = z.union([PlainSegment, CodeSegment]);
 const WikiSegment = z.union([PlainSegment, z.object({ pageKey: Key }).strict()]);
 const PlainText = z.array(PlainSegment).min(1).max(100);
+const AnswerLine = z
+  .array(AnswerSegment)
+  .min(1)
+  .max(100)
+  .superRefine((segments, ctx) => {
+    if (
+      segments.length !== 1 &&
+      segments.some((segment) => typeof segment !== 'string' && 'code' in segment)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Code-block answer line must be a single segment',
+      });
+  });
 const QuestionSegments = PlainText.superRefine((segments, ctx) => {
   const text = segments
     .filter((segment): segment is string => typeof segment === 'string')
@@ -28,7 +52,7 @@ const Question = z.union([
 ]);
 const WikiText = z.array(WikiSegment).min(1).max(100);
 const patch = { key: Key, cardRemId: RemId, remId: RemId, expectedTextHash: Hash };
-const PlainPatch = z.object({ ...patch, text: PlainText }).strict();
+const PlainPatch = z.object({ ...patch, text: AnswerLine }).strict();
 const WikiPatch = z.object({ ...patch, text: WikiText }).strict();
 function size(plan: unknown, ctx: z.RefinementCtx): void {
   if (Buffer.byteLength(JSON.stringify(plan), 'utf8') > 100 * 1024)
@@ -53,7 +77,7 @@ export const FlashcardsPlanSchema = z
     newCards: z
       .array(
         z
-          .object({ key: Key, question: Question, answer: z.array(PlainText).min(1).max(100) })
+          .object({ key: Key, question: Question, answer: z.array(AnswerLine).min(1).max(100) })
           .strict()
       )
       .max(7)
