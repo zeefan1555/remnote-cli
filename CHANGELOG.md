@@ -7,6 +7,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `context`, `inspect --fields markdown` and other reads that render titles no longer fail with
+  `richText parameter: Invalid input` on a rendered image. RemNote stores `percent: 0` on images
+  after rendering, outside the SDK enum (5/25/50/100; audio 25/50/100). Only the copy passed to
+  `richText.toString` / `toMarkdown` drops an invalid `percent` or non-numeric width/height; the
+  Rem and the raw `text` in receipts are unchanged.
+
 ### Changed
 
 - This CLI is its own repository. The companion plugin is

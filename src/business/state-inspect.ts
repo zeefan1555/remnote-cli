@@ -2,6 +2,7 @@ import type { ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
 import { hasCardStructure } from './card-structure.js';
 import { contentHash } from './content-hash.js';
 import { plainText } from './plain-text.js';
+import { sdkSafeRichText } from './sdk-rich-text.js';
 import { builtinSlotName } from './powerup-read.js';
 import { summarizeRichText, type RichTextElementSummary } from './rich-text-elements.js';
 import { BuiltInPowerupCodes, RemType } from './sdk-constants.generated.js';
@@ -499,8 +500,8 @@ export async function inspectState(
         (async () => {
           try {
             const [front, back] = await Promise.all([
-              gate(() => source.richText.toMarkdown(rem.text ?? [])),
-              gate(() => source.richText.toMarkdown(rem.backText ?? [])),
+              gate(() => source.richText.toMarkdown(sdkSafeRichText(rem.text))),
+              gate(() => source.richText.toMarkdown(sdkSafeRichText(rem.backText))),
             ]);
             if (typeof front !== 'string' || typeof back !== 'string')
               throw new Error('SDK markdown did not return a string');
