@@ -9,6 +9,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Use `main` for the default branch, GitHub Actions push trigger, and repository documentation.
 - This CLI is its own repository. The companion plugin is
   [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge)
   (npm name and manifest id `remnote-cli-bridge`, display name RemNote CLI Bridge,
