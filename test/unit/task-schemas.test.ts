@@ -236,4 +236,21 @@ describe('task plan contract', () => {
     pages[0].nodes.pop();
     expect(WikiPlanSchema.safeParse({ ...wiki, pages, answerPatches }).success).toBe(true);
   });
+  it('accepts explicit tags instead of homeRootId/tagRemId and enforces their keys', () => {
+    const base = { schemaVersion: 1, dailyRemId: 'day', newCards: [card] };
+    const ok = (p: unknown) => FlashcardsPlanSchema.safeParse(p).success;
+    expect(ok({ ...base, tags: { root: ['t'], 'card:c': ['t'] } })).toBe(true);
+    expect(ok({ ...base, tags: {} })).toBe(true);
+    expect(ok({ ...base, parentRemId: 'topic', tags: { 'card:c': ['t'] } })).toBe(true);
+    expect(ok(base)).toBe(false);
+    expect(ok({ ...base, tagRemId: 'tag', tags: {} })).toBe(false);
+    expect(ok({ ...base, homeRootId: 'home', tags: {} })).toBe(false);
+    expect(ok({ ...base, tags: { 'answer:c:0': ['t'] } })).toBe(false);
+    expect(ok({ ...base, tags: { 'card:x': ['t'] } })).toBe(false);
+    expect(ok({ ...base, tags: { 'card:c': ['t', 't'] } })).toBe(false);
+    expect(ok({ ...base, tags: { 'card:c': [''] } })).toBe(false);
+    expect(ok({ ...base, parentRemId: 'topic', tags: { root: [] } })).toBe(false);
+    expect(ok({ ...base, tags: { root: [], 'card:c': ['t'] } })).toBe(false);
+    expect(ok(flash)).toBe(true);
+  });
 });

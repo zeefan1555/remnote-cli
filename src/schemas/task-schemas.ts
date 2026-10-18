@@ -70,9 +70,13 @@ export const FlashcardsPlanSchema = z
   .object({
     schemaVersion: z.literal(1),
     dailyRemId: RemId,
-    homeRootId: RemId,
-    tagRemId: RemId,
+    homeRootId: RemId.optional(),
+    tagRemId: RemId.optional(),
     parentRemId: RemId.optional(),
+    tags: z
+      .record(z.string(), z.array(RemId).max(20))
+      .optional()
+      .describe('Explicit tag Rem IDs by semantic key: root or card:<key>'),
     title: Title.optional(),
     cardCluster: z.boolean().optional(),
     newCards: z
@@ -127,7 +131,60 @@ export const FlashcardsPlanSchema = z
         path: ['cardCluster'],
         message: 'cardCluster requires a title and two or more new cards',
       });
+    tagRules(plan, ctx);
   });
+function tagRules(
+  plan: {
+    homeRootId?: string;
+    tagRemId?: string;
+    parentRemId?: string;
+    newCards?: Array<{ key: string }>;
+    tags?: Record<string, string[]>;
+  },
+  ctx: z.RefinementCtx
+): void {
+  if (!plan.tags) {
+    for (const field of ['homeRootId', 'tagRemId'] as const)
+      if (plan[field] === undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} is required without tags`,
+        });
+    return;
+  }
+  for (const field of ['homeRootId', 'tagRemId'] as const)
+    if (plan[field] !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: [field],
+        message: 'tags replaces homeRootId and tagRemId; omit both',
+      });
+  const cards = new Set((plan.newCards ?? []).map((c) => `card:${c.key}`));
+  for (const [key, ids] of Object.entries(plan.tags)) {
+    if (key === 'root') {
+      if (plan.parentRemId !== undefined || !plan.newCards?.length)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['tags', key],
+          message: 'tags.root needs a created root; parentRemId plans have none',
+        });
+    } else if (!cards.has(key))
+      ctx.addIssue({ code: 'custom', path: ['tags', key], message: `Unknown tags key: ${key}` });
+    if (new Set(ids).size !== ids.length)
+      ctx.addIssue({ code: 'custom', path: ['tags', key], message: 'Duplicate tag ID' });
+  }
+  const single =
+    !plan.parentRemId && plan.newCards?.length === 1 ? `card:${plan.newCards[0].key}` : '';
+  const root = plan.tags.root,
+    card = single ? plan.tags[single] : undefined;
+  if (root && card && JSON.stringify([...root].sort()) !== JSON.stringify([...card].sort()))
+    ctx.addIssue({
+      code: 'custom',
+      path: ['tags', 'root'],
+      message: 'A single-card root is the card itself; tags.root and its card key must match',
+    });
+}
 const WikiNode = z
   .object({ key: Key, remId: RemId.optional(), text: WikiText, expectedTextHash: Hash.optional() })
   .strict()
