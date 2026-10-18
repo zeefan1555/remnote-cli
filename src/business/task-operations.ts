@@ -34,6 +34,8 @@ export interface FlashcardsPlan {
   dailyRemId: string;
   homeRootId: string;
   tagRemId: string;
+  /** Existing topic Rem (direct child of dailyRemId carrying tagRemId) that receives new cards. */
+  parentRemId?: string;
   title?: string;
   cardCluster?: boolean;
   newCards?: Array<{ key: string; question: string | TextSegment[]; answer: TextSegment[][] }>;
@@ -202,6 +204,14 @@ function question(v: unknown): asserts v is string | TextSegment[] {
   if (!v.some((s) => typeof s !== 'string') && !text.trim())
     throw new Error('Invalid bounded string');
 }
+/** A multi-card plan without parentRemId creates its own titled topic Rem under the daily document. */
+function clustered(p: FlashcardsPlan): boolean {
+  return !p.parentRemId && (p.newCards?.length ?? 0) > 1;
+}
+/** Parent of the created card scaffold: the existing topic Rem or the daily document. */
+function scaffoldParent(p: FlashcardsPlan): string {
+  return p.parentRemId ?? p.dailyRemId;
+}
 export function validateTaskPlan(
   kind: 'flashcards' | 'wiki',
   input: TaskApplyParams<FlashcardsPlan | WikiPlan>
@@ -231,6 +241,7 @@ export function validateTaskPlan(
       'dailyRemId',
       'homeRootId',
       'tagRemId',
+      'parentRemId',
       'title',
       'cardCluster',
       'newCards',
@@ -239,12 +250,19 @@ export function validateTaskPlan(
     ]);
     const plan = p as FlashcardsPlan;
     [plan.dailyRemId, plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
+    if (plan.parentRemId !== undefined) {
+      string(plan.parentRemId);
+      if (!plan.newCards?.length) throw new Error('parentRemId requires at least one new card');
+      if (plan.title !== undefined)
+        throw new Error('parentRemId places new cards under an existing topic; omit title');
+    }
     if (plan.title !== undefined) string(plan.title, 1000);
     if (plan.cardCluster !== undefined && typeof plan.cardCluster !== 'boolean')
       throw new Error('Invalid cardCluster');
     if (plan.newCards !== undefined) {
       array(plan.newCards, 7);
-      if (plan.newCards.length > 1 && !plan.title) throw new Error('Cluster title required');
+      if (plan.newCards.length > 1 && !plan.title && !plan.parentRemId)
+        throw new Error('Cluster title required');
       for (const c of plan.newCards) {
         object(c);
         keys(c, ['key', 'question', 'answer']);
@@ -263,10 +281,7 @@ export function validateTaskPlan(
     }
     if (!(plan.newCards?.length || plan.answerPatches?.length || plan.reusedCardRemIds?.length))
       throw new Error('Empty task');
-    count +=
-      2 +
-      (plan.newCards && plan.newCards.length > 1 ? 1 : 0) +
-      (plan.reusedCardRemIds?.length ?? 0);
+    count += 2 + (clustered(plan) ? 1 : 0) + (plan.reusedCardRemIds?.length ?? 0);
   } else {
     keys(p, [
       'schemaVersion',
@@ -684,6 +699,22 @@ export class TaskOperations {
         if (Array.isArray(card.question)) await this.checkSegments(card.question);
         for (const line of card.answer) await this.checkSegments(line);
       }
+      if (p.parentRemId) {
+        const topic = await this.rem(p.parentRemId);
+        if (
+          (await topic.getParentRem())?._id !== p.dailyRemId ||
+          topic.type !== RemType.DEFAULT_TYPE ||
+          (await topic.isFolder()) ||
+          (await topic.isDocument()) ||
+          (await topic.getCards()).length ||
+          !nativeIds(await topic.getTagRems()).includes(p.tagRemId)
+        )
+          throw new TaskError(
+            'conflict',
+            'parentRemId must be an existing non-card topic Rem directly under the daily document carrying tagRemId',
+            p.parentRemId
+          );
+      }
       for (const id of p.reusedCardRemIds ?? [])
         if (!(await (await this.rem(id)).getCards()).length)
           throw new TaskError('conflict', 'Reused Rem is not a card', id);
@@ -1066,13 +1097,15 @@ export class TaskOperations {
   }
   private async bindScaffold(p: FlashcardsPlan, ids: string[], j: Journal): Promise<void> {
     const all = await Promise.all(ids.map((id) => this.rem(id))),
+      base = scaffoldParent(p),
       roots: PluginRem[] = [];
-    for (const r of all) if ((await r.getParentRem())?._id === p.dailyRemId) roots.push(r);
-    if (roots.length !== 1) throw new TaskError('incomplete', 'Ambiguous scaffold root');
-    const cards = p.newCards!,
-      root = roots[0],
-      cardRems = cards.length > 1 ? await root.getChildrenRem() : [root],
-      bindings: Record<string, string> = { root: root._id };
+    for (const r of all) if ((await r.getParentRem())?._id === base) roots.push(r);
+    const cards = p.newCards!;
+    if (p.parentRemId ? roots.length !== cards.length : roots.length !== 1)
+      throw new TaskError('incomplete', 'Ambiguous scaffold root');
+    const root = roots[0],
+      cardRems = p.parentRemId ? roots : cards.length > 1 ? await root.getChildrenRem() : [root],
+      bindings: Record<string, string> = p.parentRemId ? {} : { root: root._id };
     if (cards.length !== cardRems.length)
       throw new TaskError('incomplete', 'Scaffold card count mismatch');
     for (let i = 0; i < cards.length; i++) {
@@ -1087,7 +1120,7 @@ export class TaskOperations {
       });
     }
     const bound = new Set(Object.values(bindings)),
-      expected = cards.reduce((n, c) => n + 1 + c.answer.length, cards.length > 1 ? 1 : 0);
+      expected = cards.reduce((n, c) => n + 1 + c.answer.length, clustered(p) ? 1 : 0);
     if (bound.size !== expected || ids.length !== expected || ids.some((id) => !bound.has(id)))
       throw new TaskError('incomplete', 'Ambiguous scaffold semantic bindings');
     Object.assign(j.ids, bindings);
@@ -1120,10 +1153,10 @@ export class TaskOperations {
     p: FlashcardsPlan,
     ids: string[],
     j: Journal
-  ): Promise<{ root: PluginRem; cards: PluginRem[]; answers: PluginRem[][] }> {
+  ): Promise<{ root?: PluginRem; cards: PluginRem[]; answers: PluginRem[][] }> {
     const cards = p.newCards!,
       needed = [
-        'root',
+        ...(p.parentRemId ? [] : ['root']),
         ...cards.flatMap((c) => [
           `card:${c.key}`,
           ...c.answer.map((_, i) => `answer:${c.key}:${i}`),
@@ -1132,10 +1165,10 @@ export class TaskOperations {
     if (needed.some((k) => !j.ids[k] || !ids.includes(j.ids[k])))
       throw new TaskError('conflict', 'Missing durable semantic binding');
     const bound = new Set(needed.map((k) => j.ids[k])),
-      expected = cards.reduce((n, c) => n + 1 + c.answer.length, cards.length > 1 ? 1 : 0);
+      expected = cards.reduce((n, c) => n + 1 + c.answer.length, clustered(p) ? 1 : 0);
     if (bound.size !== expected || ids.length !== expected || ids.some((id) => !bound.has(id)))
       throw new TaskError('conflict', 'Inconsistent scaffold bindings');
-    const root = await this.rem(j.ids.root),
+    const root = p.parentRemId ? undefined : await this.rem(j.ids.root),
       remCards = await Promise.all(cards.map((c) => this.rem(j.ids[`card:${c.key}`]))),
       answers = await Promise.all(
         cards.map((c) =>
@@ -1146,18 +1179,18 @@ export class TaskOperations {
       if (j.createdParentIds[id] !== parent || !same(j.createdChildrenIds[id], children))
         throw new TaskError('conflict', 'Baseline disagrees with semantic bindings', id);
     };
-    if (cards.length > 1)
+    if (root && clustered(p))
       baseline(
         root._id,
         p.dailyRemId,
         remCards.map((r) => r._id)
       );
-    else if (root._id !== remCards[0]._id)
+    else if (root && root._id !== remCards[0]._id)
       throw new TaskError('conflict', 'Single card root binding changed');
     for (let i = 0; i < cards.length; i++) {
       baseline(
         remCards[i]._id,
-        cards.length > 1 ? root._id : p.dailyRemId,
+        root && clustered(p) ? root._id : scaffoldParent(p),
         answers[i].map((r) => r._id)
       );
       for (const a of answers[i]) baseline(a._id, remCards[i]._id, []);
@@ -1197,6 +1230,7 @@ export class TaskOperations {
   ): Promise<void> {
     j.ids.daily = p.dailyRemId;
     j.ids.tag = p.tagRemId;
+    if (p.parentRemId) j.ids.parent = p.parentRemId;
     const cards = p.newCards ?? [];
     const cardCluster = p.cardCluster === true && cards.length > 1 && Boolean(p.title);
     if (cards.length) {
@@ -1207,29 +1241,30 @@ export class TaskOperations {
               `- Task card ${index + 1} ===\n${card.answer.map((_, n) => `    - Answer ${n + 1}`).join('\n')}`
           )
           .join('\n');
-        const markdown =
-          cards.length > 1
-            ? 'Task card cluster\n' +
-              lines
-                .split('\n')
-                .map((line) => '  ' + line)
-                .join('\n')
-            : lines;
+        const markdown = clustered(p)
+          ? 'Task card cluster\n' +
+            lines
+              .split('\n')
+              .map((line) => '  ' + line)
+              .join('\n')
+          : lines;
         this.assertCanMutate();
-        const rems = await this.deps.plugin.rem.createTreeWithMarkdown(markdown, p.dailyRemId);
+        const rems = await this.deps.plugin.rem.createTreeWithMarkdown(markdown, scaffoldParent(p));
         const ids = nativeIds(rems ?? []);
         j.steps['create:cards'].remIds = ids;
         await save();
         await this.bindScaffold(p, ids, j);
-        const root = await this.rem(j.ids.root);
         for (const rem of rems ?? []) {
           if ((await rem.getChildrenRem()).length) {
             this.assertCanMutate();
             await rem.setIsCollapsed(true, p.dailyRemId);
           }
         }
-        this.assertCanMutate();
-        await root.addTag(p.tagRemId);
+        if (!p.parentRemId) {
+          const root = await this.rem(j.ids.root);
+          this.assertCanMutate();
+          await root.addTag(p.tagRemId);
+        }
         return ids;
       });
       const bound = await this.boundScaffold(p, ids, j);
@@ -1255,12 +1290,13 @@ export class TaskOperations {
           await this.guardAnswerLine(receipt, key, bound.cards[i]._id, before);
         }
       }
-      if (cards.length > 1) {
-        await this.createdText(bound.root._id, [p.title!], j, save);
+      if (bound.root && clustered(p)) {
+        const rootId = bound.root._id;
+        await this.createdText(rootId, [p.title!], j, save);
         if (cardCluster && !(await bound.root.hasPowerup('cc'))) {
           if (j.completed)
-            throw new TaskError('conflict', 'Completed cluster powerup changed', bound.root._id);
-          const r = await this.rem(bound.root._id);
+            throw new TaskError('conflict', 'Completed cluster powerup changed', rootId);
+          const r = await this.rem(rootId);
           await this.location(r, j);
           if (
             (await r.isFolder()) ||
@@ -1272,29 +1308,56 @@ export class TaskOperations {
           await this.mutate(() => r.addPowerup('cc'));
         }
       }
-      for (const tag of await bound.root.getTagRems())
-        if (tag._id !== p.tagRemId && (await this.within(tag, p.homeRootId)))
-          throw new TaskError('conflict', 'Additional HOME classification', bound.root._id);
-      if (cards.length > 1)
+      if (bound.root)
+        for (const tag of await bound.root.getTagRems())
+          if (tag._id !== p.tagRemId && (await this.within(tag, p.homeRootId)))
+            throw new TaskError('conflict', 'Additional HOME classification', bound.root._id);
+      if (!bound.root || clustered(p))
         for (const card of bound.cards)
           for (const tag of await card.getTagRems())
             if (await this.within(tag, p.homeRootId))
-              throw new TaskError('conflict', 'Cluster child repeats HOME tag', card._id);
-      const expectations: ScopeExpectation[] = [
-        { kind: 'parent', remId: bound.root._id, value: p.dailyRemId },
-        { kind: 'tag', remId: bound.root._id, value: p.tagRemId },
-        { kind: 'cardRemIds', remId: bound.root._id, value: bound.cards.map((r) => r._id) },
-      ];
-      if (cards.length > 1)
-        expectations.push({ kind: 'remType', remId: bound.root._id, value: 'text' });
-      if (cardCluster)
-        expectations.push({ kind: 'powerup', remId: bound.root._id, code: 'cc', value: true });
+              throw new TaskError(
+                'conflict',
+                bound.root ? 'Cluster child repeats HOME tag' : 'Topic child repeats HOME tag',
+                card._id
+              );
+      const expectations: ScopeExpectation[] = [];
+      let scopeRemIds: string[];
+      if (bound.root) {
+        expectations.push(
+          { kind: 'parent', remId: bound.root._id, value: p.dailyRemId },
+          { kind: 'tag', remId: bound.root._id, value: p.tagRemId },
+          { kind: 'cardRemIds', remId: bound.root._id, value: bound.cards.map((r) => r._id) }
+        );
+        if (clustered(p))
+          expectations.push({ kind: 'remType', remId: bound.root._id, value: 'text' });
+        if (cardCluster)
+          expectations.push({ kind: 'powerup', remId: bound.root._id, code: 'cc', value: true });
+        scopeRemIds = [bound.root._id];
+      } else {
+        const topic = p.parentRemId!;
+        expectations.push({ kind: 'parent', remId: topic, value: p.dailyRemId });
+        expectations.push({ kind: 'tag', remId: topic, value: p.tagRemId });
+        expectations.push({
+          kind: 'children',
+          remId: topic,
+          value: bound.cards.map((r) => r._id),
+          exact: false,
+        });
+        for (const card of bound.cards)
+          expectations.push(
+            { kind: 'parent', remId: card._id, value: topic },
+            { kind: 'tag', remId: card._id, value: p.tagRemId, present: false },
+            { kind: 'cardRemIds', remId: card._id, value: [card._id] }
+          );
+        scopeRemIds = bound.cards.map((r) => r._id);
+      }
       const verified = await verifyScope(this.deps.plugin, {
         schemaVersion: 1,
         inspect: {
           schemaVersion: 1,
-          remIds: [bound.root._id],
-          subtreeRootIds: [bound.root._id],
+          remIds: p.parentRemId ? [p.parentRemId, ...scopeRemIds] : scopeRemIds,
+          subtreeRootIds: scopeRemIds,
           tagRemIds: [p.tagRemId],
         },
         expectations,

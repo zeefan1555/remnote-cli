@@ -72,6 +72,7 @@ export const FlashcardsPlanSchema = z
     dailyRemId: RemId,
     homeRootId: RemId,
     tagRemId: RemId,
+    parentRemId: RemId.optional(),
     title: Title.optional(),
     cardCluster: z.boolean().optional(),
     newCards: z
@@ -102,7 +103,19 @@ export const FlashcardsPlanSchema = z
         code: 'custom',
         message: 'At least one new card, answer patch, or reused card is required',
       });
-    if ((plan.newCards?.length ?? 0) >= 2 && !plan.title)
+    if (plan.parentRemId !== undefined && !plan.newCards?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['parentRemId'],
+        message: 'parentRemId requires at least one new card',
+      });
+    if (plan.parentRemId !== undefined && plan.title !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['title'],
+        message: 'parentRemId places new cards under an existing topic; omit title',
+      });
+    if (!plan.parentRemId && (plan.newCards?.length ?? 0) >= 2 && !plan.title)
       ctx.addIssue({
         code: 'custom',
         path: ['title'],

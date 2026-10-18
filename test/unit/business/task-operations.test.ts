@@ -1505,3 +1505,97 @@ describe('code-block flashcard answers', () => {
     expect(await answer.isCardItem()).toBe(false);
   });
 });
+
+describe('flashcards under an existing topic (parentRemId)', () => {
+  async function topicFixture() {
+    const f = await fixture();
+    const first = await f.adapter.applyFlashcards(request(flashPlan(), 'first'));
+    success(first);
+    return { f, topicId: first.ids.root, first };
+  }
+  const overflow = (topicId: string): FlashcardsPlan => ({
+    schemaVersion: 1,
+    dailyRemId: 'daily',
+    homeRootId: 'home',
+    tagRemId: 'tag',
+    parentRemId: topicId,
+    newCards: [
+      { key: 'c', question: 'Question C?', answer: [['Answer C']] },
+      { key: 'd', question: ['Compare ', { remId: 'source' }, '?'], answer: [['D1'], ['D2']] },
+    ],
+  });
+  it('appends untitled cards to the topic without a second topic or a HOME tag', async () => {
+    const { f, topicId, first } = await topicFixture();
+    const tagSpy = vi.spyOn(MockRem.prototype, 'addTag');
+    const plan = overflow(topicId);
+    const result = await f.adapter.applyFlashcards(request(plan, 'overflow'));
+    success(result);
+    expect(result.ids).not.toHaveProperty('root');
+    expect(result.ids.parent).toBe(topicId);
+    const topic = await rem(f, topicId);
+    expect((await topic.getChildrenRem()).map((r) => r._id)).toEqual([
+      first.ids['card:a'],
+      first.ids['card:b'],
+      result.ids['card:c'],
+      result.ids['card:d'],
+    ]);
+    expect((await topic.getTagRems()).map((r) => r._id)).toEqual(['tag']);
+    for (const key of ['card:c', 'card:d']) {
+      const card = await rem(f, result.ids[key]);
+      expect((await card.getParentRem())?._id).toBe(topicId);
+      expect(await card.getTagRems()).toEqual([]);
+    }
+    expect((await rem(f, result.ids['card:d'])).text).toEqual(['Compare ', ref('source'), '?']);
+    expect((await rem(f, result.ids['answer:d:1'])).text).toEqual(['D2']);
+    expect(tagSpy).not.toHaveBeenCalled();
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ kind: 'children', remId: topicId, status: 'passed' })
+    );
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ kind: 'tag', remId: result.ids['card:c'], status: 'passed' })
+    );
+    const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+    const replay = await adapter(f.plugin).applyFlashcards(request(plan, 'overflow'));
+    success(replay);
+    expect(replay.ids).toEqual(result.ids);
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+  });
+  it('places a single card under the topic', async () => {
+    const { f, topicId } = await topicFixture();
+    const plan = { ...overflow(topicId), newCards: overflow(topicId).newCards!.slice(0, 1) };
+    const result = await f.adapter.applyFlashcards(request(plan, 'single'));
+    success(result);
+    expect((await (await rem(f, result.ids['card:c'])).getParentRem())?._id).toBe(topicId);
+    expect(await (await rem(f, result.ids['card:c'])).getTagRems()).toEqual([]);
+  });
+  it.each(['untagged', 'nested', 'card'] as const)(
+    'rejects a %s parentRemId before any write',
+    async (mode) => {
+      const { f, topicId, first } = await topicFixture();
+      let target = topicId;
+      if (mode === 'untagged') {
+        const bare = f.plugin.addTestRem('bare', 'Bare topic');
+        await bare.setParent(f.daily);
+        target = bare._id;
+      }
+      if (mode === 'nested') {
+        const nested = f.plugin.addTestRem('nested', 'Nested topic');
+        await nested.setParent(await rem(f, topicId));
+        await nested.addTag('tag');
+        target = nested._id;
+      }
+      if (mode === 'card') target = first.ids['card:a'];
+      const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+      const result = await f.adapter.applyFlashcards(request(overflow(target), `bad-${mode}`));
+      expect(result.status).toBe('conflict');
+      expect(result.errors[0]?.message).toContain('parentRemId must be an existing');
+      expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+    }
+  );
+  it('rejects parentRemId with a title before any write', async () => {
+    const { f, topicId } = await topicFixture();
+    await expect(
+      f.adapter.applyFlashcards(request({ ...overflow(topicId), title: 'Topic' }, 'titled'))
+    ).rejects.toThrow('omit title');
+  });
+});
