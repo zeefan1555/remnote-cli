@@ -75,7 +75,7 @@ open; this delivery authorization does not establish a passing live result.
 
 ## Post-Commit Verification
 
-The independent repository is private and its default branch is `master`.
+The independent repository is private and its default branch is `main`.
 Commit `9ecf91b9c2bfedd04db56ff198ed19ee279b9d3f` was pushed successfully.
 Its first [CI run](https://github.com/zeefan1555/remnote-cli/actions)
 passed both plugin jobs, but both CLI jobs failed during dependency installation:
