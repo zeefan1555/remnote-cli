@@ -9,14 +9,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `flashcards apply` plans accept optional `tags`, keyed by receipt semantic key (`root` or `card:<key>`), each a
-  list of existing tag Rem IDs. With `tags`, `homeRootId` and `tagRemId` must be omitted and no implicit HOME rule
-  applies: the root is not tagged automatically, HOME ancestry and exclusivity are not checked, and a `parentRemId`
-  topic no longer needs to carry a tag (its structure checks remain). Declared tags are written inside the creation
-  step before the created-tag baseline, so same-key replay stays verified, and every created Rem must end with exactly
-  its declared tags (none if undeclared), reported as `tags` receipt checks. A single-card root is the card itself, so
-  `root` and its `card:<key>` must match. Plans without `tags` behave exactly as before.
-
 - `flashcards apply` plans accept optional `parentRemId`: an existing topic Rem directly under the daily document
   that already carries `tagRemId`. New cards (up to 7 per plan, no title needed) are created as its last direct
   children and get no tag of their own, replacing single-card plans plus `move-note` and tag removal for overflow
@@ -153,6 +145,18 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   children; CLI context and verification preserve the full entity scope instead of failing on a complete superset.
 - Document the matching Bridge's separate read-only knowledge-base identity permission for task preview/apply;
   existing installations require explicit approval before continuing.
+
+## [0.25.0] - 2026-10-18
+
+### Added
+
+- `flashcards apply` plans accept optional `tags`, keyed by receipt semantic key (`root` or `card:<key>`), each a
+  list of existing tag Rem IDs. With `tags`, `homeRootId` and `tagRemId` must be omitted and no implicit HOME rule
+  applies: the root is not tagged automatically, HOME ancestry and exclusivity are not checked, and a `parentRemId`
+  topic no longer needs to carry a tag (its structure checks remain). Declared tags are written inside the creation
+  step before the created-tag baseline, so same-key replay stays verified, and every created Rem must end with exactly
+  its declared tags (none if undeclared), reported as `tags` receipt checks. A single-card root is the card itself, so
+  `root` and its `card:<key>` must match. Plans without `tags` behave exactly as before.
 
 ## [0.24.0] - 2026-10-01
 

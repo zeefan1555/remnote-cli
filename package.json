@@ -1,7 +1,7 @@
 {
   "name": "remnote-cli",
   "private": true,
-  "version": "0.24.1",
+  "version": "0.25.0",
   "description": "Direct CLI automation for RemNote through the RemNote CLI Bridge plugin",
   "type": "module",
   "main": "dist/remnote-cli/index.js",
