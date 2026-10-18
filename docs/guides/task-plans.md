@@ -53,9 +53,18 @@ hash is a conflict, not permission to bypass the guard.
 ```
 
 `dailyRemId`, `homeRootId`, and `tagRemId` are required existing IDs. `newCards`, `answerPatches`,
-`reusedCardRemIds`, `title`, and `cardCluster` are optional. At least one new/patch/reused card is required. `newCards` allows at most
+`reusedCardRemIds`, `parentRemId`, `title`, and `cardCluster` are optional. At least one new/patch/reused card is required. `newCards` allows at most
 7 entries; each requires `key`, a plain string or TextSegments `question`, and 1–100 answer lines, each a TextSegments array. Plain-string questions containing `[[` or `]]` are rejected because RemNote stores those brackets as literal text. Native reference IDs in questions and answers are checked before any write. Two or more new cards
-require a cluster title. Patches and reused Rem IDs allow at most 100 each. Reuse uses Rem IDs, not native card IDs.
+require a cluster title unless `parentRemId` is set. Patches and reused Rem IDs allow at most 100 each. Reuse uses Rem IDs, not native card IDs.
+
+`parentRemId` is optional and names an existing topic Rem: a non-card, non-folder, non-document Rem that is a
+direct child of `dailyRemId` and already carries `tagRemId` (for example the titled parent created by an earlier
+plan). New cards are then created as its last direct children, in plan order, and receive no tag of their own; there
+is no `root` binding, and the receipt `ids` include `parent`. With `parentRemId`, `title` is rejected, `cardCluster`
+cannot be `true`, two or more new cards do not need a title, and at least one new card is required. Verification
+checks each card's parent, that the topic keeps `tagRemId` and lists the new cards among its children in plan order,
+and that no new card repeats `tagRemId`. Use it for overflow cards after the first titled 7-card plan instead of
+single-card plans followed by `move-note` and tag removal. Preflight rejects any other parent before a write.
 
 `cardCluster` is an optional boolean and defaults to off. A multi-card plan still creates a titled parent Rem, but
 apply adds and verifies the Card Cluster powerup (`cc`) only when `cardCluster` is `true`. That opt-in also requires

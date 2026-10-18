@@ -749,7 +749,8 @@ remnote-cli --port 3005 status --text
 
 [Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
 inner plan, bound, text segment and apply receipt. Flashcard `cardCluster` defaults off; `cc` is added only when the
-plan sets it to `true` with a title and at least two new cards. Flashcard questions accept a plain string or
+plan sets it to `true` with a title and at least two new cards. Optional `parentRemId` appends new cards, untagged,
+to an existing tagged topic Rem directly under the daily document; it forbids `title`. Flashcard questions accept a plain string or
 `TextSegments`; native references use `{"remId":"EXACT_ID"}`, and plain strings containing `[[` or `]]` are rejected.
 A flashcard answer line may be one code-block segment `{"code":"...","language":"plaintext"}`. Apply stores the SDK
 code-block element and sets `isCardItem` so the line is on the card back. Applied receipts include `answerLines`

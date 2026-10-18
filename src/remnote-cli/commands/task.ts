@@ -32,14 +32,15 @@ const help = {
   flashcards: [
     'Plan shape:',
     '  {"schemaVersion":1,"dailyRemId":"DAILY_ID","homeRootId":"HOME_ID","tagRemId":"TAG_ID","title":"Optional cluster title","cardCluster":false,"newCards":[{"key":"card-a","question":"Question?","answer":[["Answer."]]}],"answerPatches":[],"reusedCardRemIds":[]}',
-    'newCards, answerPatches, reusedCardRemIds, title and cardCluster are optional; at least one new/patch/reused card is required.',
+    'newCards, answerPatches, reusedCardRemIds, parentRemId, title and cardCluster are optional; at least one new/patch/reused card is required.',
+    'parentRemId: existing non-card topic Rem directly under dailyRemId that already carries tagRemId. New cards become its last direct children in plan order and get no tag; title is rejected, no title is needed for several cards, at least one new card is required, ids include parent and no root.',
     'newCards <=7; answer lines 1..100; answerPatches/reusedCardRemIds <=100.',
     'question is a plain string or TextSegments, e.g. "question":["Compare ",{"remId":"TITLE_ID"}," and PB?"]. A plain-string question containing [[ or ]] is rejected: RemNote stores it as literal text, so use {"remId"} segments for references.',
-    'A title is required for two or more new cards. Card Cluster powerup cc is off unless cardCluster is true, which also requires that title and at least two new cards. Omitted or false never adds cc. pageKey segments are forbidden.',
+    'A title is required for two or more new cards unless parentRemId is set. Card Cluster powerup cc is off unless cardCluster is true, which also requires that title and at least two new cards. Omitted or false never adds cc. pageKey segments are forbidden.',
     'dailyRemId must name an explicit existing dailyDocument; native type validation cannot prove calendar freshness.',
     'No date scalar is supplied. The caller resolves/revalidates the intended date before a new batch and after midnight.',
     'Replay uses the original recorded diary; it never switches an existing batch to a newly resolved date.',
-    'Receipt budget: sum(1 + answer lines per newCard) + (newCards.length > 1 ? 1 : 0) + 2 + reused IDs + 2*patches <=1000.',
+    'Receipt budget: sum(1 + answer lines per newCard) + (newCards.length > 1 && !parentRemId ? 1 : 0) + 2 + reused IDs + 2*patches <=1000.',
   ],
   wiki: [
     'Plan shape:',

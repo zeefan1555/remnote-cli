@@ -7,6 +7,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `flashcards apply` plans accept optional `parentRemId`: an existing topic Rem directly under the daily document
+  that already carries `tagRemId`. New cards (up to 7 per plan, no title needed) are created as its last direct
+  children and get no tag of their own, replacing single-card plans plus `move-note` and tag removal for overflow
+  cards. `title` is rejected with it; preflight rejects any other parent before writing; verification checks parent,
+  child order, the topic tag and that new cards do not repeat it.
+
 ### Fixed
 
 - `context`, `inspect --fields markdown` and other reads that render titles no longer fail with

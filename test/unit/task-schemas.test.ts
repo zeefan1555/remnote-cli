@@ -89,6 +89,10 @@ describe('task plan contract', () => {
     { cardCluster: true },
     { title: 'Topic', cardCluster: true },
     { cardCluster: true, newCards: [card, { ...card, key: 'c2' }] },
+    { parentRemId: '' },
+    { parentRemId: 'topic', title: 'Topic' },
+    { parentRemId: 'topic', newCards: undefined, reusedCardRemIds: ['r'] },
+    { parentRemId: 'topic', cardCluster: true, newCards: [card, { ...card, key: 'c2' }] },
   ])('rejects unsafe flashcard input %#', (v) =>
     expect(FlashcardsPlanSchema.safeParse({ ...flash, ...v }).success).toBe(false)
   );
@@ -127,6 +131,12 @@ describe('task plan contract', () => {
     });
     expect(bad.success).toBe(false);
     expect(JSON.stringify(bad.error?.issues)).toContain('{\\"remId\\"');
+  });
+  it('accepts parentRemId for several new cards without a title', () => {
+    const two = { ...flash, parentRemId: 'topic', newCards: [card, { ...card, key: 'c2' }] };
+    expect(FlashcardsPlanSchema.parse(two)).toEqual(two);
+    const { parentRemId: _omitted, ...untitled } = two;
+    expect(FlashcardsPlanSchema.safeParse(untitled).success).toBe(false);
   });
   it('accepts an explicit Card Cluster opt-in and treats omit or false as off', () => {
     const two = {
