@@ -117,6 +117,12 @@ require the current raw-text hash. Semantic receipt keys identify returned Rems;
 never infer IDs from creation order. Multi-card flashcards do not receive the
 Card Cluster powerup unless the plan sets `cardCluster: true` together with a
 title and at least two new cards. Omitted or `false` leaves `cc` unset.
+Optional flashcard `tags` declares tags by semantic key, e.g.
+`"tags":{"root":[],"card:a":["TAG_ID"]}`; then omit `homeRootId`/`tagRemId`. Every
+created Rem ends with exactly its declared tags (none if undeclared), and a
+`parentRemId` topic need not carry a tag. Declare final tags in the plan instead of
+`update-tags` afterwards, which breaks same-key replay. Without `tags` the implicit
+HOME tagging is unchanged.
 Flashcard questions accept a plain string or `TextSegments`. Use `{"remId":"EXACT_ID"}`
 segments for native references. A plain string containing `[[` or `]]` is invalid.
 An answer line may be one code block, `[{"code":"line1\nline2","language":"plaintext"}]`.

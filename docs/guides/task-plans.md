@@ -52,8 +52,9 @@ hash is a conflict, not permission to bypass the guard.
 {"schemaVersion":1,"dailyRemId":"daily-rem","homeRootId":"home-root","tagRemId":"tag-rem","title":"Topic","newCards":[{"key":"card-a","question":"Question?","answer":[["Answer."]]},{"key":"card-b","question":["How does ",{"remId":"source-rem"}," apply?"],"answer":[["See ",{"remId":"source-rem"}]]}],"answerPatches":[],"reusedCardRemIds":[]}
 ```
 
-`dailyRemId`, `homeRootId`, and `tagRemId` are required existing IDs. `newCards`, `answerPatches`,
-`reusedCardRemIds`, `parentRemId`, `title`, and `cardCluster` are optional. At least one new/patch/reused card is required. `newCards` allows at most
+`dailyRemId` is a required existing ID. `homeRootId` and `tagRemId` are required unless the plan uses `tags`
+(see below), and forbidden when it does. `newCards`, `answerPatches`,
+`reusedCardRemIds`, `parentRemId`, `title`, `cardCluster`, and `tags` are optional. At least one new/patch/reused card is required. `newCards` allows at most
 7 entries; each requires `key`, a plain string or TextSegments `question`, and 1–100 answer lines, each a TextSegments array. Plain-string questions containing `[[` or `]]` are rejected because RemNote stores those brackets as literal text. Native reference IDs in questions and answers are checked before any write. Two or more new cards
 require a cluster title unless `parentRemId` is set. Patches and reused Rem IDs allow at most 100 each. Reuse uses Rem IDs, not native card IDs.
 
@@ -65,6 +66,25 @@ cannot be `true`, two or more new cards do not need a title, and at least one ne
 checks each card's parent, that the topic keeps `tagRemId` and lists the new cards among its children in plan order,
 and that no new card repeats `tagRemId`. Use it for overflow cards after the first titled 7-card plan instead of
 single-card plans followed by `move-note` and tag removal. Preflight rejects any other parent before a write.
+
+`tags` is optional and replaces the implicit HOME tagging above with explicit tags:
+
+```json
+{"schemaVersion":1,"dailyRemId":"daily-rem","title":"Topic","newCards":[{"key":"card-a","question":"Question?","answer":[["Answer."]]},{"key":"card-b","question":"Other?","answer":[["Answer."]]}],"tags":{"root":[],"card:a":["tag-1"],"card:b":["tag-1","tag-2"]}}
+```
+
+Keys are receipt semantic keys: `root` or `card:<key>` for a new card in this plan; values are up to 20 distinct
+existing tag Rem IDs. `answer:` keys and unknown keys are rejected. A `parentRemId` plan has no root, so `root` is
+rejected there. In a single-card plan without `parentRemId` the root is the card itself; `root` and `card:<key>` may
+both appear only with the same IDs. When `tags` is present (an empty object counts), `homeRootId` and `tagRemId`
+must be omitted and the CLI applies no HOME rule: it does not tag the root implicitly, does not check HOME ancestry
+or exclusivity, and a `parentRemId` topic need not carry any tag (its tags are neither changed nor checked; the
+non-card, non-folder, non-document, direct-child-of-`dailyRemId` checks still apply). Declared tags are added inside
+the creation step, before the created-tag baseline is recorded, so same-key replay stays consistent. After writing,
+every created Rem (root, cards, answer lines) must carry exactly its declared tag IDs, or none if undeclared; each
+yields a `tags` check in the receipt and a mismatch fails the apply. Receipt `ids` then omit `tag`. Tag IDs added
+later with `update-tags` change that baseline and make a same-key replay conflict, so declare final tags in the plan.
+Without `tags`, behavior is unchanged.
 
 `cardCluster` is an optional boolean and defaults to off. A multi-card plan still creates a titled parent Rem, but
 apply adds and verifies the Card Cluster powerup (`cc`) only when `cardCluster` is `true`. That opt-in also requires

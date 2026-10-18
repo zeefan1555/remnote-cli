@@ -1599,3 +1599,182 @@ describe('flashcards under an existing topic (parentRemId)', () => {
     ).rejects.toThrow('omit title');
   });
 });
+
+describe('flashcards with explicit tags', () => {
+  async function tagged() {
+    const f = await fixture();
+    const term = f.plugin.addTestRem('term-topic', 'Term topic');
+    term.type = RemType.CONCEPT;
+    return { f, term };
+  }
+  const explicitPlan = (): FlashcardsPlan => ({
+    schemaVersion: 1,
+    dailyRemId: 'daily',
+    title: 'Cluster',
+    newCards: [
+      { key: 'a', question: 'Question A?', answer: [['Answer A']] },
+      { key: 'b', question: 'Question B?', answer: [['Answer B']] },
+    ],
+    tags: { root: [], 'card:a': ['term-topic'], 'card:b': ['term-topic'] },
+  });
+  const underTopic = (topicId: string): FlashcardsPlan => ({
+    schemaVersion: 1,
+    dailyRemId: 'daily',
+    parentRemId: topicId,
+    newCards: [
+      { key: 'c', question: 'Question C?', answer: [['Answer C']] },
+      { key: 'd', question: ['Compare ', { remId: 'source' }, '?'], answer: [['D1']] },
+    ],
+    tags: { 'card:c': ['term-topic'], 'card:d': ['tag'] },
+  });
+  const tagIds = async (f: Fixture, id: string) =>
+    (await (await rem(f, id)).getTagRems()).map((r) => r._id).sort();
+
+  it('writes exactly the declared tags, leaves the root untagged and replays without new writes', async () => {
+    const { f } = await tagged();
+    const tagSpy = vi.spyOn(MockRem.prototype, 'addTag');
+    const plan = explicitPlan();
+    const result = await f.adapter.applyFlashcards(request(plan, 'explicit'));
+    success(result);
+    expect(result.ids).not.toHaveProperty('tag');
+    expect(await tagIds(f, result.ids.root)).toEqual([]);
+    expect(await tagIds(f, result.ids['card:a'])).toEqual(['term-topic']);
+    expect(await tagIds(f, result.ids['card:b'])).toEqual(['term-topic']);
+    expect(await tagIds(f, result.ids['answer:a:0'])).toEqual([]);
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ kind: 'tags', remId: result.ids.root, status: 'passed' })
+    );
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        kind: 'tags',
+        remId: result.ids['card:a'],
+        status: 'passed',
+        actual: ['term-topic'],
+      })
+    );
+    const writes = tagSpy.mock.calls.length;
+    expect(writes).toBe(2);
+    const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+    const replay = await adapter(f.plugin).applyFlashcards(request(plan, 'explicit'));
+    success(replay);
+    expect(replay.ids).toEqual(result.ids);
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+    expect(tagSpy).toHaveBeenCalledTimes(writes);
+    tagSpy.mockRestore();
+  });
+
+  it('keeps the implicit HOME tag on the root when tags is omitted', async () => {
+    const f = await fixture();
+    const result = await f.adapter.applyFlashcards(request(flashPlan(), 'legacy'));
+    success(result);
+    expect(result.ids.tag).toBe('tag');
+    expect(await tagIds(f, result.ids.root)).toEqual(['tag']);
+    expect(await tagIds(f, result.ids['card:a'])).toEqual([]);
+    expect(result.checks.some((c) => c.kind === 'tags')).toBe(false);
+  });
+
+  it('accepts an untagged topic as parentRemId and tags each new card as declared', async () => {
+    const { f } = await tagged();
+    const first = await f.adapter.applyFlashcards(request(explicitPlan(), 'first'));
+    success(first);
+    const topicId = first.ids.root;
+    const result = await f.adapter.applyFlashcards(request(underTopic(topicId), 'second'));
+    success(result);
+    expect(await tagIds(f, topicId)).toEqual([]);
+    expect(await tagIds(f, result.ids['card:c'])).toEqual(['term-topic']);
+    expect(await tagIds(f, result.ids['card:d'])).toEqual(['tag']);
+    expect((await (await rem(f, result.ids['card:d'])).getParentRem())?._id).toBe(topicId);
+  });
+
+  it('accepts a legacy HOME-tagged topic and leaves its tag in place', async () => {
+    const { f } = await tagged();
+    const legacy = await f.adapter.applyFlashcards(request(flashPlan(), 'legacy'));
+    success(legacy);
+    const result = await f.adapter.applyFlashcards(request(underTopic(legacy.ids.root), 'next'));
+    success(result);
+    expect(await tagIds(f, legacy.ids.root)).toEqual(['tag']);
+    expect(await tagIds(f, result.ids['card:d'])).toEqual(['tag']);
+  });
+
+  it('still rejects a nested parentRemId before any write', async () => {
+    const { f } = await tagged();
+    const first = await f.adapter.applyFlashcards(request(explicitPlan(), 'first'));
+    const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+    const result = await f.adapter.applyFlashcards(
+      request(underTopic(first.ids['card:a']), 'nested')
+    );
+    expect(result.status).toBe('conflict');
+    expect(result.errors[0]?.message).toContain('parentRemId must be an existing');
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+  });
+
+  it('fails when a created Rem ends with an undeclared tag', async () => {
+    const { f } = await tagged();
+    f.plugin.addTestRem('extra', 'Extra');
+    const original = MockRem.prototype.addTag;
+    const spy = vi.spyOn(MockRem.prototype, 'addTag').mockImplementation(async function (
+      this: MockRem,
+      id: string
+    ) {
+      await original.call(this, id);
+      await original.call(this, 'extra');
+    });
+    const result = await f.adapter.applyFlashcards(request(explicitPlan(), 'extra'));
+    spy.mockRestore();
+    expect(result.status).toBe('conflict');
+    expect(result.errors[0]?.message).toContain('Created tags differ from plan tags');
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ kind: 'tags', status: 'failed' })
+    );
+  });
+
+  it('treats a single-card root and its card key as one Rem', async () => {
+    const { f } = await tagged();
+    const single: FlashcardsPlan = {
+      schemaVersion: 1,
+      dailyRemId: 'daily',
+      newCards: [{ key: 's', question: 'Single?', answer: [['Yes']] }],
+      tags: { root: ['term-topic'], 'card:s': ['term-topic'] },
+    };
+    const result = await f.adapter.applyFlashcards(request(single, 'single'));
+    success(result);
+    expect(result.ids.root).toBe(result.ids['card:s']);
+    expect(await tagIds(f, result.ids['card:s'])).toEqual(['term-topic']);
+    await expect(
+      f.adapter.applyFlashcards(
+        request({ ...single, tags: { root: [], 'card:s': ['term-topic'] } }, 'mismatch')
+      )
+    ).rejects.toThrow('tags.root and its card key must match');
+  });
+
+  it.each([
+    ['an answer key', { tags: { 'answer:a:0': ['tag'] } }, 'Unknown tags key'],
+    ['an unknown card key', { tags: { 'card:zz': ['tag'] } }, 'Unknown tags key'],
+    ['a duplicate tag ID', { tags: { 'card:a': ['tag', 'tag'] } }, 'Duplicate tag ID'],
+    ['tagRemId alongside tags', { tagRemId: 'tag' }, 'omit both'],
+    ['homeRootId alongside tags', { homeRootId: 'home' }, 'omit both'],
+  ])('rejects %s before any write', async (_name, patch, message) => {
+    const { f } = await tagged();
+    await expect(
+      f.adapter.applyFlashcards(request({ ...explicitPlan(), ...patch }, 'bad'))
+    ).rejects.toThrow(message);
+    expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('rejects tags.root on a parentRemId plan and a missing tag Rem', async () => {
+    const { f } = await tagged();
+    const first = await f.adapter.applyFlashcards(request(explicitPlan(), 'first'));
+    await expect(
+      f.adapter.applyFlashcards(
+        request({ ...underTopic(first.ids.root), tags: { root: [] } }, 'root')
+      )
+    ).rejects.toThrow('tags.root needs a created root');
+    const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+    const missing = await f.adapter.applyFlashcards(
+      request({ ...explicitPlan(), tags: { 'card:a': ['nope'] } }, 'missing')
+    );
+    expect(missing.status).not.toBe('verified');
+    expect(missing.errors[0]?.message).toContain('Rem missing');
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+  });
+});

@@ -32,10 +32,20 @@ export interface AnswerPatch {
 export interface FlashcardsPlan {
   schemaVersion: 1;
   dailyRemId: string;
-  homeRootId: string;
-  tagRemId: string;
-  /** Existing topic Rem (direct child of dailyRemId carrying tagRemId) that receives new cards. */
+  /** Implicit HOME tagging (legacy). Required without `tags`, forbidden with it. */
+  homeRootId?: string;
+  tagRemId?: string;
+  /**
+   * Existing topic Rem (direct child of dailyRemId) that receives new cards. Without `tags` it must
+   * already carry tagRemId.
+   */
   parentRemId?: string;
+  /**
+   * Explicit tags keyed by receipt semantic key (`root` or `card:<key>`). When present, every
+   * created Rem ends with exactly its declared tag IDs (undeclared ones with none) and no implicit
+   * HOME rule applies.
+   */
+  tags?: Record<string, string[]>;
   title?: string;
   cardCluster?: boolean;
   newCards?: Array<{ key: string; question: string | TextSegment[]; answer: TextSegment[][] }>;
@@ -208,6 +218,41 @@ function question(v: unknown): asserts v is string | TextSegment[] {
 function clustered(p: FlashcardsPlan): boolean {
   return !p.parentRemId && (p.newCards?.length ?? 0) > 1;
 }
+/** A plan with a tags object declares tags explicitly instead of the implicit HOME rules. */
+function explicitTags(p: FlashcardsPlan): boolean {
+  return p.tags !== undefined;
+}
+function validateTags(p: FlashcardsPlan): void {
+  object(p.tags);
+  const cards = new Set((p.newCards ?? []).map((c) => `card:${c.key}`));
+  for (const [k, ids] of Object.entries(p.tags)) {
+    if (k === 'root') {
+      if (p.parentRemId !== undefined || !p.newCards?.length)
+        throw new Error('tags.root needs a created root; parentRemId plans have none');
+    } else if (!cards.has(k)) throw new Error(`Unknown tags key: ${k}`);
+    array(ids, 20);
+    ids.forEach((v) => string(v));
+    if (new Set(ids).size !== ids.length) throw new Error(`Duplicate tag ID in tags.${k}`);
+  }
+  const single = !p.parentRemId && p.newCards?.length === 1 ? `card:${p.newCards[0].key}` : '';
+  if (
+    single &&
+    p.tags.root &&
+    p.tags[single] &&
+    !same([...p.tags.root].sort(), [...p.tags[single]].sort())
+  )
+    throw new Error('A single-card root is the card itself; tags.root and its card key must match');
+}
+/** Declared tags per created Rem ID; a single-card root and its card share one Rem. */
+function declaredTags(p: FlashcardsPlan, ids: Record<string, string>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [k, tagIds] of Object.entries(p.tags ?? {})) {
+    const id = ids[k];
+    if (!id) throw new TaskError('conflict', `Missing durable semantic binding for tags.${k}`);
+    out.set(id, [...tagIds].sort());
+  }
+  return out;
+}
 /** Parent of the created card scaffold: the existing topic Rem or the daily document. */
 function scaffoldParent(p: FlashcardsPlan): string {
   return p.parentRemId ?? p.dailyRemId;
@@ -247,9 +292,14 @@ export function validateTaskPlan(
       'newCards',
       'answerPatches',
       'reusedCardRemIds',
+      'tags',
     ]);
     const plan = p as FlashcardsPlan;
-    [plan.dailyRemId, plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
+    string(plan.dailyRemId);
+    if (plan.tags !== undefined) {
+      if (plan.homeRootId !== undefined || plan.tagRemId !== undefined)
+        throw new Error('tags replaces homeRootId and tagRemId; omit both');
+    } else [plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
     if (plan.parentRemId !== undefined) {
       string(plan.parentRemId);
       if (!plan.newCards?.length) throw new Error('parentRemId requires at least one new card');
@@ -275,6 +325,7 @@ export function validateTaskPlan(
     }
     if (plan.cardCluster === true && ((plan.newCards?.length ?? 0) < 2 || !plan.title))
       throw new Error('cardCluster requires a title and two or more new cards');
+    if (plan.tags !== undefined) validateTags(plan);
     if (plan.reusedCardRemIds !== undefined) {
       array(plan.reusedCardRemIds, 100);
       plan.reusedCardRemIds.forEach((v) => string(v));
@@ -660,41 +711,54 @@ export class TaskOperations {
   ): Promise<void> {
     if (kind === 'flashcards') {
       const p = input as FlashcardsPlan,
-        evidence = await inspectWithEvidence(this.deps.plugin, {
-          schemaVersion: 1,
-          remIds: [p.dailyRemId, p.homeRootId, p.tagRemId],
-        });
-      const context = evidence.result;
-      if (!context.complete)
-        throw new TaskError('incomplete', 'Cannot read daily/HOME/tag context');
-      const ancestry = verifyInspection(
-        context,
-        {
-          schemaVersion: 1,
-          inspect: { schemaVersion: 1, remIds: [p.dailyRemId, p.homeRootId, p.tagRemId] },
-          expectations: [{ kind: 'ancestor', remId: p.tagRemId, value: p.homeRootId }],
-        },
-        evidence.ancestorTails
-      );
-      if (ancestry.status === 'incomplete')
-        throw new TaskError(
-          'incomplete',
-          'HOME ancestry requires the unread ancestor tail',
-          p.tagRemId
+        explicit = explicitTags(p);
+      if (explicit) {
+        const context = (
+          await inspectWithEvidence(this.deps.plugin, { schemaVersion: 1, remIds: [p.dailyRemId] })
+        ).result;
+        if (!context.complete) throw new TaskError('incomplete', 'Cannot read daily context');
+        if (context.objects[0]?.remType !== 'dailyDocument')
+          throw new TaskError('conflict', 'Expected existing daily document', p.dailyRemId);
+        for (const id of new Set(Object.values(p.tags!).flat())) await this.rem(id);
+      } else {
+        const homeRootId = p.homeRootId!,
+          tagRemId = p.tagRemId!,
+          evidence = await inspectWithEvidence(this.deps.plugin, {
+            schemaVersion: 1,
+            remIds: [p.dailyRemId, homeRootId, tagRemId],
+          });
+        const context = evidence.result;
+        if (!context.complete)
+          throw new TaskError('incomplete', 'Cannot read daily/HOME/tag context');
+        const ancestry = verifyInspection(
+          context,
+          {
+            schemaVersion: 1,
+            inspect: { schemaVersion: 1, remIds: [p.dailyRemId, homeRootId, tagRemId] },
+            expectations: [{ kind: 'ancestor', remId: tagRemId, value: homeRootId }],
+          },
+          evidence.ancestorTails
         );
-      const daily = context.objects.find((o) => o.remId === p.dailyRemId),
-        home = context.objects.find((o) => o.remId === p.homeRootId),
-        tag = context.objects.find((o) => o.remId === p.tagRemId);
-      if (
-        daily?.remType !== 'dailyDocument' ||
-        home?.remType !== 'folder' ||
-        tag?.remType !== 'concept' ||
-        !tag.ancestorRemIds.includes(p.homeRootId)
-      )
-        throw new TaskError(
-          'conflict',
-          'Expected existing daily document and HOME descendant Concept Tag'
-        );
+        if (ancestry.status === 'incomplete')
+          throw new TaskError(
+            'incomplete',
+            'HOME ancestry requires the unread ancestor tail',
+            tagRemId
+          );
+        const daily = context.objects.find((o) => o.remId === p.dailyRemId),
+          home = context.objects.find((o) => o.remId === homeRootId),
+          tag = context.objects.find((o) => o.remId === tagRemId);
+        if (
+          daily?.remType !== 'dailyDocument' ||
+          home?.remType !== 'folder' ||
+          tag?.remType !== 'concept' ||
+          !tag.ancestorRemIds.includes(homeRootId)
+        )
+          throw new TaskError(
+            'conflict',
+            'Expected existing daily document and HOME descendant Concept Tag'
+          );
+      }
       for (const card of p.newCards ?? []) {
         if (Array.isArray(card.question)) await this.checkSegments(card.question);
         for (const line of card.answer) await this.checkSegments(line);
@@ -707,11 +771,13 @@ export class TaskOperations {
           (await topic.isFolder()) ||
           (await topic.isDocument()) ||
           (await topic.getCards()).length ||
-          !nativeIds(await topic.getTagRems()).includes(p.tagRemId)
+          (!explicit && !nativeIds(await topic.getTagRems()).includes(p.tagRemId!))
         )
           throw new TaskError(
             'conflict',
-            'parentRemId must be an existing non-card topic Rem directly under the daily document carrying tagRemId',
+            explicit
+              ? 'parentRemId must be an existing non-card topic Rem directly under the daily document'
+              : 'parentRemId must be an existing non-card topic Rem directly under the daily document carrying tagRemId',
             p.parentRemId
           );
       }
@@ -1228,8 +1294,9 @@ export class TaskOperations {
     save: () => Promise<void>,
     receipt: TaskReceipt
   ): Promise<void> {
+    const explicit = explicitTags(p);
     j.ids.daily = p.dailyRemId;
-    j.ids.tag = p.tagRemId;
+    if (!explicit) j.ids.tag = p.tagRemId!;
     if (p.parentRemId) j.ids.parent = p.parentRemId;
     const cards = p.newCards ?? [];
     const cardCluster = p.cardCluster === true && cards.length > 1 && Boolean(p.title);
@@ -1260,10 +1327,19 @@ export class TaskOperations {
             await rem.setIsCollapsed(true, p.dailyRemId);
           }
         }
-        if (!p.parentRemId) {
+        // Tags are written inside the creation action so createdTagIds records the final set.
+        if (explicit)
+          for (const [id, tagIds] of declaredTags(p, j.ids)) {
+            const r = await this.rem(id);
+            for (const tagId of tagIds) {
+              this.assertCanMutate();
+              await r.addTag(tagId);
+            }
+          }
+        else if (!p.parentRemId) {
           const root = await this.rem(j.ids.root);
           this.assertCanMutate();
-          await root.addTag(p.tagRemId);
+          await root.addTag(p.tagRemId!);
         }
         return ids;
       });
@@ -1308,14 +1384,30 @@ export class TaskOperations {
           await this.mutate(() => r.addPowerup('cc'));
         }
       }
-      if (bound.root)
+      if (explicit) {
+        const declared = declaredTags(p, j.ids);
+        for (const id of ids) {
+          const actual = nativeIds(await (await this.rem(id)).getTagRems()).sort(),
+            expected = declared.get(id) ?? [],
+            passed = same(actual, expected);
+          receipt.checks.push({
+            kind: 'tags',
+            remId: id,
+            status: passed ? 'passed' : 'failed',
+            expected,
+            actual,
+          });
+          if (!passed) throw new TaskError('conflict', 'Created tags differ from plan tags', id);
+        }
+      }
+      if (bound.root && !explicit)
         for (const tag of await bound.root.getTagRems())
-          if (tag._id !== p.tagRemId && (await this.within(tag, p.homeRootId)))
+          if (tag._id !== p.tagRemId && (await this.within(tag, p.homeRootId!)))
             throw new TaskError('conflict', 'Additional HOME classification', bound.root._id);
-      if (!bound.root || clustered(p))
+      if (!explicit && (!bound.root || clustered(p)))
         for (const card of bound.cards)
           for (const tag of await card.getTagRems())
-            if (await this.within(tag, p.homeRootId))
+            if (await this.within(tag, p.homeRootId!))
               throw new TaskError(
                 'conflict',
                 bound.root ? 'Cluster child repeats HOME tag' : 'Topic child repeats HOME tag',
@@ -1326,9 +1418,10 @@ export class TaskOperations {
       if (bound.root) {
         expectations.push(
           { kind: 'parent', remId: bound.root._id, value: p.dailyRemId },
-          { kind: 'tag', remId: bound.root._id, value: p.tagRemId },
           { kind: 'cardRemIds', remId: bound.root._id, value: bound.cards.map((r) => r._id) }
         );
+        if (!explicit)
+          expectations.push({ kind: 'tag', remId: bound.root._id, value: p.tagRemId! });
         if (clustered(p))
           expectations.push({ kind: 'remType', remId: bound.root._id, value: 'text' });
         if (cardCluster)
@@ -1337,19 +1430,21 @@ export class TaskOperations {
       } else {
         const topic = p.parentRemId!;
         expectations.push({ kind: 'parent', remId: topic, value: p.dailyRemId });
-        expectations.push({ kind: 'tag', remId: topic, value: p.tagRemId });
+        if (!explicit) expectations.push({ kind: 'tag', remId: topic, value: p.tagRemId! });
         expectations.push({
           kind: 'children',
           remId: topic,
           value: bound.cards.map((r) => r._id),
           exact: false,
         });
-        for (const card of bound.cards)
+        for (const card of bound.cards) {
           expectations.push(
             { kind: 'parent', remId: card._id, value: topic },
-            { kind: 'tag', remId: card._id, value: p.tagRemId, present: false },
             { kind: 'cardRemIds', remId: card._id, value: [card._id] }
           );
+          if (!explicit)
+            expectations.push({ kind: 'tag', remId: card._id, value: p.tagRemId!, present: false });
+        }
         scopeRemIds = bound.cards.map((r) => r._id);
       }
       const verified = await verifyScope(this.deps.plugin, {
@@ -1358,7 +1453,7 @@ export class TaskOperations {
           schemaVersion: 1,
           remIds: p.parentRemId ? [p.parentRemId, ...scopeRemIds] : scopeRemIds,
           subtreeRootIds: scopeRemIds,
-          tagRemIds: [p.tagRemId],
+          ...(explicit ? {} : { tagRemIds: [p.tagRemId!] }),
         },
         expectations,
       });
