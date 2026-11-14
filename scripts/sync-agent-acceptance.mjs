@@ -144,6 +144,15 @@ function cardIdentity(snapshot) {
   }));
 }
 
+function assertParentChain(actual, expected) {
+  // Ancestor names follow text edits; only ordered identity/type are structural.
+  assert.deepEqual(
+    actual.map(({ id, type }) => ({ id, type })),
+    expected.map(({ id, type }) => ({ id, type })),
+    'Immutable parent changed'
+  );
+}
+
 function replaceOnce(source, original, replacement) {
   assert.equal(source.split(original).length, 2, 'Expected exactly one synthetic text occurrence');
   return source.replace(original, replacement);
@@ -561,9 +570,9 @@ async function main(argv) {
     assert.deepEqual(remById(updated, question.id).text, ['Sync acceptance revised question']);
     assert.deepEqual(remById(updated, answer.id).text, ['Sync acceptance revised answer']);
     assert.deepEqual(cardIdentity(updated), cardIdentity(before), 'Card identity/history changed');
-    for (const old of before.rems)
+    for (const old of before.rems) {
+      assertParentChain(remById(updated, old.id).parent, old.parent);
       for (const field of [
-        'parent',
         'children',
         'isCardItem',
         'hasCardStructure',
@@ -571,6 +580,7 @@ async function main(argv) {
         'backText',
       ])
         assert.deepEqual(remById(updated, old.id)[field], old[field], `Immutable ${field} changed`);
+    }
     await unchanged('noop-sync');
     assert.deepEqual(await inspect('noop-readback', ids), updated);
 
@@ -752,6 +762,24 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
   );
   assert.throws(() => options(['--yes', '--unexpected', 'value']), /Unknown argument/);
   assert.throws(() => options(['--yes', '--kb-id', 'a', '--kb-id', 'b']), /Duplicate/);
+  const parentChain = [
+    { id: 'root', name: 'Synthetic root', type: 'document' },
+    { id: 'question', name: 'Sync acceptance question', type: 'text' },
+  ];
+  assertParentChain(parentChain, parentChain);
+  assertParentChain([], []);
+  for (const changed of [
+    [parentChain[0], { ...parentChain[1], id: 'different-question' }],
+    [parentChain[0], { ...parentChain[1], type: 'document' }],
+    [...parentChain].reverse(),
+    parentChain.slice(0, -1),
+    [...parentChain, { id: 'extra', name: 'Extra ancestor', type: 'text' }],
+  ])
+    assert.throws(() => assertParentChain(changed, parentChain), /Immutable parent changed/);
+  assertParentChain(
+    [parentChain[0], { ...parentChain[1], name: 'Sync acceptance revised question' }],
+    parentChain
+  );
   const { renderDocument, parseDocument } = await import('../src/business/workspace/markdown.ts');
   const { renderFrontmatter } = await import('../src/business/workspace/metadata.ts');
   const { reconcile } = await import('../src/business/workspace/reconcile.ts');
@@ -970,7 +998,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     'remote-structure'
   );
   console.log(
-    'Offline driver self-test passed: codec, stable blocks, receipt bounds, retained IDs and three-way conflicts; no live calls or filesystem writes.'
+    'Offline driver self-test passed: codec, stable blocks, parent identity, receipt bounds, retained IDs and three-way conflicts; no live calls or filesystem writes.'
   );
 } else {
   await main(argv).catch(() => {
