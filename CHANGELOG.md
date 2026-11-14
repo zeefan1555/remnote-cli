@@ -25,6 +25,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The agent skill accepts explicit operation-, target- and scope-bound write authorization
+  throughout the same task, without a fixed confirmation phrase or routine per-turn reconfirmation.
+  Read-only requests, destructive-write gates, status checks, readback and recovery safeguards remain in force.
 - Use `main` for the default branch, GitHub Actions push trigger, and repository documentation.
 - This CLI is its own repository. The companion plugin is
   [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge)
