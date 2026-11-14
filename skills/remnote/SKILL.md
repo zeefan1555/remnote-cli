@@ -1,7 +1,6 @@
 ---
 name: remnote
 description: Search, read, write, or synchronize a private Obsidian vault and RemNote through remnote-cli within the user's authorized scope.
-homepage: https://github.com/zeefan1555/remnote-cli
 metadata:
   openclaw:
     requires:
@@ -9,6 +8,8 @@ metadata:
 ---
 
 # RemNote CLI
+
+Repository: [zeefan1555/remnote-cli](https://github.com/zeefan1555/remnote-cli).
 
 Use the direct CLI for ordinary knowledge-base operations. A customized
 `remnote-kb-navigation` skill can supply the user's exact root IDs; do not guess

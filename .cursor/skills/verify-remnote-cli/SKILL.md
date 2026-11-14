@@ -1,6 +1,6 @@
 ---
 name: verify-remnote-cli
-description: 验证 remnote-cli 仓库：用 node>=22 构建、跑 vitest 单测，并在隔离的 REMNOTE_CLI_CONFIG 里驱动 --version/--help、pair（私有配对文件）和 status 未连接路径。改本仓库后、提 PR 之前使用；不连真实 RemNote，也不覆盖已安装的 remnote-cli。插件在独立仓库 https://github.com/zeefan1555/remnote-cli-bridge。
+description: 验证 remnote-cli 仓库：用 Node 22.13.0+ 构建、跑 vitest 单测，并在隔离的 REMNOTE_CLI_CONFIG 里驱动 --version/--help、pair（私有配对文件）和 status 未连接路径。改本仓库后、提 PR 之前使用；不连真实 RemNote，也不覆盖已安装的 remnote-cli。插件在独立仓库 https://github.com/zeefan1555/remnote-cli-bridge。
 ---
 
 # 验证 remnote-cli
