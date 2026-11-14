@@ -1,6 +1,6 @@
 ---
 name: remnote
-description: Search, read, and write RemNote through remnote-cli. Require confirm write before mutating commands.
+description: Search, read, and write RemNote through remnote-cli within the user's authorized scope.
 homepage: https://github.com/zeefan1555/remnote-cli
 metadata:
   openclaw:
@@ -29,10 +29,16 @@ See [installation](../../docs/guides/installation.md) and
 
 ## Safety
 
-Default to reads and previews. Require the user's exact phrase `confirm write`
-in the same turn before ordinary mutating commands. Preview is not write consent.
-Destructive changes also require explicit replacement/deletion intent, both plugin
-write gates and `--allow-destructive`.
+Default to reads and previews. An explicit write request authorizes its specified
+operation, target objects and scope throughout the same task; no fixed phrase or
+routine per-turn reconfirmation is required. Inspection, review and preview alone
+are not write consent. Clarify ambiguous targets or scope, scope expansions, or
+overwriting unrecognized changes before writing. Stop on a user pause/revocation
+or a real workflow Human Gate.
+
+Check live status before writes and verify the exact resulting state by semantic
+readback. Destructive changes also require explicit replacement/deletion intent,
+both plugin write gates and `--allow-destructive`.
 
 Prefer one `remnote-cli` process per turn. Do not shell-chain separate processes:
 each process owns the loopback port, and the next process can fail with

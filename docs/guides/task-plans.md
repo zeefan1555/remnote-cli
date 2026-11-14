@@ -10,7 +10,8 @@ remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-batch-1
 The CLI reads the **inner plan** from a UTF-8 JSON file or stdin (`-`), then wraps it as
 `{schemaVersion:1,plan,dryRun:true,idempotencyKey}`. `--apply` explicitly sets
 `dryRun:false`; preview is the default and performs no writes or persistent journal storage. Preview is not approval
-to apply. Obtain normal write authorization; the [CLI skill](../../skills/remnote/SKILL.md) retains `confirm write`.
+to apply. Apply only within the user's explicitly authorized operation, targets and scope;
+see the [CLI skill](../../skills/remnote/SKILL.md#safety) for authorization and safety rules.
 
 Neither preview nor apply ever looks up dates or creates daily documents. Task setters recheck the live write gate
 immediately before each SDK mutation after awaited reads. This is not a transaction or rollback guarantee.
