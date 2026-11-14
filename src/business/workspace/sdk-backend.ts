@@ -1,0 +1,317 @@
+import type { ReactRNPlugin, PluginRem, RichTextInterface } from '@remnote/plugin-sdk';
+import { cardMetadataSchema } from './metadata.js';
+import { immutableProjection } from './snapshots.js';
+import {
+  hash,
+  type MetadataStore,
+  type WorkspaceBackend,
+  type WorkspaceRem,
+  type PublicDiscovery,
+} from './types.js';
+
+function boolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw new Error(`Incomplete native ${label} flag`);
+  return value;
+}
+
+function publicSnapshot(rem: PluginRem): Record<string, unknown> {
+  return JSON.parse(
+    JSON.stringify(
+      {
+        $type: 'rem',
+        id: rem._id,
+        ...Object.fromEntries(
+          Object.entries(rem).filter(([key, value]) => key !== '_id' && typeof value !== 'function')
+        ),
+      },
+      (_key, value) => (value === undefined ? { $type: 'undefined' } : value)
+    )
+  );
+}
+
+function cardsSnapshot(
+  cards: Awaited<ReturnType<PluginRem['getCards']>>,
+  remId: string
+): NonNullable<WorkspaceRem['cards']> {
+  if (!Array.isArray(cards)) throw new Error('Incomplete native card snapshot');
+  return cards
+    .map((card) => {
+      if (!card || card.remId !== remId) throw new Error('Native card owner mismatch');
+      return cardMetadataSchema.parse({
+        id: card._id,
+        remId: card.remId,
+        type: card.type,
+        createdAt: card.createdAt,
+        repetitionHistory: card.repetitionHistory ?? null,
+        nextRepetitionTime: card.nextRepetitionTime ?? null,
+        lastRepetitionTime: card.lastRepetitionTime ?? null,
+        timesWrongInRow: card.timesWrongInRow ?? null,
+      });
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function mapBounded<T, R>(items: T[], action: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        results[index] = await action(items[index]!);
+      }
+    })
+  );
+  return results;
+}
+
+/** No SDK handles are cached. Every read obtains fresh public SDK objects. */
+export class SdkWorkspaceBackend implements WorkspaceBackend {
+  constructor(
+    private readonly plugin: ReactRNPlugin,
+    readonly journal: MetadataStore,
+    private readonly status: () => Promise<{
+      kbId: string;
+      writable: boolean;
+      destructive?: boolean;
+    }>
+  ) {}
+
+  async identity(): Promise<{ kbId: string; writable: boolean; destructive?: boolean }> {
+    const live = await this.status(),
+      kb = await this.plugin.kb.getCurrentKnowledgeBaseData();
+    if (!kb || kb._id !== live.kbId) throw new Error('Workspace live KB binding mismatch');
+    return live;
+  }
+
+  private async snapshot(rem: PluginRem): Promise<WorkspaceRem> {
+    if (
+      !rem ||
+      typeof rem._id !== 'string' ||
+      !(rem.parent === null || typeof rem.parent === 'string') ||
+      !Array.isArray(rem.children) ||
+      rem.children.some((id) => typeof id !== 'string')
+    )
+      throw new Error('Incomplete SDK Rem snapshot');
+    const [
+      document,
+      folder,
+      cardItem,
+      practice,
+      enablePractice,
+      table,
+      property,
+      powerup,
+      powerupSlot,
+      powerupProperty,
+      powerupEnum,
+      powerupList,
+    ] = await Promise.all([
+      rem.isDocument(),
+      rem.isFolder(),
+      rem.isCardItem(),
+      rem.getPracticeDirection(),
+      rem.getEnablePractice(),
+      rem.isTable(),
+      rem.isProperty(),
+      rem.isPowerup(),
+      rem.isPowerupSlot(),
+      rem.isPowerupProperty(),
+      rem.isPowerupEnum(),
+      rem.isPowerupPropertyListItem(),
+    ]);
+    const unsupported = [
+      ['table', table],
+      ['property', property],
+      ['powerup', powerup],
+      ['powerup-slot', powerupSlot],
+      ['powerup-property', powerupProperty],
+      ['powerup-enum', powerupEnum],
+      ['powerup-list', powerupList],
+    ]
+      .filter(([label, value]) => boolean(value, String(label)))
+      .map(([label]) => label)
+      .join(',');
+    if (!['forward', 'backward', 'both', 'none'].includes(practice))
+      throw new Error('Incomplete native practice direction');
+    return {
+      id: rem._id,
+      parent: rem.parent,
+      children: [...rem.children],
+      type: rem.type ?? null,
+      text: rem.text ?? null,
+      backText: rem.backText ?? null,
+      document: boolean(document, 'document'),
+      folder: boolean(folder, 'folder'),
+      cardItem: boolean(cardItem, 'cardItem'),
+      practice,
+      enablePractice: boolean(enablePractice, 'enablePractice'),
+      public: publicSnapshot(rem),
+      cards: cardsSnapshot(await rem.getCards(), rem._id),
+      facts: {
+        isTable: boolean(table, 'table'),
+        isProperty: boolean(property, 'property'),
+        isPowerup: boolean(powerup, 'powerup'),
+        isPowerupSlot: boolean(powerupSlot, 'powerupSlot'),
+        isPowerupProperty: boolean(powerupProperty, 'powerupProperty'),
+        isPowerupEnum: boolean(powerupEnum, 'powerupEnum'),
+        isPowerupPropertyListItem: boolean(powerupList, 'powerupList'),
+      },
+      ...(unsupported ? { unsupported } : {}),
+    };
+  }
+
+  async enumerate(): Promise<WorkspaceRem[]> {
+    // Official global enumeration. Transport errors remain incomplete: no search/known-root fallback.
+    const rems = await this.plugin.rem.getAll();
+    if (!Array.isArray(rems)) throw new Error('Full-library enumeration did not return an array');
+    return mapBounded(rems, (rem) => this.snapshot(rem));
+  }
+
+  async read(ids: string[]): Promise<WorkspaceRem[]> {
+    if (ids.length > 50) throw new Error('Exact-ID native read batch exceeds 50');
+    const rems = await this.plugin.rem.findMany(ids);
+    if (!Array.isArray(rems) || rems.length !== ids.length)
+      throw new Error('Incomplete exact-ID native read');
+    return mapBounded(rems, (rem) => this.snapshot(rem));
+  }
+
+  async readPublic(ids: string[]): Promise<Record<string, unknown>[]> {
+    if (ids.length > 50 || new Set(ids).size !== ids.length)
+      throw new Error('Exact public read batch exceeds 50 or repeats IDs');
+    const rems = await this.plugin.rem.findMany(ids);
+    if (
+      !Array.isArray(rems) ||
+      new Set(rems.map((rem) => rem._id)).size !== rems.length ||
+      rems.some((rem) => !ids.includes(rem._id))
+    )
+      throw new Error('Malformed exact public read');
+    return rems.map(publicSnapshot);
+  }
+
+  async subtree(rootIds: string[]): Promise<WorkspaceRem[]> {
+    if (!rootIds.length || new Set(rootIds).size !== rootIds.length)
+      throw new Error('Subtree requires unique exact root IDs');
+    const queue = [...rootIds],
+      seen = new Set<string>(),
+      result: WorkspaceRem[] = [];
+    while (queue.length) {
+      const ids = queue.splice(0, 50);
+      if (ids.some((id) => seen.has(id))) throw new Error('Duplicate/cyclic subtree reference');
+      ids.forEach((id) => seen.add(id));
+      if (seen.size > 100000) throw new Error('Subtree exceeds 100000 Rem bound');
+      const rems = await this.read(ids);
+      if (
+        new Set(rems.map((rem) => rem.id)).size !== ids.length ||
+        rems.some((rem) => !ids.includes(rem.id))
+      )
+        throw new Error('Malformed exact subtree batch');
+      result.push(...rems);
+      queue.push(...rems.flatMap((rem) => rem.children));
+    }
+    return result;
+  }
+
+  async discover(ids: string[]): Promise<PublicDiscovery> {
+    if (new Set(ids).size !== ids.length || ids.length > 100000)
+      throw new Error('Invalid official discovery ID set');
+    const result: PublicDiscovery = { snapshots: [], flags: {} };
+    for (let start = 0; start < ids.length; start += 50) {
+      const batch = ids.slice(start, start + 50),
+        rems = await this.plugin.rem.findMany(batch);
+      if (
+        !Array.isArray(rems) ||
+        rems.length !== batch.length ||
+        new Set(rems.map((rem) => rem._id)).size !== batch.length ||
+        rems.some((rem) => !batch.includes(rem._id))
+      )
+        throw new Error('Incomplete official exact-ID public snapshot collection');
+      await mapBounded(rems, async (rem) => {
+        const [document, folder] = await Promise.all([rem.isDocument(), rem.isFolder()]);
+        result.snapshots.push(publicSnapshot(rem));
+        result.flags[rem._id] = {
+          document: boolean(document, 'document'),
+          folder: boolean(folder, 'folder'),
+          unsupported: 'unverified-native-flags',
+        };
+      });
+    }
+    return result;
+  }
+
+  private async rem(id: string): Promise<PluginRem> {
+    const rem = await this.plugin.rem.findOne(id);
+    if (!rem || rem._id !== id) throw new Error('Missing native Rem');
+    return rem;
+  }
+
+  async cardFacts(id: string): Promise<Array<{ id: string; hash: string }>> {
+    const cards = await (await this.rem(id)).getCards();
+    if (!Array.isArray(cards)) throw new Error('Incomplete native card read');
+    return cards
+      .map((card) => {
+        if (!card || typeof card._id !== 'string' || card.remId !== id)
+          throw new Error('Malformed native card identity');
+        return {
+          id: card._id,
+          hash: hash({ id: card._id, remId: card.remId, type: card.type }),
+        };
+      })
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  async guard(ids: string[]): Promise<string> {
+    const facts = await mapBounded([...ids].sort(), async (id) => {
+      const rem = await this.rem(id),
+        snapshot = await this.snapshot(rem),
+        tags = await rem.getTagRems();
+      if (!Array.isArray(tags)) throw new Error('Incomplete native tags');
+      return {
+        ...immutableProjection(snapshot),
+        tags: tags.map((tag) => tag._id).sort(),
+        cards: await this.cardFacts(id),
+      };
+    });
+    return hash(facts);
+  }
+
+  private async writable(): Promise<void> {
+    if (!(await this.identity()).writable) throw new Error('Live workspace write gate is disabled');
+  }
+
+  async create(markdown?: string): Promise<string> {
+    await this.writable();
+    const rem =
+      markdown === undefined
+        ? await this.plugin.rem.createRem()
+        : await this.plugin.rem.createSingleRemWithMarkdown(markdown);
+    if (!rem?._id) throw new Error('Creation did not return an identity; outcome may be unknown');
+    return rem._id;
+  }
+  async writeField(id: string, field: 'text' | 'backText', value: unknown[]): Promise<void> {
+    await this.writable();
+    const rem = await this.rem(id);
+    if (field === 'text') await rem.setText(value as RichTextInterface);
+    else await rem.setBackText(value as RichTextInterface);
+  }
+  async setParent(id: string, parent: string, position: number): Promise<void> {
+    await this.writable();
+    await (await this.rem(id)).setParent(parent, position);
+  }
+  async setCardItem(id: string, value: boolean): Promise<void> {
+    await this.writable();
+    await (await this.rem(id)).setIsCardItem(value);
+  }
+  async remove(id: string): Promise<void> {
+    const live = await this.identity();
+    if (!live.writable || !live.destructive)
+      throw new Error('Both write gates and --allow-destructive are required');
+    await (await this.rem(id)).remove();
+  }
+  async existingIds(ids: string[]): Promise<string[]> {
+    const rems = await this.plugin.rem.findMany(ids);
+    if (!Array.isArray(rems) || rems.some((rem) => !ids.includes(rem._id)))
+      throw new Error('Invalid exact deletion readback');
+    return rems.map((rem) => rem._id);
+  }
+}

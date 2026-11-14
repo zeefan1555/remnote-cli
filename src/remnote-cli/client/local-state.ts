@@ -5,7 +5,10 @@ import { join } from 'node:path';
 
 /** Private metadata only. Corrupt journals fail closed, never become a cache miss. */
 export class LocalState {
-  constructor(private readonly directory: string) {}
+  constructor(
+    private readonly directory: string,
+    private readonly maxBytes = 4 * 1024 * 1024
+  ) {}
   private path(key: string): string {
     return join(this.directory, createHash('sha256').update(key).digest('hex') + '.json');
   }
@@ -20,7 +23,7 @@ export class LocalState {
     }
     try {
       const stat = await file.stat();
-      if (!stat.isFile() || stat.size > 4 * 1024 * 1024 || (stat.mode & 0o077) !== 0)
+      if (!stat.isFile() || stat.size > this.maxBytes || (stat.mode & 0o077) !== 0)
         throw new Error('Invalid private CLI state file');
       return JSON.parse(await file.readFile('utf8')) as T;
     } finally {
@@ -29,7 +32,8 @@ export class LocalState {
   }
   async setLocal<T>(key: string, value: T): Promise<void> {
     const data = JSON.stringify(value);
-    if (Buffer.byteLength(data) > 4 * 1024 * 1024) throw new Error('CLI metadata exceeds 4 MiB');
+    if (Buffer.byteLength(data) > this.maxBytes)
+      throw new Error(`CLI metadata exceeds ${this.maxBytes / (1024 * 1024)} MiB`);
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const path = this.path(key),
       temporary = path + '.' + randomUUID() + '.tmp';

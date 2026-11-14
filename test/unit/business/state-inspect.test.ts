@@ -34,6 +34,13 @@ function fixture() {
       isFolder: vi.fn(async () => false),
       isDocument: vi.fn(async () => false),
       isCardItem: vi.fn(async () => false),
+      isTable: vi.fn(async () => false),
+      isProperty: vi.fn(async () => false),
+      isPowerup: vi.fn(async () => false),
+      isPowerupSlot: vi.fn(async () => false),
+      isPowerupProperty: vi.fn(async () => false),
+      isPowerupEnum: vi.fn(async () => false),
+      isPowerupPropertyListItem: vi.fn(async () => false),
       hasPowerup: vi.fn(async () => false),
       getChildrenRem: vi.fn(async () => [] as Rem[]),
       getTagRems: vi.fn(async () => [] as Rem[]),
@@ -76,6 +83,185 @@ function fixture() {
 }
 
 describe('generic inspect', () => {
+  it('reads explicit native flags and complete raw card facts in one bounded batch', async () => {
+    const { make, plugin } = fixture();
+    const rem = make('card-rem');
+    rem.isDocument.mockResolvedValue(true);
+    rem.isPowerupSlot.mockResolvedValue(true);
+    rem.getCards.mockResolvedValue([
+      {
+        _id: 'card-1',
+        remId: 'card-rem',
+        type: { clozeId: 'cloze' },
+        createdAt: 1,
+        repetitionHistory: [{ score: 1, time: 20 }],
+        nextRepetitionTime: 40,
+        lastRepetitionTime: 20,
+        timesWrongInRow: 0,
+      },
+    ]);
+    const fields = [
+      'isDocument',
+      'isFolder',
+      'isTable',
+      'isProperty',
+      'isPowerup',
+      'isPowerupSlot',
+      'isPowerupProperty',
+      'isPowerupEnum',
+      'isPowerupPropertyListItem',
+      'rawCards',
+      'cards',
+    ] as const;
+    const result = await inspectState(plugin as never, {
+      remIds: ['card-rem'],
+      fields: [...fields],
+    });
+    expect(result).toMatchObject({ complete: true, truncated: false, errors: [] });
+    expect(result.rems[0]).toMatchObject({
+      id: 'card-rem',
+      isDocument: true,
+      isFolder: false,
+      isTable: false,
+      isProperty: false,
+      isPowerup: false,
+      isPowerupSlot: true,
+      isPowerupProperty: false,
+      isPowerupEnum: false,
+      isPowerupPropertyListItem: false,
+      rawCards: [
+        {
+          id: 'card-1',
+          remId: 'card-rem',
+          type: { clozeId: 'cloze' },
+          createdAt: 1,
+          repetitionHistory: [{ score: 1, time: 20 }],
+          nextRepetitionTime: 40,
+          lastRepetitionTime: 20,
+          timesWrongInRow: 0,
+        },
+      ],
+    });
+    expect(rem.getCards).toHaveBeenCalledTimes(1);
+    expect(plugin.rem.findMany).toHaveBeenCalledTimes(1);
+    expect(plugin.richText.toMarkdown).not.toHaveBeenCalled();
+    expect(rem.getTagRems).not.toHaveBeenCalled();
+    expect(requestedFields({}).has('rawCards')).toBe(false);
+    expect(requestedFields({}).has('isTable')).toBe(false);
+  });
+
+  it('does not turn missing native flags or history into false and empty facts', async () => {
+    const { make, plugin } = fixture();
+    const rem = make('card-rem');
+    rem.isTable.mockResolvedValue(undefined as never);
+    rem.getCards.mockResolvedValue([
+      {
+        _id: 'card-1',
+        remId: 'card-rem',
+        type: 'forward',
+        createdAt: 1,
+      },
+    ]);
+    const result = await inspectState(plugin as never, {
+      remIds: ['card-rem'],
+      fields: ['isTable', 'rawCards'],
+    });
+    expect(result).toMatchObject({
+      complete: false,
+      errors: [expect.objectContaining({ field: 'isTable' })],
+    });
+    expect(result.rems[0].isTable).toBeNull();
+    expect(result.rems[0].rawCards![0]).toMatchObject({
+      repetitionHistory: null,
+      nextRepetitionTime: null,
+      lastRepetitionTime: null,
+      timesWrongInRow: null,
+    });
+    rem.getCards.mockResolvedValue([{ _id: 'card-1', remId: 'other', type: 'forward' }]);
+    const wrongOwner = await inspectState(plugin as never, {
+      remIds: ['card-rem'],
+      fields: ['rawCards'],
+    });
+    expect(wrongOwner).toMatchObject({
+      complete: false,
+      rems: [{ id: 'card-rem', rawCards: null }],
+    });
+  });
+
+  it('bounds native audit calls across 100 explicit IDs and reuses type classification flags', async () => {
+    const { make, plugin } = fixture();
+    let active = 0,
+      peak = 0;
+    const rems = Array.from({ length: 100 }, (_, i) => make(`audit-${i}`));
+    for (const rem of rems)
+      rem.isTable.mockImplementation(async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        active--;
+        return false;
+      });
+    const result = await inspectState(plugin as never, {
+      remIds: rems.map((rem) => rem._id),
+      fields: ['type', 'isDocument', 'isFolder', 'isTable', 'rawCards'],
+    });
+    expect(result).toMatchObject({ complete: true, truncated: false, errors: [] });
+    expect(result.rems).toHaveLength(100);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(INSPECT_CONCURRENCY);
+    expect(plugin.rem.findMany).toHaveBeenCalledTimes(1);
+    for (const rem of rems) {
+      expect(rem.isDocument).toHaveBeenCalledTimes(1);
+      expect(rem.isFolder).toHaveBeenCalledTimes(1);
+      expect(rem.getCards).toHaveBeenCalledTimes(1);
+      expect(rem.isProperty).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    { type: 1 },
+    { repetitionHistory: 'unknown' },
+    { createdAt: Number.NaN },
+    { lastRepetitionTime: Number.POSITIVE_INFINITY },
+  ])('rejects malformed raw card facts without inventing review state: %j', async (extra) => {
+    const { make, plugin } = fixture(),
+      rem = make('card-rem');
+    rem.getCards.mockResolvedValue([{ _id: 'card', remId: 'card-rem', type: 'forward', ...extra }]);
+    expect(
+      await inspectState(plugin as never, { remIds: ['card-rem'], fields: ['rawCards'] })
+    ).toMatchObject({
+      complete: false,
+      rems: [{ id: 'card-rem', rawCards: null }],
+      errors: [expect.objectContaining({ field: 'rawCards' })],
+    });
+  });
+
+  it.each<{ fields: Array<'cards' | 'rawCards'> }>([
+    { fields: ['rawCards'] },
+    { fields: ['cards', 'rawCards'] },
+  ])('rejects duplicate raw card IDs for fields $fields', async ({ fields }) => {
+    const { make, plugin } = fixture(),
+      rem = make('r');
+    rem.getCards.mockResolvedValue([
+      { _id: 'c', remId: 'r', type: 'forward', repetitionHistory: [] },
+      { _id: 'c', remId: 'r', type: 'forward', repetitionHistory: [] },
+    ]);
+    const result = await inspectState(plugin as never, { remIds: ['r'], fields });
+    expect(result).toMatchObject({
+      complete: false,
+      rems: [{ id: 'r', rawCards: null }],
+      errors: fields.map((field) => ({
+        id: 'r',
+        field,
+        message: 'SDK raw card identities duplicated',
+      })),
+    });
+    if (fields.includes('cards')) expect(result.rems[0].cards).toBeNull();
+    else expect(result.rems[0]).not.toHaveProperty('cards');
+    expect(rem.getCards).toHaveBeenCalledTimes(1);
+    expect(plugin.rem.findMany).toHaveBeenCalledTimes(1);
+  });
+
   it('loads requested ids in one findMany and summarizes every requested field', async () => {
     const { make, plugin } = fixture();
     const root = make('root', ['Home']);

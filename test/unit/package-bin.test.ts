@@ -8,7 +8,15 @@ describe('direct CLI package', () => {
     expect(pkg.bin).toEqual({ 'remnote-cli': 'dist/remnote-cli/index.js' });
     expect(lock.packages[''].bin).toEqual(pkg.bin);
     expect(pkg.main).toBe(pkg.bin['remnote-cli']);
-    expect(Object.keys(pkg.dependencies).sort()).toEqual(['commander', 'ws', 'zod']);
+    expect(Object.keys(pkg.dependencies).sort()).toEqual([
+      'commander',
+      'fflate',
+      'mdast-util-from-markdown',
+      'mdast-util-to-markdown',
+      'ws',
+      'yaml',
+      'zod',
+    ]);
     expect(pkg.scripts.build).toContain('tsc');
     expect(pkg.scripts.build).not.toContain('mcpb');
     for (const file of [

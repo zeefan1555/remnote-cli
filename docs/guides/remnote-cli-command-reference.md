@@ -8,8 +8,9 @@
 remnote-cli [global-options] <command> [command-options]
 ```
 
-Commands require RemNote open with the authenticated RemNote CLI Bridge enabled. Each command
-owns a short-lived loopback connection; no daemon or MCP endpoint is used.
+Live commands require RemNote open with the authenticated RemNote CLI Bridge enabled.
+`sync status`, `sync lint` and `sync diff` operate offline. A live command owns a
+short-lived loopback connection; no daemon or MCP endpoint is used.
 Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
 See [configuration](configuration.md) for permissions and private pairing-file handling.
 
@@ -56,6 +57,338 @@ To prevent this:
 | ---- | --------------------------------------- |
 | `0`  | Success                                 |
 | `1` | Validation, connection, command error or incomplete receipt |
+
+## sync
+
+The private Obsidian vault and RemNote are both editable endpoints. Users in
+Obsidian and agents edit the **same Markdown files**; a user may also edit cards
+during RemNote review. The candidate uses a common baseline and per-Rem semantic
+three-way merging. The receipts below describe the current source contract;
+offline tests are not native acceptance or a release claim. Legacy `pull`/`push`
+aliases are removed.
+
+```bash
+remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
+remnote-cli --kb-id KB_ID sync import /PRIVATE/library --export /PRIVATE/export.rem
+remnote-cli sync status /PRIVATE/vault
+remnote-cli sync lint /PRIVATE/vault
+remnote-cli sync diff /PRIVATE/vault
+remnote-cli sync /PRIVATE/vault
+remnote-cli sync /PRIVATE/vault --apply --plan-hash PREVIEW_HASH
+remnote-cli sync recover /PRIVATE/vault
+```
+
+### Initial import and privacy
+
+`sync import` requires explicit global `--kb-id` and a new directory without
+content or a prior manifest. It establishes the initial common baseline; even a
+clean existing vault cannot be re-imported. Later edits from either endpoint are
+inputs to three-way sync. Re-importing or overwriting a whole file is not a merge.
+
+| Import option | Scope |
+| --- | --- |
+| `--root-id ID` | One exact native subtree in a new dedicated vault |
+| `--export FILE.rem` | Official full JSON archive with original records and snapshot provenance |
+| `--snapshot FILE` | Optional public SDK snapshot bound to the exact archive and KB |
+| `--editable-root-id ID` | Fully inspect the selected subtree during official import before enabling supported edits |
+
+`--snapshot` requires `--export`; `--root-id` is an independent scope, not an
+editable-root modifier. Archive IDs, relationships and provenance are validated;
+raw short codes do not certify writable semantics. The import receipt reports
+`status: "imported"`, `complete`, `scope`, `rootIds`,
+`globalDiscoveryComplete`, counts and `git: "unchanged"`. Completeness is
+limited to the declared scope and snapshot time. Subtree or known-ID inspection
+cannot discover new top-level roots or prove current global completeness.
+
+Continuous sync reads bound IDs only, using public `findMany` batches of at most
+50. Its receipts always report `discoveryScope: "bound-ids"` and
+`globalDiscoveryComplete: false`; this is distinct from the historic initial
+import receipt. Unknown children, missing objects and reparenting are explicit
+failures or conflicts, not silently omitted content. New top-level roots are not
+discoverable in this scope. Public `getAll` exceeds the current Bridge serializer's
+1,000-item limit, and empty siblings on parentless anchors do not enumerate roots.
+Global discovery needs a separately authorized Bridge change, release and device
+update; it is not supplied by this CLI change.
+
+The vault root must be 0700. Markdown saved normally by Obsidian may be 0644;
+CLI-created Markdown is 0600. Native sidecars and runtime state remain 0600.
+Symlinks are not a content access path. Keep a separately authorized, local-only
+content Git repository with no network remote; sync does not configure Git or
+publish files. Content must stay out of code repositories and public evidence.
+
+Ignore `.sync/`, locks and credentials in content Git. Exclude `.obsidian/`,
+`.trash/` and `.DS_Store` from content scanning, candidate freeze and Git.
+Do not delete user configuration or Trash to make validation pass. Private CLI
+state holds authoritative manifests and metadata journals; vault state is not
+independent permission to bypass those guards.
+
+Lossless native records live in `.remnote/records/ID.json`; imported payloads
+live under `.remnote/originals/{rems,cards,public}/`. These read-only sidecars
+belong in private content Git and are hidden in Obsidian's normal file tree.
+They are not disposable cache or part of `.sync/` runtime state.
+
+### Markdown, native YAML and stable identities
+
+The vault uses ordinary nested Markdown lists plus document/Folder notes and
+wikilinks. It is not one file per Rem, and a Markdown file or directory does not
+by itself establish native Document or Folder status. Every node has explicit
+YAML native metadata: Rem identity, type, parent, ordered children, card shape,
+tags, references, Power-ups and other applicable attributes. Unknown `null`
+and missing facts are distinct from `false`; unsupported native data and its
+lossless raw sidecar remain read-only. Mapping a field does not certify that it
+is writable.
+
+Folder layout is `Name/Name.md`; a Document or top-level plain Rem uses `Name.md`.
+Child Documents live under the same stem directory, such as `Name/Child.md`.
+Folder wins when both native capabilities are present. Existing `.md` titles do
+not receive a second extension; collisions receive a stable-ID suffix. Pages are
+not all named `index.md`. Auto-opening a folder's description note on folder click
+is not an Obsidian core feature; sync does not install a plugin for that behavior.
+
+List items end in an Obsidian block anchor such as ` ^stable-block-id`.
+Block IDs contain only ASCII letters, digits and hyphens. YAML explicitly maps
+each `rems[ID].block` to its `id`; assigning a newly created Rem ID must not replace its
+existing block ID. Renaming a file preserves native identities rather than
+deleting and recreating them; it does not authorize native movement or reparenting,
+which remains unsupported and is rejected.
+
+Frontmatter uses `schema: remnote-sync/1`, the existing root Rem ID in `root`,
+an optional display-only `title`, display-only `aliases` and `tags` arrays, and a `rems`
+map. Each existing Rem entry is keyed by its native ID and contains `id`, `block`,
+`content`, `native`, and `readOnly`. `content` is `text`, `multiline`, `basic` or
+`readonly`. Do not manually change existing `id`, `block`, `content`, native facts
+or read-only bindings; the sync engine publishes verified snapshot changes.
+Supported text changes belong in the Markdown body, not a fabricated native
+snapshot. The root body is only `# Title`, bound by YAML `root`, without a list
+anchor. H1 is the sole root-text authority; optional frontmatter `title` is not
+a second source of native text. Publication preserves display aliases/tags.
+
+`native` records type, parent, ordered children, Document/Folder/card-item flags,
+practice direction/enabled state, tags and references. Structured facts use:
+
+- `powerups`: `{code, slots: [{slot, valueRemId, valueRichText}]}` entries.
+- `propertyValues`: `{propertyId, valueRemId, valueRichText}` entries (not `properties`).
+- `portal`: `{type, directlyIncludedRemIds}`, or `null`.
+- `cards`: exact `id`, `remId`, forward/backward or `{clozeId}` type, `createdAt`,
+  `repetitionHistory`, `nextRepetitionTime`, `lastRepetitionTime`, `timesWrongInRow`.
+  History and scheduling fields are read-only.
+
+Nullable orthogonal details preserve list/quote/code/TODO/table, property and
+Power-up flags; `embeddedQueueViewMode`, `todoStatus`, `fontSize`, `highlightColor`,
+`propertyType` (including numeric `0`), `aliasRemIds`, `sourceRemIds`, `createdAt`,
+`localUpdatedAt` and `updatedAt`. `collected` is the set of explicitly read native
+field names: it distinguishes unknown `null` from a known-null observation.
+Unknown facts remain `null`; they are not permission to invent a value or an edit
+timestamp. `readOnly.record` binds `.remnote/records/ID.json`; `readOnly.public` and
+`readOnly.original` bind the corresponding imported public/native record paths,
+or `null` when absent.
+
+New nodes use a `new:key` map key, `id: null`, a stable `local-<UUID>` block and
+`content: text` or `multiline`; native/read-only fields must be omitted
+until real IDs are assigned. Existing imported blocks start as `rn-<UTF8hex>`;
+a previously assigned `local-<UUID>` remains stable after synchronization.
+For a new multiline question, direct answer entries use the same minimal
+`id: null`, `block`, `content: text` shape; construction under that parent sets
+native `isCardItem: true`, rather than requiring invented native facts in YAML.
+The first version does not create new basic cards.
+
+For example, retain the imported root and all existing `rems` entries, then add
+these two entries **under the existing `rems` map**, using fresh stable blocks:
+
+```yaml
+new:question:
+  id: null
+  block: local-9a16e18d-9aa8-45dd-b3e3-aafc4ed0c501
+  content: multiline
+new:answer:
+  id: null
+  block: local-53f2289d-5ef8-42ae-bbc9-bf2d1430155f
+  content: text
+```
+
+Append the matching outline beneath the existing H1:
+
+```markdown
+- A question ^local-9a16e18d-9aa8-45dd-b3e3-aafc4ed0c501
+  - An answer ^local-53f2289d-5ef8-42ae-bbc9-bf2d1430155f
+```
+
+After verified publication, map keys and `id` become native Rem IDs while the
+two `local-...` blocks remain unchanged. Links to an unpublished `new:key` target
+are rejected until it has a native identity.
+
+The following illustrates ordinary Markdown and full-path links; it does not
+replace the required per-node native YAML:
+
+```markdown
+# Example
+
+- A topic ^topic-a1
+  - A child ^child-a1
+
+[[path/note|Example]]
+[[path/note#^child-a1|This child]]
+```
+
+| Input | Meaning |
+| --- | --- |
+| `[[path/note|label]]` | Full vault-relative note path resolves to its document/root Rem |
+| `[[path/note#^stable-block-id|label]]` | That note's explicit YAML mapping resolves to an ordinary Rem |
+| Top-level YAML `aliases` / `tags`, or `#tag` | Obsidian display/search metadata; no automatic native Alias/Tag change |
+| Nested native Tag/reference metadata | Exact Rem ID relationships, never inferred from display labels |
+| `![[path/note]]` | An Obsidian embed, not automatically a RemNote reference or Portal |
+
+Use full vault paths. Broken paths, missing block IDs, ambiguous short names and
+duplicate identities fail lint instead of guessing a target. Renames must leave
+references resolvable. Display aliases do not change native identity. New embeds
+without a verified public-SDK mapping fail the whole sync before remote writes;
+existing native Portals retain their original value and are explicitly read-only.
+
+Top-level aliases and tags use standard Obsidian properties. Edit nested native
+YAML in **Source mode**: the Properties GUI does not support nested properties.
+These conventions use Obsidian's documented [links](https://help.obsidian.md/links),
+[embeds](https://help.obsidian.md/embeds),
+[properties](https://help.obsidian.md/properties) and
+[aliases](https://help.obsidian.md/aliases). Obsidian readability is not proof of
+RemNote semantic acceptance.
+
+### Supported write boundary
+
+The first write surface is plain text, bold/italic text, inline and fenced code,
+exact wikilinks, basic-card back text, new plain Rems, multiline cards and explicit
+bounded deletion. A multiline question is an ordinary bullet with answer child
+bullets; YAML card semantics and each answer's `isCardItem` determine the native
+card. For a basic card, the first paragraph is the front and a blockquote inside
+the same list item is the back, not a new Rem. Literal `===` and `>>` in ordinary
+text do not declare cards.
+
+Native Folder/Document/Tag/Power-up changes, moves, new embeds/media and complex
+rich-text edits are outside this write surface. Existing native content is kept
+losslessly and displayed read-only as faithfully as supported. Portal metadata
+records its native type and directly included Rem IDs; it does not grant Portal
+write support. Raw-record preservation, metadata mapping, writable support and
+live/UI verification are separate coverage claims.
+
+### Common baseline and convergence
+
+Compare semantic content for each stable Rem across baseline, local and remote.
+One-sided edits propagate to the other endpoint; identical results converge;
+edits to different Rems merge, including a local question edit and a remote
+answer edit in the same file. The merge unit is a whole Rem: a local front edit
+and a remote back edit on one basic card currently conflict rather than merge
+field-by-field. For two edits to the same Rem, select
+the newer result only with trustworthy, comparable content-version evidence.
+Unknown, missing or equal times preserve both versions and report a conflict.
+Markdown file mtime, download/capture time and card-review time are not a reliable
+per-Rem content version. Do not apply whole-file last-write-wins.
+
+The current implementation has no trustworthy local per-Rem edit clock. It
+therefore reports divergent edits to the same content as `untrusted-edit-order`;
+it does not implement automatic timestamp-based resolution. Remote `updatedAt`
+is retained as evidence, not compared to a local file mtime.
+
+The target sync plan can contain incoming and outgoing changes together. Recheck
+both endpoints before apply; publish only the planned semantic result and advance
+the common baseline only after verification. Frozen-file checks guard local
+publication, and remote pre/post hashes detect observed version changes. These
+are client optimistic checks: the SDK has no native conditional setter, so they
+cannot eliminate the check-write lost-update window. Native transactions remain
+disabled. Partial or uncertain results retain the baseline, both versions and
+recovery evidence rather than claiming atomic convergence.
+
+Review history and scheduling are exclusively owned by RemNote. Local copies are
+read-only snapshots and never become outgoing updates. Missing files, nodes or
+remote objects are not automatic deletion requests; absence must be distinguished
+from incomplete reads. Deletion remains explicit and bounded in either direction.
+
+### Lint, preview and apply
+
+`lint` returns `ok`, `complete` and diagnostics with `path`, one-based
+`line`, stable `code` and `message`. Text mode prints
+`path:line / CODE / message`. Any diagnostic blocks the **entire** sync before
+remote calls. Metadata unsupported by the current write matrix is read-only,
+not silently dropped. Existing Rem/card identity, parent/order and review history
+are protected. Missing files, nodes or remote objects do not authorize movement
+or automatic deletion.
+
+`status` and `diff` inspect local state without applying changes. The retained
+entrypoint is `sync DIR` preview followed by `sync DIR --apply --plan-hash HASH`.
+Bidirectional planning extends that envelope with incoming/outgoing and conflict
+evidence. Apply must
+bind the exact frozen plan, unchanged candidate files, matching KB and native
+state, with live writes enabled for outgoing changes. Incoming changes are merged
+semantic results, not arbitrary remote snapshot overwrites. SDK writes are
+sequential, not atomic; there is no server-side CAS or exactly-once guarantee.
+
+Current receipt fields (arrays contain exact Rem IDs unless noted):
+
+| Status | Fields and meaning |
+| --- | --- |
+| `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `incoming`, `converged`, `outgoing`, `metadataRefresh`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
+| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
+| `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
+| planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, `remoteWrites: 0`; no apply is authorized by this receipt |
+
+Each of these carries `remoteChecked: true`, `discoveryScope: "bound-ids"`,
+`globalDiscoveryComplete: false`. `diff` is local-only and reports
+`remoteChecked: false`; it cannot establish remote freshness or convergence.
+Each planning conflict records `id`, `path`, `reason` (`untrusted-edit-order`,
+`remote-structure` or `remote-missing`), `baseHash`, `localHash`, nullable
+`remoteHash` / `remoteUpdatedAt`, and a private `remoteSnapshot` path or `null`.
+The local version remains in place. A mutation-stage failure may also use status
+`conflict`, but carries `journalKey`, known `ids` and `steps` instead of the
+planning `remoteWrites: 0` guarantee: inspect that evidence before any next action.
+
+Deletion is explicit and separate from file absence. Keep the local outline
+intact for preview:
+
+```bash
+remnote-cli sync /PRIVATE/vault --delete-id CARD_ID --scope-root ROOT_ID
+remnote-cli --allow-destructive sync /PRIVATE/vault --delete-id CARD_ID --scope-root ROOT_ID --apply --plan-hash PREVIEW_HASH
+```
+
+The target must be a strict descendant of the exact scope root. Review the
+bounded exact descendant IDs. Native Document/Folder deletion is unsupported;
+both live plugin write gates and global `--allow-destructive` are required.
+Deleting a Rem does not promise to purge all historical Card records. Never
+delete review history to make an acceptance test pass.
+
+The verified receipt distinguishes incoming/outgoing changes and identity/card
+checks after baseline publication. Read back exact semantic state:
+exit 0, a Markdown card shape or a Rem ID alone is not native-card acceptance.
+
+### Failure, recovery and development acceptance
+
+Preserve the exact plan/hash, journal and known IDs after `unknown`,
+`conflict` or `publication-incomplete`. A lost response does not prove that
+a write failed. Do not change its key, remove its journal, recreate objects or
+start a new test batch to bypass uncertainty.
+
+Recovery finishes only already-verified publication and must not replay remote
+mutations. Exact-ID reads may be needed before local publication. Acknowledged
+writes followed by validation or publication failure are not a zero-write failure
+and must be reconciled. A recovered local publication reports `status: "recovered"`,
+`complete: true`, `remoteWrites: 0` and the existing `ids`; it does not mean the
+original operation had zero remote writes.
+
+Development acceptance needs a frozen candidate, exclusive live ownership and
+the guarded integration wrapper. The draft `scripts/sync-agent-acceptance.mjs`
+uses a new synthetic subtree with native-YAML fixtures, stable-block checks,
+incoming-only, mixed-direction, same-result convergence and same-Rem conflict
+cases. The deliberate conflict must prove zero remote writes and preserve both
+versions before resolving only local synthetic text to the observed remote value.
+Cleanup requires fresh exact root text/parent/children plus a recorded intent.
+SDK `findMany` may filter missing IDs; deletion proof uses `inspect --strict` and
+accepts exit 1 only for the exact expected `missing: true` records, no truncation
+and no other read errors. It does not assume null padding or equate any failed read
+with deletion.
+Card lookup records returned and unreturned IDs separately, rejects duplicate or
+out-of-scope IDs, and makes no historical-card purge claim from an absent result.
+Its `node --import tsx scripts/sync-agent-acceptance.mjs --self-test` checks
+synthetic codec/receipt boundaries offline, without live calls or file writes.
+Preserve existing failed batches for their owner's reconciliation; never treat
+another batch's repair or cleanup as this driver's acceptance. A new live run
+requires approval and native/UI evidence; offline checks do not establish it.
 
 ## create
 

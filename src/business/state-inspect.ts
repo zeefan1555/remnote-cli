@@ -1,4 +1,4 @@
-import type { ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
+import type { PluginCardType, ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
 import { hasCardStructure } from './card-structure.js';
 import { contentHash } from './content-hash.js';
 import { plainText } from './plain-text.js';
@@ -7,7 +7,7 @@ import { builtinSlotName } from './powerup-read.js';
 import { summarizeRichText, type RichTextElementSummary } from './rich-text-elements.js';
 import { BuiltInPowerupCodes, RemType } from './sdk-constants.generated.js';
 
-export const INSPECT_FIELDS = [
+const DEFAULT_INSPECT_FIELDS = [
   'type',
   'text',
   'backText',
@@ -24,6 +24,24 @@ export const INSPECT_FIELDS = [
   'aliases',
   'sources',
   'portal',
+] as const;
+const NATIVE_FLAG_FIELDS = [
+  'isDocument',
+  'isFolder',
+  'isTable',
+  'isProperty',
+  'isPowerup',
+  'isPowerupSlot',
+  'isPowerupProperty',
+  'isPowerupEnum',
+  'isPowerupPropertyListItem',
+] as const;
+type NativeFlagField = (typeof NATIVE_FLAG_FIELDS)[number];
+/** Full native audit and review history are opt-in, never an implicit expansion of summary reads. */
+export const INSPECT_FIELDS = [
+  ...DEFAULT_INSPECT_FIELDS,
+  ...NATIVE_FLAG_FIELDS,
+  'rawCards',
 ] as const;
 export type InspectField = (typeof INSPECT_FIELDS)[number];
 
@@ -111,6 +129,17 @@ export interface InspectedCard {
   hash: string;
 }
 
+export interface InspectedRawCard {
+  id: string;
+  remId: string;
+  type: PluginCardType;
+  createdAt: number | null;
+  repetitionHistory: unknown[] | null;
+  nextRepetitionTime: number | null;
+  lastRepetitionTime: number | null;
+  timesWrongInRow: number | null;
+}
+
 export interface InspectedTag extends InspectPathNode {
   ancestors: InspectPathNode[];
 }
@@ -131,7 +160,7 @@ export interface InspectFieldError {
   message: string;
 }
 
-export interface InspectedRem {
+export interface InspectedRem extends Partial<Record<NativeFlagField, boolean | null>> {
   id: string;
   missing?: boolean;
   type?: string | null;
@@ -145,6 +174,7 @@ export interface InspectedRem {
   practiceDirection?: string | null;
   enablePractice?: boolean | null;
   cards?: InspectedCard[] | null;
+  rawCards?: InspectedRawCard[] | null;
   tags?: InspectedTag[] | null;
   parent?: InspectPathNode[] | null;
   children?: string[] | null;
@@ -162,14 +192,12 @@ export interface InspectStateResult {
   errors: Array<{ id?: string; field?: string; message: string }>;
 }
 
-interface LoadedRem {
+interface LoadedRem extends Record<NativeFlagField, () => Promise<boolean>> {
   _id: string;
   type?: number;
   text?: RichTextInterface;
   backText?: RichTextInterface;
   parent?: unknown;
-  isFolder: () => Promise<boolean>;
-  isDocument: () => Promise<boolean>;
   isCardItem: () => Promise<boolean>;
   hasPowerup: (code: string) => Promise<boolean>;
   getChildrenRem: () => Promise<LoadedRem[]>;
@@ -188,7 +216,10 @@ interface LoadedCard {
   _id?: string;
   remId?: string;
   type?: unknown;
+  createdAt?: number;
   nextRepetitionTime?: number;
+  lastRepetitionTime?: number;
+  timesWrongInRow?: number;
   repetitionHistory?: unknown[];
 }
 
@@ -229,7 +260,7 @@ export function requestedFields(params: {
   summary?: boolean;
 }): Set<InspectField> {
   if (params.fields?.length) return new Set(params.fields);
-  const fields = new Set<InspectField>(INSPECT_FIELDS);
+  const fields = new Set<InspectField>(DEFAULT_INSPECT_FIELDS);
   if (params.summary) for (const field of SUMMARY_OMIT) fields.delete(field);
   return fields;
 }
@@ -255,6 +286,42 @@ function requireBoolean(value: unknown, label: string): boolean {
   return value;
 }
 
+function rawCard(card: LoadedCard, remId: string): InspectedRawCard {
+  if (!card || typeof card._id !== 'string' || !card._id || card.remId !== remId)
+    throw new Error('SDK raw card identity/owner malformed');
+  const type = card.type;
+  if (
+    type !== 'forward' &&
+    type !== 'backward' &&
+    !(
+      type &&
+      typeof type === 'object' &&
+      'clozeId' in type &&
+      typeof type.clozeId === 'string' &&
+      Object.keys(type).length === 1
+    )
+  )
+    throw new Error('SDK raw card type malformed');
+  if (card.repetitionHistory != null && !Array.isArray(card.repetitionHistory))
+    throw new Error('SDK raw card history malformed');
+  const number = (value: unknown): number | null => {
+    if (value == null) return null;
+    if (typeof value !== 'number' || !Number.isFinite(value))
+      throw new Error('SDK raw card timestamp/count malformed');
+    return value;
+  };
+  return {
+    id: card._id,
+    remId: card.remId,
+    type: type as PluginCardType,
+    createdAt: number(card.createdAt),
+    repetitionHistory: card.repetitionHistory ?? null,
+    nextRepetitionTime: number(card.nextRepetitionTime),
+    lastRepetitionTime: number(card.lastRepetitionTime),
+    timesWrongInRow: number(card.timesWrongInRow),
+  };
+}
+
 /**
  * Read many Rems in one plugin session.
  * Requested IDs are loaded with one `findMany` batch. Descendant, tag, and ancestor
@@ -276,6 +343,16 @@ export async function inspectState(
   const kinds = new Map<string, string>();
   const names = new Map<string, string>();
   const gate = createLimiter(INSPECT_CONCURRENCY);
+  const flagJobs = new Map<string, Promise<boolean>>();
+  const flagOf = (rem: LoadedRem, field: NativeFlagField): Promise<boolean> => {
+    const key = `${rem._id}:${field}`;
+    let job = flagJobs.get(key);
+    if (!job) {
+      job = gate(() => rem[field]()).then((value) => requireBoolean(value, field));
+      flagJobs.set(key, job);
+    }
+    return job;
+  };
   const result: InspectStateResult = {
     schemaVersion: 1,
     complete: true,
@@ -409,8 +486,8 @@ export async function inspectState(
       const cached = kinds.get(rem._id);
       if (cached) return cached;
       const [folder, document, daily] = await Promise.all([
-        gate(() => rem.isFolder()),
-        gate(() => rem.isDocument()),
+        flagOf(rem, 'isFolder'),
+        flagOf(rem, 'isDocument'),
         gate(() => rem.hasPowerup(BuiltInPowerupCodes.DailyDocument)),
       ]);
       const kind = requireBoolean(daily, 'daily document')
@@ -484,6 +561,18 @@ export async function inspectState(
         backText: summarizeRichText(rem.backText),
       };
     const tasks: Array<Promise<void>> = [];
+    for (const field of NATIVE_FLAG_FIELDS)
+      if (fields.has(field))
+        tasks.push(
+          (async () => {
+            try {
+              out[field] = await flagOf(rem, field);
+            } catch (error) {
+              fail(field, error);
+              out[field] = null;
+            }
+          })()
+        );
     if (fields.has('type'))
       tasks.push(
         (async () => {
@@ -556,37 +645,52 @@ export async function inspectState(
           }
         })()
       );
-    if (fields.has('cards'))
+    if (fields.has('cards') || fields.has('rawCards'))
       tasks.push(
         (async () => {
           try {
             const cards = await gate(() => rem.getCards());
             if (!Array.isArray(cards)) throw new Error('SDK cards malformed');
-            out.cards = await Promise.all(
-              cards.map(async (card) => {
-                if (!card || typeof card._id !== 'string' || !card._id)
-                  throw new Error('SDK card identity malformed');
-                const history = Array.isArray(card.repetitionHistory) ? card.repetitionHistory : [];
-                const due =
-                  typeof card.nextRepetitionTime === 'number' ? card.nextRepetitionTime : null;
-                return {
-                  id: card._id,
-                  type: card.type ?? null,
-                  due,
-                  nextRepetition: due,
-                  historyLength: history.length,
-                  hash: await contentHash({
-                    cardId: card._id,
-                    remId: card.remId ?? rem._id,
+            if (fields.has('rawCards')) {
+              const rawCards = cards.map((card) => rawCard(card, rem._id));
+              if (new Set(rawCards.map((card) => card.id)).size !== rawCards.length)
+                throw new Error('SDK raw card identities duplicated');
+              out.rawCards = rawCards;
+            }
+            if (fields.has('cards'))
+              out.cards = await Promise.all(
+                cards.map(async (card) => {
+                  if (!card || typeof card._id !== 'string' || !card._id)
+                    throw new Error('SDK card identity malformed');
+                  const history = Array.isArray(card.repetitionHistory)
+                    ? card.repetitionHistory
+                    : [];
+                  const due =
+                    typeof card.nextRepetitionTime === 'number' ? card.nextRepetitionTime : null;
+                  return {
+                    id: card._id,
                     type: card.type ?? null,
-                    history,
-                  }),
-                };
-              })
-            );
+                    due,
+                    nextRepetition: due,
+                    historyLength: history.length,
+                    hash: await contentHash({
+                      cardId: card._id,
+                      remId: card.remId ?? rem._id,
+                      type: card.type ?? null,
+                      history,
+                    }),
+                  };
+                })
+              );
           } catch (error) {
-            fail('cards', error);
-            out.cards = null;
+            if (fields.has('cards')) {
+              fail('cards', error);
+              out.cards = null;
+            }
+            if (fields.has('rawCards')) {
+              fail('rawCards', error);
+              out.rawCards = null;
+            }
           }
         })()
       );
