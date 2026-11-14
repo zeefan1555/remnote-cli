@@ -1,6 +1,7 @@
 import {
   allFiles,
   readPrivate,
+  STATE,
   withWorkspaceLock,
   workspaceDirectory,
   writePrivate,
@@ -11,7 +12,7 @@ import {
   loadState,
   localStore,
   saveState,
-  STATE,
+  serializeState,
   validateGraph,
   writeSnapshot,
   type LocalContext,
@@ -707,7 +708,7 @@ export async function recoverWorkspace(
     try {
       await loadState(root);
     } catch {
-      await writePrivate(root, STATE, JSON.stringify(state, null, 2) + '\n');
+      await writePrivate(root, STATE, serializeState(state));
       repaired = true;
     }
     if (!state.pending) return { status: 'nothing-to-recover', complete: true, remoteWrites: 0 };

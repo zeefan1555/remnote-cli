@@ -49,6 +49,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Workspace aggregate manifests and state mirrors now share bounded 32 MiB
+  publication, readback and recovery support; ordinary payloads remain limited
+  to 4 MiB. Final serialized sizes, including the publication ledger, are checked
+  before staging, and oversized recovery metadata fails before local installation.
 - `context`, `inspect --fields markdown` and other reads that render titles no longer fail with
   `richText parameter: Invalid input` on a rendered image. RemNote stores `percent: 0` on images
   after rendering, outside the SDK enum (5/25/50/100; audio 25/50/100). Only the copy passed to

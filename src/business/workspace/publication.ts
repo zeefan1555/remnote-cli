@@ -1,14 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import {
   allFiles,
+  assertFileSize,
   displacePrivate,
+  fileByteLimit,
   linkPrivate,
+  MAX_METADATA_BYTES,
   readPrivate,
   withWorkspaceLock,
   workspaceDirectory,
   writePrivate,
 } from './files.js';
-import { authoritativeState, loadState, publicationStore, saveState } from './local.js';
+import {
+  authoritativeState,
+  loadState,
+  publicationStore,
+  saveState,
+  serializeState,
+} from './local.js';
 import { FrozenFiles } from './frozen-files.js';
 import { hash, type WorkspaceState } from './types.js';
 
@@ -20,9 +29,13 @@ interface Publication {
   baseline: Record<string, string>;
   writes: Array<{ path: string; stage: string | null; hash: string | null; backup: string }>;
 }
-async function currentHash(root: string, path: string): Promise<string | null> {
+async function currentHash(
+  root: string,
+  path: string,
+  maxBytes = fileByteLimit(path)
+): Promise<string | null> {
   try {
-    return hash(await readPrivate(root, path));
+    return hash(await readPrivate(root, path, maxBytes));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
@@ -33,6 +46,7 @@ export async function readPublication(root: string): Promise<Publication | undef
   if (!value) return;
   if (value.version !== 1 || value.directory !== root || value.next.directory !== root)
     throw new Error('Invalid snapshot publication binding');
+  serializeState(value.next);
   return value;
 }
 export async function requireNoPublication(root: string): Promise<void> {
@@ -66,7 +80,7 @@ async function publish(root: string, publication: Publication): Promise<void> {
       const actual = await currentHash(root, path),
         write = writes.get(path),
         before = publication.baseline[path] ?? null;
-      const displaced = write ? await currentHash(root, write.backup) : null;
+      const displaced = write ? await currentHash(root, write.backup, fileByteLimit(path)) : null;
       if (displaced !== null && displaced !== before)
         throw new Error(
           `Concurrent content preserved in ${write!.backup}; reconcile before recover`
@@ -85,15 +99,16 @@ async function publish(root: string, publication: Publication): Promise<void> {
   };
   await check();
   for (const item of publication.writes) {
+    const maxBytes = fileByteLimit(item.path);
     const actual = await currentHash(root, item.path);
     if (actual === item.hash) continue;
     const before = publication.baseline[item.path] ?? null;
-    const backup = await currentHash(root, item.backup);
+    const backup = await currentHash(root, item.backup, maxBytes);
     if (actual !== before && !(actual === null && backup === before))
       throw new Error(`Local file changed during sync publication: ${item.path}`);
     if (actual !== null) {
       await displacePrivate(root, item.path, item.backup);
-      if ((await currentHash(root, item.backup)) !== before) {
+      if ((await currentHash(root, item.backup, maxBytes)) !== before) {
         // Restore without overwriting a subsequent save; the displaced copy is always retained.
         if ((await currentHash(root, item.path)) === null)
           await linkPrivate(root, item.backup, item.path);
@@ -101,7 +116,7 @@ async function publish(root: string, publication: Publication): Promise<void> {
       }
     }
     if (item.stage !== null) {
-      if ((await currentHash(root, item.stage)) !== item.hash)
+      if ((await currentHash(root, item.stage, maxBytes)) !== item.hash)
         throw new Error('Staged snapshot content integrity mismatch');
       // link(2) fails EEXIST if an editor saved after displacement; it never replaces that save.
       await linkPrivate(root, item.stage, item.path);
@@ -121,6 +136,7 @@ export async function stageSnapshot(
   frozen: FrozenFiles
 ): Promise<void> {
   await requireNoPublication(root);
+  serializeState(next);
   const publication: Publication = {
     version: 1,
     directory: root,
@@ -131,8 +147,8 @@ export async function stageSnapshot(
   };
   const stageRoot = `.sync/staging/${randomUUID()}`;
   for (const [path, content] of writes) {
+    if (content !== null) assertFileSize(path, content);
     const stage = content === null ? null : `${stageRoot}/${publication.writes.length}.json`;
-    if (stage !== null) await writePrivate(root, stage, content!);
     publication.writes.push({
       path,
       stage,
@@ -140,6 +156,12 @@ export async function stageSnapshot(
       backup: `${stageRoot}/${publication.writes.length}.displaced`,
     });
   }
+  if (Buffer.byteLength(JSON.stringify(publication)) > MAX_METADATA_BYTES)
+    throw new Error('Snapshot publication metadata exceeds 32 MiB');
+  // Validate final serialized bytes before creating even the first staging file.
+  for (const item of publication.writes)
+    if (item.stage !== null)
+      await writePrivate(root, item.stage, writes.get(item.path)!, fileByteLimit(item.path));
   await frozen.check();
   if (previous && hash(await loadState(root)) !== hash(previous))
     throw new Error('Local sync metadata changed while staging');

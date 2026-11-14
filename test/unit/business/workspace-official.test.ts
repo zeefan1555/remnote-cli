@@ -9,9 +9,11 @@ import {
   diffWorkspace,
   importWorkspace,
   lintWorkspace,
+  recoverWorkspace,
 } from '../../../src/business/workspace/workspace.js';
 import { loadState } from '../../../src/business/workspace/local.js';
-import { readPrivate } from '../../../src/business/workspace/files.js';
+import { allFiles, readPrivate, writePrivate } from '../../../src/business/workspace/files.js';
+import { FrozenFiles } from '../../../src/business/workspace/frozen-files.js';
 import { normalizeRichText, parseDocument } from '../../../src/business/workspace/markdown.js';
 import { parseFrontmatter } from '../../../src/business/workspace/metadata.js';
 import type {
@@ -30,7 +32,12 @@ afterEach(async () => {
   await rm(temporary, { recursive: true, force: true });
 });
 
-async function bootstrap(extra: Record<string, unknown> = {}, complete = true) {
+async function bootstrap(
+  extra: Record<string, unknown> = {},
+  complete = true,
+  headerFields: Record<string, unknown> = {},
+  originalFields: Record<string, unknown> = {}
+) {
   const flags = {
     document: false,
     folder: false,
@@ -64,11 +71,13 @@ async function bootstrap(extra: Record<string, unknown> = {}, complete = true) {
     'rem.json': Buffer.from(
       JSON.stringify({
         ...header,
+        ...headerFields,
         docs: rems.map(({ id, parent, text }) => ({
           _id: id,
           parent,
           key: text,
           future: { retained: true },
+          ...originalFields,
         })),
       })
     ),
@@ -127,6 +136,71 @@ const facts = {
 };
 
 describe('official snapshot native fact consumption', () => {
+  it('publishes and revalidates an aggregate original manifest larger than ordinary content', async () => {
+    const input = await bootstrap({}, true, { syntheticNotes: 'metadata'.repeat(655360) }),
+      directory = join(temporary, 'workspace');
+    const factory = vi.fn(async (): Promise<WorkspaceBackend> => {
+      throw new Error('Must remain offline');
+    });
+    const official = await readOfficialExport(input.archive, input.snapshot, 'kb');
+    expect(
+      Buffer.byteLength(official.originals.get(official.source.manifestPath)!)
+    ).toBeGreaterThan(4 * 1024 * 1024);
+    expect(
+      await importWorkspace(directory, 'kb', factory, {
+        export: input.archive,
+        snapshot: input.snapshot,
+      })
+    ).toMatchObject({ complete: true, rems: 2 });
+    expect(await readPrivate(directory, official.source.manifestPath)).toBe(
+      official.originals.get(official.source.manifestPath)
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
+    const frozen = await FrozenFiles.capture(directory);
+    await frozen.check();
+    expect(await recoverWorkspace(directory, factory)).toMatchObject({
+      complete: true,
+      remoteWrites: 0,
+    });
+    await writePrivate(
+      directory,
+      official.source.manifestPath,
+      official.originals.get(official.source.manifestPath)!.replace('metadata', 'modified')
+    );
+    await expect(frozen.check()).rejects.toThrow('Local file changed');
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: false });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it.each(['manifest', 'original'])(
+    'rejects an oversized official %s before staging or publishing original content',
+    async (kind) => {
+      const input = await bootstrap(
+        {},
+        true,
+        kind === 'manifest' ? { syntheticNotes: 'x'.repeat(32 * 1024 * 1024) } : {},
+        kind === 'original' ? { syntheticPayload: 'x'.repeat(4 * 1024 * 1024) } : {}
+      );
+      await expect(readOfficialExport(input.archive, input.snapshot, 'kb')).rejects.toThrow(
+        'safe byte bound'
+      );
+      const directory = join(temporary, 'workspace');
+      const factory = vi.fn(async (): Promise<WorkspaceBackend> => {
+        throw new Error('Must remain offline');
+      });
+      expect(
+        await importWorkspace(directory, 'kb', factory, {
+          export: input.archive,
+          snapshot: input.snapshot,
+        })
+      ).toMatchObject({ status: 'incomplete', complete: false });
+      expect(await allFiles(directory)).toEqual(['.gitignore']);
+      expect((await loadState(directory)).entries).toEqual({});
+      expect(factory).not.toHaveBeenCalled();
+    }
+  );
+
   it('imports complete facts and cards into YAML without materializing absent facts or losing source semantics', async () => {
     const extra: NativeFlags = {
       cards,

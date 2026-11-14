@@ -3,7 +3,15 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { connectionConfigPath } from '../../remnote-cli/client/connection-config.js';
 import { LocalState } from '../../remnote-cli/client/local-state.js';
-import { allFiles, readPrivate, writePrivate } from './files.js';
+import {
+  allFiles,
+  assertFileSize,
+  MAX_METADATA_BYTES,
+  OFFICIAL_MANIFEST,
+  readPrivate,
+  STATE,
+  writePrivate,
+} from './files.js';
 import { FrozenFiles } from './frozen-files.js';
 import { stageSnapshot } from './publication.js';
 import {
@@ -31,7 +39,6 @@ import {
   type WorkspaceState,
 } from './types.js';
 
-export const STATE = '.sync/state.json';
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const remSchema = z
   .object({
@@ -76,7 +83,7 @@ const stateSchema = z
       .object({
         archiveSha256: digest,
         exportDate: z.string(),
-        manifestPath: z.string(),
+        manifestPath: z.literal(OFFICIAL_MANIFEST),
         manifestHash: digest,
         remCount: z.number().int(),
         cardCount: z.number().int(),
@@ -116,12 +123,15 @@ export function localStore(kbId: string): LocalState {
 export function publicationStore(): LocalState {
   return new LocalState(
     join(dirname(connectionConfigPath()), 'sync-publications'),
-    32 * 1024 * 1024
+    MAX_METADATA_BYTES
   );
 }
 
 function manifestStore(): LocalState {
-  return new LocalState(join(dirname(connectionConfigPath()), 'sync-manifests'), 32 * 1024 * 1024);
+  return new LocalState(
+    join(dirname(connectionConfigPath()), 'sync-manifests'),
+    MAX_METADATA_BYTES
+  );
 }
 export async function authoritativeState(root: string): Promise<WorkspaceState> {
   const value = await manifestStore().getLocal<WorkspaceState>(`manifest:${hash(root)}`);
@@ -141,11 +151,18 @@ export async function loadState(root: string): Promise<WorkspaceState> {
   return state;
 }
 
-export async function saveState(root: string, state: WorkspaceState): Promise<void> {
+export function serializeState(state: WorkspaceState): string {
   stateSchema.parse(state);
+  const content = JSON.stringify(state, null, 2) + '\n';
+  assertFileSize(STATE, content);
+  return content;
+}
+
+export async function saveState(root: string, state: WorkspaceState): Promise<void> {
+  const content = serializeState(state);
   // One atomic private record is authoritative. The in-directory mirror is never a second authority.
   await manifestStore().setLocal(`manifest:${hash(root)}`, state);
-  await writePrivate(root, STATE, JSON.stringify(state, null, 2) + '\n');
+  await writePrivate(root, STATE, content);
 }
 
 export function validateGraph(rems: WorkspaceRem[], rootIds: string[] = []): string[] {

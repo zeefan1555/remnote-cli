@@ -5,7 +5,24 @@ import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 const MAX_FILE = 4 * 1024 * 1024;
+export const MAX_METADATA_BYTES = 32 * 1024 * 1024;
+export const STATE = '.sync/state.json';
+export const OFFICIAL_MANIFEST = '.remnote/originals/manifest.json';
 const IGNORED = new Set(['.git', '.sync', '.obsidian', '.trash']);
+
+/** Only these aggregate records share the CLI metadata store's larger bound. */
+export function fileByteLimit(name: string): number {
+  return name === STATE || name === OFFICIAL_MANIFEST ? MAX_METADATA_BYTES : MAX_FILE;
+}
+
+export function assertFileSize(
+  name: string,
+  content: string,
+  maxBytes = fileByteLimit(name)
+): void {
+  if (Buffer.byteLength(content) > maxBytes)
+    throw new Error(`Workspace file exceeds its safe byte bound: ${name}`);
+}
 
 function readableMode(name: string, mode: number): boolean {
   return (
@@ -51,7 +68,7 @@ async function safePath(root: string, name: string, createParents = false): Prom
 export async function readPrivate(
   root: string,
   name: string,
-  maxBytes = MAX_FILE
+  maxBytes = fileByteLimit(name)
 ): Promise<string> {
   const path = await safePath(root, name);
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -69,10 +86,9 @@ export async function writePrivate(
   root: string,
   name: string,
   content: string,
-  maxBytes = MAX_FILE
+  maxBytes = fileByteLimit(name)
 ): Promise<void> {
-  if (Buffer.byteLength(content) > maxBytes)
-    throw new Error('Workspace file exceeds its safe byte bound');
+  assertFileSize(name, content, maxBytes);
   const path = await safePath(root, name, true);
   try {
     const stat = await lstat(path);

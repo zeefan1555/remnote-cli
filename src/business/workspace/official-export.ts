@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { idSchema } from './markdown.js';
 import { nativeDetailsSchema, nativeSchema } from './metadata.js';
 import { validateGraph } from './local.js';
+import { assertFileSize, OFFICIAL_MANIFEST } from './files.js';
 import { hash, type WorkspaceRem, type WorkspaceState, type WorkspaceBackend } from './types.js';
 
 const MAX_INPUT = 64 * 1024 * 1024;
@@ -260,6 +261,7 @@ export async function readOfficialExport(
     hashes: Record<string, string> = {};
   const add = (path: string, value: unknown) => {
     const text = JSON.stringify(value, null, 2) + '\n';
+    assertFileSize(path, text);
     originals.set(path, text);
     hashes[path] = hash(text);
   };
@@ -283,7 +285,7 @@ export async function readOfficialExport(
   });
   const { docs: _rems, ...remHeader } = remExport,
     { docs: _cards, ...cardHeader } = cardExport;
-  const manifestPath = '.remnote/originals/manifest.json';
+  const manifestPath = OFFICIAL_MANIFEST;
   const manifest =
     JSON.stringify(
       {
@@ -300,6 +302,7 @@ export async function readOfficialExport(
       null,
       2
     ) + '\n';
+  assertFileSize(manifestPath, manifest);
   originals.set(manifestPath, manifest);
   return {
     rems,

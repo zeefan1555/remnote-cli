@@ -127,6 +127,15 @@ live under `.remnote/originals/{rems,cards,public}/`. These read-only sidecars
 belong in private content Git and are hidden in Obsidian's normal file tree.
 They are not disposable cache or part of `.sync/` runtime state.
 
+Markdown, individual native/original records and other ordinary files are limited
+to 4 MiB each. Only the aggregate `.remnote/originals/manifest.json` and
+`.sync/state.json` use a 32 MiB bound, matching the private CLI manifest and
+publication stores. Import/publication prechecks the final serialized UTF-8 bytes
+of every payload, the state mirror and the complete publication ledger before
+writing any staging content. Staged/displaced files inherit their destination's
+bound; reading, freezing, integrity checks and recovery enforce the same limits.
+Oversized metadata is rejected without truncation or relaxing individual-file limits.
+
 ### Markdown, native YAML and stable identities
 
 The vault uses ordinary nested Markdown lists plus document/Folder notes and
