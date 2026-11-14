@@ -226,7 +226,8 @@ function assertMissing(snapshot, ids) {
     'Unexpected read error identity'
   );
   assert.deepEqual(
-    [...snapshot.errors].sort((a, b) => a.id.localeCompare(b.id)),
+    // Match the default ID sort; locale collation orders mixed-case IDs differently.
+    [...snapshot.errors].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     [...ids].sort().map((id) => ({ id, ...missingError })),
     'Unexpected read failure, not absence'
   );
@@ -891,6 +892,28 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     { remIds: absentIds, fields: ['text'] }
   );
   assertMissing(absentSnapshot, absentIds);
+  const mixedCaseIds = ['b-synthetic', 'F-synthetic'];
+  const mixedCaseMissing = await inspectState(
+    { rem: { findMany: async () => [] } },
+    { remIds: mixedCaseIds, fields: ['text'] }
+  );
+  for (const rems of [mixedCaseMissing.rems, [...mixedCaseMissing.rems].reverse()])
+    for (const errors of [mixedCaseMissing.errors, [...mixedCaseMissing.errors].reverse()])
+      for (const ids of [mixedCaseIds, [...mixedCaseIds].reverse()])
+        assertMissing({ ...mixedCaseMissing, rems, errors }, ids);
+  const [firstMissing, secondMissing] = mixedCaseMissing.errors;
+  for (const errors of [
+    [{ ...firstMissing, message: 'Read failed' }, secondMissing],
+    [{ ...firstMissing, field: 'text' }, secondMissing],
+    [{ ...firstMissing, id: 'unexpected' }, secondMissing],
+    [firstMissing],
+    [firstMissing, firstMissing],
+    [...mixedCaseMissing.errors, { ...firstMissing, id: 'extra' }],
+  ])
+    assert.throws(
+      () => assertMissing({ ...mixedCaseMissing, errors }, mixedCaseIds),
+      /Unexpected read (failure|error identity)/
+    );
   assert.throws(() => assertMissing({ ...absentSnapshot, rems: [] }, absentIds));
   assert.throws(() => assertMissing({ ...absentSnapshot, truncated: true }, absentIds));
   const failedRead = await inspectState(
