@@ -545,6 +545,15 @@ its explicit ID, scope boundary and destructive permission gates.
 Only reads are parallel: up to 16 local file reads and 4 exact-ID remote batches
 of 50. Each native batch snapshots at most 4 Rems concurrently, each with up to
 12 independent SDK flags (192 in-flight flag reads at the composed maximum).
+Every workspace structural observation, including cheap probes, full reads,
+guards and discovery, reads the public SDK `getChildrenRem()` entity list. The
+optional public `children` field is not proof of emptiness: when present, it must
+be a complete ordered subsequence of that list. Entity IDs must be valid, unique
+and owned by the requested parent. Unknown, malformed or failed entity reads are
+errors, never an empty-list fallback. All entity types are retained; native
+additions or reordering still stop sync as structural conflicts, even for queries
+or portals. This read correction does not import or rebase unknown structure.
+Cheap probes still omit Card/history and full native-flag reads.
 Read results retain input order; failures stop their pool and drain in-flight
 work before returning, without passing partial reads into writes. Parsed source
 and bytes are reused only within one operation. Full content hashes, safe paths,

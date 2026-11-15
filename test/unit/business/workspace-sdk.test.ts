@@ -1,13 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ReactRNPlugin } from '@remnote/plugin-sdk';
 import { SdkWorkspaceBackend } from '../../../src/business/workspace/sdk-backend.js';
 import { remoteEditedAt } from '../../../src/business/workspace/snapshots.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
 import { mapReads } from '../../../src/business/workspace/read-pool.js';
 import { isReferencePortal } from '../../../src/business/workspace/reference-projection.js';
+import {
+  importWorkspace,
+  pushWorkspace,
+  readWorkspace,
+} from '../../../src/business/workspace/workspace.js';
 
 function fixture(count = 2) {
   const objects = new Map<string, Record<string, unknown>>();
+  const entityChildren = new Map<string, string[]>();
   const flags = new Map<string, Record<string, ReturnType<typeof vi.fn>>>();
   for (let i = 0; i < count; i++) {
     const id = `r${i}`,
@@ -17,6 +26,7 @@ function fixture(count = 2) {
         children: i === 0 ? Array.from({ length: count - 1 }, (_, n) => `r${n + 1}`) : [],
         text: [id],
       };
+    entityChildren.set(id, [...(object.children as string[])]);
     const methods: Record<string, ReturnType<typeof vi.fn>> = {};
     for (const name of [
       'isDocument',
@@ -32,6 +42,7 @@ function fixture(count = 2) {
     ])
       methods[name] = vi.fn(async () => false);
     Object.assign(methods, {
+      getChildrenRem: vi.fn(async () => entityChildren.get(id)!.map((child) => objects.get(child))),
       getPracticeDirection: vi.fn(async () => 'forward'),
       getEnablePractice: vi.fn(async () => true),
       getCards: vi.fn(async () => []),
@@ -78,7 +89,7 @@ function fixture(count = 2) {
     { getLocal: async () => undefined, setLocal: async () => {} },
     status
   );
-  return { backend, plugin, findMany, objects, flags, status };
+  return { backend, plugin, findMany, objects, entityChildren, flags, status };
 }
 
 async function readCardHistory(repetitionHistory: unknown) {
@@ -339,7 +350,7 @@ describe('public SDK sync adapter', () => {
       unsupported: 'unverified-native-flags',
     });
   });
-  it('reads exact public snapshots without native getters and retains unknown fields and explicit undefined', async () => {
+  it('reads exact public snapshots without flags/cards and retains unknown fields and explicit undefined', async () => {
     const f = fixture();
     Object.assign(f.objects.get('r0')!, {
       updatedAt: 9,
@@ -485,10 +496,10 @@ describe('public SDK sync adapter', () => {
   ])('rejects $label instead of silently rewriting Card history', async ({ history }) => {
     await expect(readCardHistory(history)).rejects.toMatchObject({ name: 'ZodError' });
   });
-  it('fails closed on missing/duplicate IDs or missing public child arrays', async () => {
+  it('fails closed on missing/duplicate IDs or malformed public child arrays', async () => {
     const f = fixture();
     await expect(f.backend.read(['missing'])).rejects.toThrow('Incomplete');
-    delete f.objects.get('r0')!.children;
+    f.objects.get('r0')!.children = null;
     await expect(f.backend.subtree(['r0'])).rejects.toThrow('Incomplete');
     f.findMany.mockResolvedValue([f.objects.get('r1')!, f.objects.get('r1')!]);
     await expect(f.backend.discover(['r0', 'r1'])).rejects.toThrow('Incomplete');
@@ -533,5 +544,255 @@ describe('public SDK sync adapter', () => {
       { _id: 'different-card', remId: 'r1', type: 'forward', createdAt: 2 },
     ]);
     expect(await f.backend.guard(['r1'])).not.toBe(before);
+  });
+});
+
+type Fixture = ReturnType<typeof fixture>;
+const observations = {
+  read: (f: Fixture) => f.backend.read(['r0']),
+  public: (f: Fixture) => f.backend.readPublic(['r0']),
+  probe: (f: Fixture) => f.backend.readProbe(['r0']),
+  discover: (f: Fixture) => f.backend.discover(['r0']),
+  subtree: (f: Fixture) => f.backend.subtree(['r0']),
+  enumerate: (f: Fixture) => f.backend.enumerate(),
+  guard: (f: Fixture) => f.backend.guard(['r0']),
+};
+
+describe('authoritative native entity children', () => {
+  it.each([[], undefined, ['r1', 'r3']].map((declared) => ({ declared })))(
+    'retains the full entity order when public children omit entries: $declared',
+    async ({ declared }) => {
+      const f = fixture(4);
+      f.objects.get('r0')!.children = declared;
+      f.objects.get('r2')!.type = 6;
+      const expected = ['r1', 'r2', 'r3'];
+      expect((await f.backend.read(['r0']))[0]).toMatchObject({
+        children: expected,
+        public: { children: expected },
+      });
+      expect((await f.backend.readPublic(['r0']))[0]!.children).toEqual(expected);
+      expect((await f.backend.readProbe(['r0']))[0]!.snapshot.children).toEqual(expected);
+      expect((await f.backend.discover(['r0'])).snapshots[0]!.children).toEqual(expected);
+      expect((await f.backend.enumerate())[0]!.children).toEqual(expected);
+      expect((await f.backend.subtree(['r0'])).map((rem) => rem.id)).toEqual(['r0', ...expected]);
+      await f.backend.guard(['r0']);
+      expect(f.flags.get('r0')!.getChildrenRem).toHaveBeenCalledTimes(7);
+      expect(f.objects.get('r0')!.children).toEqual(declared);
+    }
+  );
+
+  for (const [name, observe] of Object.entries(observations)) {
+    it.each([
+      { label: 'undefined entity result', actual: undefined },
+      { label: 'null entity result', actual: null },
+      { label: 'non-array entity result', actual: {} },
+      { label: 'null entity', actual: [null] },
+      { label: 'missing ID', actual: [{ parent: 'r0' }] },
+      { label: 'invalid ID', actual: [{ _id: 'bad/id', parent: 'r0' }] },
+      { label: 'empty ID', actual: [{ _id: '', parent: 'r0' }] },
+      { label: 'unknown parent', actual: [{ _id: 'r1' }] },
+      { label: 'foreign parent', actual: [{ _id: 'r1', parent: 'foreign' }] },
+      { label: 'null parent', actual: [{ _id: 'r1', parent: null }] },
+      { label: 'self child', actual: [{ _id: 'r0', parent: 'r0' }] },
+      {
+        label: 'duplicate entity',
+        actual: [
+          { _id: 'r1', parent: 'r0' },
+          { _id: 'r1', parent: 'r0' },
+        ],
+      },
+      { label: 'sparse entity result', actual: new Array(1) },
+    ])(`${name} rejects $label, never falling back to an empty public list`, async ({ actual }) => {
+      const f = fixture();
+      f.objects.get('r0')!.children = [];
+      f.flags.get('r0')!.getChildrenRem!.mockResolvedValue(actual);
+      await expect(observe(f)).rejects.toThrow();
+    });
+    it.each(
+      [null, {}, ['r1', 'r1'], ['bad/id'], new Array(1), ['missing'], ['r2', 'r1']].map(
+        (declared) => ({ declared })
+      )
+    )(
+      `${name} rejects malformed, omitted or reordered declared children: $declared`,
+      async ({ declared }) => {
+        const f = fixture(3);
+        f.objects.get('r0')!.children = declared;
+        await expect(observe(f)).rejects.toThrow();
+      }
+    );
+    it(`${name} propagates an entity read error without using public children`, async () => {
+      const f = fixture();
+      f.flags.get('r0')!.getChildrenRem!.mockRejectedValue(new Error('entity read unavailable'));
+      await expect(observe(f)).rejects.toThrow('entity read unavailable');
+    });
+  }
+
+  it('retains the cheap path and its exact-ID batch limit with stale public children', async () => {
+    const f = fixture(52);
+    f.objects.get('r0')!.children = [];
+    const ids = [...f.objects.keys()].slice(0, 50);
+    expect((await f.backend.readProbe(ids))[0]!.snapshot.children).toHaveLength(51);
+    expect(f.findMany.mock.calls.map(([batch]) => batch.length)).toEqual([50]);
+    for (const methods of f.flags.values()) {
+      expect(methods.getCards).not.toHaveBeenCalled();
+      expect(methods.isDocument).not.toHaveBeenCalled();
+      expect(methods.isCardItem).not.toHaveBeenCalled();
+    }
+    await expect(f.backend.readProbe([...f.objects.keys()])).rejects.toThrow('50');
+    expect(f.findMany).toHaveBeenCalledTimes(1);
+    expect((await f.backend.subtree(['r0'])).map((rem) => rem.id)).toEqual([...f.objects.keys()]);
+    expect(f.findMany.mock.calls.slice(1).map(([batch]) => batch.length)).toEqual([1, 50, 1]);
+  });
+
+  it('drains sibling entity reads before reporting a failed probe batch', async () => {
+    const f = fixture();
+    let release!: () => void, started!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const invoked = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    f.flags.get('r0')!.getChildrenRem!.mockRejectedValue(new Error('entity read unavailable'));
+    f.flags.get('r1')!.getChildrenRem!.mockImplementation(async () => {
+      started();
+      await pending;
+      return [];
+    });
+    let finished = false;
+    const result = f.backend.readProbe(['r0', 'r1']).finally(() => {
+      finished = true;
+    });
+    const rejected = expect(result).rejects.toThrow('entity read unavailable');
+    await invoked;
+    expect(finished).toBe(false);
+    release();
+    await rejected;
+    expect(finished).toBe(true);
+  });
+});
+
+describe('entity structure sync gates through the actual SDK backend', () => {
+  let temporary: string | undefined;
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    if (temporary) await rm(temporary, { recursive: true, force: true });
+    temporary = undefined;
+  });
+
+  async function imported() {
+    temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-entity-children-test-')));
+    vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+    const directory = join(temporary, 'vault'),
+      f = fixture(5);
+    f.flags.get('r0')!.isDocument!.mockResolvedValue(true);
+    f.objects.get('r0')!.children = ['r1', 'r2'];
+    f.entityChildren.set('r0', ['r1', 'r2']);
+    await importWorkspace(directory, 'kb', async () => f.backend, { rootId: 'r0' });
+    for (const methods of f.flags.values())
+      for (const method of Object.values(methods)) method.mockClear();
+    const apply = (options: Record<string, unknown> = {}) =>
+      pushWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: ['r0.md'],
+        ...options,
+      });
+    return { ...f, directory, apply };
+  }
+
+  function noWrites(f: Fixture) {
+    for (const methods of f.flags.values())
+      for (const name of [
+        'setText',
+        'setBackText',
+        'setParent',
+        'setIsCardItem',
+        'addPowerup',
+        'addTag',
+        'removeTag',
+        'remove',
+      ])
+        expect(methods[name]).not.toHaveBeenCalled();
+  }
+
+  it.each(['changed', 'all'])(
+    'does not invent a conflict for unchanged entity children in %s mode',
+    async (scope) => {
+      const f = await imported();
+      f.objects.get('r0')!.children = [];
+      expect(await f.apply({ scope })).toMatchObject({
+        status: 'unchanged',
+        complete: true,
+        remoteWrites: 0,
+      });
+      if (scope === 'changed')
+        for (const methods of f.flags.values()) {
+          expect(methods.getCards).not.toHaveBeenCalled();
+          expect(methods.isDocument).not.toHaveBeenCalled();
+        }
+      const { fileHash } = await readWorkspace(f.directory, 'r0.md');
+      expect(await f.apply({ expectedFileHash: fileHash })).toMatchObject({
+        status: 'verified',
+        complete: true,
+        remoteWrites: 0,
+        outline: { nodes: { r0: { children: ['r1', 'r2'] } } },
+      });
+      noWrites(f);
+    }
+  );
+
+  it.each(['changed', 'all', 'guarded'])(
+    'rejects concealed type 6 additions in %s mode, never reporting verified',
+    async (mode) => {
+      const f = await imported();
+      f.entityChildren.set('r1', ['r3']);
+      Object.assign(f.objects.get('r3')!, { parent: 'r1', type: 6, children: ['r4'] });
+      Object.assign(f.objects.get('r4')!, { parent: 'r3' });
+      f.entityChildren.set('r3', ['r4']);
+      const options =
+        mode === 'guarded'
+          ? { expectedFileHash: (await readWorkspace(f.directory, 'r0.md')).fileHash }
+          : { scope: mode };
+      expect(await f.apply(options)).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        remoteWrites: 0,
+        conflicts: [expect.objectContaining({ id: 'r1', reason: 'remote-structure' })],
+      });
+      noWrites(f);
+      expect(f.entityChildren.get('r1')).toEqual(['r3']);
+    }
+  );
+
+  it('rejects a true entity order change concealed by empty public children', async () => {
+    const f = await imported();
+    f.objects.get('r0')!.children = [];
+    f.entityChildren.set('r0', ['r2', 'r1']);
+    expect(await f.apply()).toMatchObject({
+      status: 'conflict',
+      complete: false,
+      remoteWrites: 0,
+      conflicts: [expect.objectContaining({ id: 'r0', reason: 'remote-structure' })],
+    });
+    noWrites(f);
+  });
+
+  it('rejects a concealed addition after the immutable guard at the fresh revision boundary', async () => {
+    const f = await imported();
+    const guard = f.backend.guard.bind(f.backend);
+    vi.spyOn(f.backend, 'guard').mockImplementation(async (ids) => {
+      const result = await guard(ids);
+      f.entityChildren.set('r1', ['r3']);
+      f.objects.get('r3')!.parent = 'r1';
+      return result;
+    });
+    const { fileHash } = await readWorkspace(f.directory, 'r0.md');
+    expect(await f.apply({ expectedFileHash: fileHash })).toMatchObject({
+      status: 'conflict',
+      complete: false,
+      remoteWrites: 0,
+      error: 'Concurrent remote change on r1',
+    });
+    noWrites(f);
   });
 });

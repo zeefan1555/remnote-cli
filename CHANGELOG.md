@@ -7,6 +7,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Workspace structural observations use the public SDK `getChildrenRem()` entity
+  list consistently in cheap probes, full reads, guards and discovery. Optional or
+  incomplete public `children` fields no longer create false emptiness. Entity IDs,
+  uniqueness, parent ownership and declared-child completeness/order are validated;
+  read errors and inconsistent lists fail closed. Native additions (including
+  portals/queries) and reordering remain structural conflicts, not implicit imports.
+
 ### Added
 
 - Standard Obsidian direct-tag projection: document YAML tags and per-bullet inline

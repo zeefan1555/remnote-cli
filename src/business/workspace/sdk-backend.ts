@@ -17,7 +17,39 @@ function boolean(value: unknown, label: string): boolean {
   return value;
 }
 
-function publicSnapshot(rem: PluginRem): Record<string, unknown> {
+async function publicSnapshot(
+  rem: PluginRem
+): Promise<Record<string, unknown> & { children: string[] }> {
+  if (
+    !rem ||
+    !idSchema.safeParse(rem._id).success ||
+    !idSchema.nullable().safeParse(rem.parent).success ||
+    (rem.children !== undefined && !Array.isArray(rem.children))
+  )
+    throw new Error('Incomplete SDK Rem snapshot');
+  // The official field is optional and may omit entity children. The atomic entity
+  // getter is authoritative; a present declaration must still be a complete,
+  // ordered subsequence. Never infer emptiness or discard portal/query entities.
+  const declared =
+    rem.children === undefined ? undefined : [...rem.children].map((id) => idSchema.parse(id));
+  if (declared && new Set(declared).size !== declared.length)
+    throw new Error(`Duplicate declared entity children for ${rem._id}`);
+  const entities = await rem.getChildrenRem();
+  if (!Array.isArray(entities)) throw new Error(`Incomplete native entity children for ${rem._id}`);
+  const children: string[] = [];
+  for (const child of entities) {
+    const id = idSchema.parse(child?._id);
+    if (id === rem._id || child.parent !== rem._id)
+      throw new Error(`Native entity child owner mismatch for ${rem._id}`);
+    children.push(id);
+  }
+  if (new Set(children).size !== children.length)
+    throw new Error(`Duplicate native entity children for ${rem._id}`);
+  if (declared) {
+    const declaredIds = new Set(declared);
+    if (JSON.stringify(declared) !== JSON.stringify(children.filter((id) => declaredIds.has(id))))
+      throw new Error(`SDK omitted or reordered declared entity children for ${rem._id}`);
+  }
   return JSON.parse(
     JSON.stringify(
       {
@@ -26,6 +58,7 @@ function publicSnapshot(rem: PluginRem): Record<string, unknown> {
         ...Object.fromEntries(
           Object.entries(rem).filter(([key, value]) => key !== '_id' && typeof value !== 'function')
         ),
+        children,
       },
       (_key, value) => (value === undefined ? { $type: 'undefined' } : value)
     )
@@ -99,14 +132,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   }
 
   private async snapshot(rem: PluginRem): Promise<WorkspaceRem> {
-    if (
-      !rem ||
-      typeof rem._id !== 'string' ||
-      !(rem.parent === null || typeof rem.parent === 'string') ||
-      !Array.isArray(rem.children) ||
-      rem.children.some((id) => typeof id !== 'string')
-    )
-      throw new Error('Incomplete SDK Rem snapshot');
+    const observed = await publicSnapshot(rem);
     const [
       document,
       folder,
@@ -173,7 +199,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     return {
       id: rem._id,
       parent: rem.parent,
-      children: [...rem.children],
+      children: [...observed.children],
       type: rem.type ?? null,
       text: rem.text ?? null,
       backText: rem.backText ?? null,
@@ -182,7 +208,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       cardItem: boolean(cardItem, 'cardItem'),
       practice,
       enablePractice: boolean(enablePractice, 'enablePractice'),
-      public: publicSnapshot(rem),
+      public: observed,
       cards,
       ...(portal === undefined ? {} : { portal }),
       facts: {
@@ -257,7 +283,11 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     )
       throw new Error('Malformed exact public read');
     const byId = new Map(rems.map((rem) => [rem._id, rem]));
-    return ids.flatMap((id) => (byId.has(id) ? [publicSnapshot(byId.get(id)!)] : []));
+    return mapReads(
+      ids.filter((id) => byId.has(id)),
+      4,
+      (id) => publicSnapshot(byId.get(id)!)
+    );
   }
 
   async readProbe(
@@ -292,7 +322,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
           )
         : undefined;
       return {
-        snapshot: publicSnapshot(rem),
+        snapshot: await publicSnapshot(rem),
         tags: await this.tags(rem),
         ...(powerupPresence ? { powerupPresence } : {}),
       };
@@ -341,7 +371,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
         const rem = byId.get(id)!;
         const [document, folder] = await settleReads([rem.isDocument(), rem.isFolder()]);
         return {
-          snapshot: publicSnapshot(rem),
+          snapshot: await publicSnapshot(rem),
           id: rem._id,
           flags: {
             document: boolean(document, 'document'),
