@@ -14,7 +14,7 @@ const source = ts.createSourceFile(
   ts.ScriptTarget.Latest,
   true
 );
-const names = new Set(['RemType', 'BuiltInPowerupCodes']);
+const names = new Set(['RemType', 'BuiltInPowerupCodes', 'PORTAL_TYPE']);
 const declarations = source.statements.filter(
   (node) => ts.isEnumDeclaration(node) && names.has(node.name.text)
 );

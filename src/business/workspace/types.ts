@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { NativeDetails, NativeMetadata, WorkspaceMetadata } from './metadata.js';
+import type {
+  DocumentAttributes,
+  NativeDetails,
+  NativeMetadata,
+  WorkspaceMetadata,
+} from './metadata.js';
 
 export function hash(value: unknown): string {
   function canonical(input: unknown): unknown {
@@ -107,6 +112,7 @@ export interface OutlineNode {
 }
 export interface ParsedOutline {
   path: string;
+  attributes?: DocumentAttributes;
   metadata?: WorkspaceMetadata;
   nodes: OutlineNode[];
   references: Array<{ id: string; line: number }>;

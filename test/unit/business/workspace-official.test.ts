@@ -11,11 +11,10 @@ import {
   lintWorkspace,
   recoverWorkspace,
 } from '../../../src/business/workspace/workspace.js';
-import { loadState } from '../../../src/business/workspace/local.js';
+import { inspectLocal, loadState } from '../../../src/business/workspace/local.js';
 import { allFiles, readPrivate, writePrivate } from '../../../src/business/workspace/files.js';
 import { FrozenFiles } from '../../../src/business/workspace/frozen-files.js';
-import { normalizeRichText, parseDocument } from '../../../src/business/workspace/markdown.js';
-import { parseFrontmatter } from '../../../src/business/workspace/metadata.js';
+import { normalizeRichText } from '../../../src/business/workspace/markdown.js';
 import type {
   NativeFlags,
   WorkspaceBackend,
@@ -228,8 +227,8 @@ describe('official snapshot native fact consumption', () => {
     expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
     const state = await loadState(directory),
       path = state.entries.child!.path;
-    const source = await readPrivate(directory, path),
-      metadata = parseFrontmatter(path, source).metadata!;
+    const parsed = (await inspectLocal(directory)).parsed.get(path)!;
+    const metadata = parsed.metadata!;
     const entry = metadata.rems.child!;
     if (entry.id === null) throw new Error('Expected native entry');
     expect(entry.content).toBe('basic');
@@ -242,10 +241,8 @@ describe('official snapshot native fact consumption', () => {
     expect(raw.facts).toEqual(facts);
     expect(raw.cards).toEqual(cards);
     expect(raw.portal).toBeNull();
-    const parsed = parseDocument(path, source);
-    expect(parsed.diagnostics).toEqual([]);
     for (const rem of input.rems) {
-      const node = parsed.document.nodes.find((node) => node.key === rem.id)!;
+      const node = parsed.nodes.find((node) => node.key === rem.id)!;
       expect(normalizeRichText(node.text)).toEqual(normalizeRichText(rem.text));
       if (Array.isArray(rem.backText))
         expect(normalizeRichText(node.backText)).toEqual(normalizeRichText(rem.backText));

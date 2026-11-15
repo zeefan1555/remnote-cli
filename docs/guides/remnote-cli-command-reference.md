@@ -9,7 +9,7 @@ remnote-cli [global-options] <command> [command-options]
 ```
 
 Live commands require RemNote open with the authenticated RemNote CLI Bridge enabled.
-`sync read`, `sync save`, `sync status`, `sync lint` and `sync diff` operate offline. A live command owns a
+`sync read`, `sync save`, `sync status`, `sync lint`, `sync diff` and `sync format` operate offline. A live command owns a
 short-lived loopback connection; no daemon or MCP endpoint is used.
 Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
 See [configuration](configuration.md) for permissions and private pairing-file handling.
@@ -67,6 +67,9 @@ three-way merging. The receipts below describe the current source contract;
 offline tests are not native acceptance or a release claim. Legacy `pull`/`push`
 aliases are removed.
 
+The commands below are separate entry points, not a required pipeline. After
+editing, daily synchronization needs only `sync DIR --apply` within the authorized scope.
+
 ```bash
 remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
 remnote-cli --kb-id KB_ID sync import /PRIVATE/library --export /PRIVATE/export.rem
@@ -76,13 +79,15 @@ remnote-cli sync status /PRIVATE/vault
 remnote-cli sync lint /PRIVATE/vault
 remnote-cli sync diff /PRIVATE/vault
 remnote-cli sync /PRIVATE/vault
+remnote-cli sync /PRIVATE/vault --apply
 remnote-cli sync /PRIVATE/vault --apply --plan-hash PREVIEW_HASH
+remnote-cli sync format /PRIVATE/vault
 remnote-cli sync recover /PRIVATE/vault
 ```
 
 ### Initial import and privacy
 
-`sync import` requires explicit global `--kb-id` and a new directory without
+`sync import` publishes the human-readable format by default. It requires explicit global `--kb-id` and a new directory without
 content or a prior manifest. It establishes the initial common baseline; even a
 clean existing vault cannot be re-imported. Later edits from either endpoint are
 inputs to three-way sync. Re-importing or overwriting a whole file is not a merge.
@@ -123,14 +128,20 @@ Ignore `.sync/`, locks and credentials in content Git. Exclude `.obsidian/`,
 Do not delete user configuration or Trash to make validation pass. Private CLI
 state holds authoritative manifests and metadata journals; vault state is not
 independent permission to bypass those guards.
+Only root `AGENTS.md` and exact `.agents/skills/remnote-data/SKILL.md` are excluded
+from content parsing as tooling documents; they are still scanned and frozen.
+Other `README.md` or `SKILL.md` files are not silently exempt from content lint.
 
 Lossless native records live in `.remnote/records/ID.json`; imported payloads
 live under `.remnote/originals/{rems,cards,public}/`. These read-only sidecars
 belong in private content Git and are hidden in Obsidian's normal file tree.
 They are not disposable cache or part of `.sync/` runtime state.
+Tracked `.remnote/identity.json` is a schema/KB/document/block-to-Rem identity
+projection, derived from the authoritative manifest; it does not duplicate native
+records, card history or scheduling. Native truth stays in records/originals.
 
 Markdown, individual native/original records and other ordinary files are limited
-to 4 MiB each. Only the aggregate `.remnote/originals/manifest.json` and
+to 4 MiB each. Only the aggregate `.remnote/identity.json`, `.remnote/originals/manifest.json` and
 `.sync/state.json` use a 32 MiB bound, matching the private CLI manifest and
 publication stores. Import/publication prechecks the final serialized UTF-8 bytes
 of every payload, the state mirror and the complete publication ledger before
@@ -140,7 +151,9 @@ Oversized metadata is rejected without truncation or relaxing individual-file li
 
 ### Guarded local editing
 
-Agents use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
+Users and agents may edit the same Markdown directly, then run `sync DIR --apply`
+once. Separate read/save/lint/diff/preview commands are not a required daily pipeline.
+For guarded editing and trusted local version clocks, use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
 and its `fileHash` from the same read, then edit that source and call `sync save`
 with the returned hash and complete `--content-file` (or `-` for stdin). `PATH` is
 the exact workspace-relative Markdown path, not a native Rem ID. Both commands
@@ -150,7 +163,7 @@ Rem keys. Copy the returned hash verbatim rather than substituting a file mtime.
 
 Save validates the entire workspace and rejects a stale hash before publication.
 Only Rems whose semantic front/back content changed receive a millisecond local
-version timestamp bound to their content hash. New `new:key` Rems use the same
+version timestamp bound to their content hash. New Rems use engine-generated temporary keys in the same
 path and lose those temporary clocks after verified native-ID assignment. No-op
 or formatting-only saves do not retime content. The source and clock metadata use
 the existing staged publication/recovery mechanism, without advancing the native
@@ -162,16 +175,18 @@ retroactively. Use guarded save for Agent edits when automatic same-Rem resoluti
 is needed. Uncertain mutation journals still block save and sync; a prior preview
 with no write steps can be replaced by a fresh preview.
 
-### Markdown, native YAML and stable identities
+### Human Markdown and stable identities
 
 The vault uses ordinary nested Markdown lists plus document/Folder notes and
 wikilinks. It is not one file per Rem, and a Markdown file or directory does not
-by itself establish native Document or Folder status. Every node has explicit
-YAML native metadata: Rem identity, type, parent, ordered children, card shape,
-tags, references, Power-ups and other applicable attributes. Unknown `null`
-and missing facts are distinct from `false`; unsupported native data and its
-lossless raw sidecar remain read-only. Mapping a field does not certify that it
-is writable.
+by itself establish native Document or Folder status. With no user attributes,
+there is no YAML. One hidden `<!-- remnote:document-key -->` before H1 binds the
+document; short anchors bind existing ordinary Rems. Native identity, type,
+parent/order, card shape, tags, references and Power-ups are hydrated through
+`.remnote/identity.json` and sealed native records, not copied into user YAML.
+Unknown native `null`, missing facts and `false` remain distinct; unsupported
+native data stays lossless and read-only. Unknown user YAML fields instead fail
+lint before remote calls. Mapping a field does not certify writable support.
 
 Folder layout is `Name/Name.md`; a Document or top-level plain Rem uses `Name.md`.
 Child Documents live under the same stem directory, such as `Name/Child.md`.
@@ -180,23 +195,27 @@ not receive a second extension; collisions receive a stable-ID suffix. Pages are
 not all named `index.md`. Auto-opening a folder's description note on folder click
 is not an Obsidian core feature; sync does not install a plugin for that behavior.
 
-List items end in an Obsidian block anchor such as ` ^stable-block-id`.
-Block IDs contain only ASCII letters, digits and hyphens. YAML explicitly maps
-each `rems[ID].block` to its `id`; assigning a newly created Rem ID must not replace its
-existing block ID. Renaming a file preserves native identities rather than
+Existing list items place a short Obsidian anchor at the end of their first
+paragraph, such as ` ^r-a1b2c3d4`. Keys contain 1–64 ASCII letters, digits or
+hyphens; H1 has no anchor. The tracked identity projection uses
+`schema: remnote-identity/1`, `kbId` and `documents[documentKey]` with `rootId`
+and a `blocks` map from short keys to native Rem IDs. It is not a user-editable
+native property database. Assigning a newly created Rem ID preserves its
+existing short key. Renaming a file preserves native identities rather than
 deleting and recreating them; it does not authorize native movement or reparenting,
 which remains unsupported and is rejected.
 
-Frontmatter uses `schema: remnote-sync/1`, the existing root Rem ID in `root`,
-an optional display-only `title`, display-only `aliases` and `tags` arrays, and a `rems`
-map. Each existing Rem entry is keyed by its native ID and contains `id`, `block`,
-`content`, `native`, and `readOnly`. `content` is `text`, `multiline`, `basic` or
-`readonly`. Do not manually change existing `id`, `block`, `content`, native facts
-or read-only bindings; the sync engine publishes verified snapshot changes.
-Supported text changes belong in the Markdown body, not a fabricated native
-snapshot. The root body is only `# Title`, bound by YAML `root`, without a list
-anchor. H1 is the sole root-text authority; optional frontmatter `title` is not
-a second source of native text. Publication preserves display aliases/tags.
+Optional frontmatter accepts a display-only `title` string, `aliases` and `tags` arrays,
+plus `rems[shortKey].content` (`text` or `multiline`) when a new node needs an
+explicit content kind. Ordinary text is the default; only a new multiline
+question needs the explicit `multiline` declaration. Existing node/card kinds
+come from identity-bound records and flags: edit their body directly, without
+restating native metadata. Existing identity and native facts cannot be replaced
+through YAML. H1 is the sole root-text authority; optional `title` is not a
+second source of native text. Publication preserves display attributes.
+
+The following native facts are retained in hidden records and hydrated metadata,
+not accepted as user frontmatter:
 
 `native` records type, parent, ordered children, Document/Folder/card-item flags,
 practice direction/enabled state, tags and references. Structured facts use:
@@ -218,86 +237,103 @@ Power-up flags; `embeddedQueueViewMode`, `todoStatus`, `fontSize`, `highlightCol
 `localUpdatedAt` and `updatedAt`. `collected` is the set of explicitly read native
 field names: it distinguishes unknown `null` from a known-null observation.
 Unknown facts remain `null`; they are not permission to invent a value or an edit
-timestamp. `readOnly.record` binds `.remnote/records/ID.json`; `readOnly.public` and
+timestamp. Hydrated `readOnly.record` binds `.remnote/records/ID.json`; `readOnly.public` and
 `readOnly.original` bind the corresponding imported public/native record paths,
 or `null` when absent.
 
-New nodes use a `new:key` map key, `id: null`, a stable `local-<UUID>` block and
-`content: text` or `multiline`; native/read-only fields must be omitted
-until real IDs are assigned. Existing imported blocks start as `rn-<UTF8hex>`;
-a previously assigned `local-<UUID>` remains stable after synchronization.
-For a new multiline question, direct answer entries use the same minimal
-`id: null`, `block`, `content: text` shape; construction under that parent sets
-native `isCardItem: true`, rather than requiring invented native facts in YAML.
-The first version does not create new basic cards.
+New ordinary bullets need neither YAML nor an anchor; successful apply assigns
+their native identity and publishes short anchors. A valid unique manual short
+key is also accepted. New multiline questions require a short question anchor
+and matching `rems` attribute; direct leaf answer bullets may omit anchors.
+Creating those answers sets native `isCardItem: true`. New basic cards remain
+unsupported. Engine-generated `new:key` values in receipts are temporary keys,
+not frontmatter users must type. References to unpublished targets are rejected
+until native identity exists.
 
-For example, retain the imported root and all existing `rems` entries, then add
-these two entries **under the existing `rems` map**, using fresh stable blocks:
-
-```yaml
-new:question:
-  id: null
-  block: local-9a16e18d-9aa8-45dd-b3e3-aafc4ed0c501
-  content: multiline
-new:answer:
-  id: null
-  block: local-53f2289d-5ef8-42ae-bbc9-bf2d1430155f
-  content: text
-```
-
-Append the matching outline beneath the existing H1:
+This synthetic note needs no YAML; preserve its real imported document binding
+and existing anchors when editing:
 
 ```markdown
-- A question ^local-9a16e18d-9aa8-45dd-b3e3-aafc4ed0c501
-  - An answer ^local-53f2289d-5ef8-42ae-bbc9-bf2d1430155f
-```
-
-After verified publication, map keys and `id` become native Rem IDs while the
-two `local-...` blocks remain unchanged. Links to an unpublished `new:key` target
-are rejected until it has a native identity.
-
-The following illustrates ordinary Markdown and full-path links; it does not
-replace the required per-node native YAML:
-
-```markdown
+<!-- remnote:doc-a1 -->
 # Example
 
 - A topic ^topic-a1
   - A child ^child-a1
+- A new ordinary note, without a hand-written identity.
 
-[[path/note|Example]]
-[[path/note#^child-a1|This child]]
+- [[path/note|Example]]
+- [[path/note#^child-a1|This child]]
+```
+
+For a new multiline question in an existing imported note, preserve its document
+binding and other content, and add only the needed declaration and bullets:
+
+```markdown
+---
+rems:
+  question-1:
+    content: multiline
+---
+
+<!-- remnote:doc-a1 -->
+# Example
+
+- A new question ^question-1
+  - An answer
 ```
 
 | Input | Meaning |
 | --- | --- |
 | `[[path/note|label]]` | Full vault-relative note path resolves to its document/root Rem |
-| `[[path/note#^stable-block-id|label]]` | That note's explicit YAML mapping resolves to an ordinary Rem |
+| `[[path/note#^short-key|label]]` | That note's tracked identity mapping resolves to an ordinary Rem |
 | Top-level YAML `aliases` / `tags`, or `#tag` | Obsidian display/search metadata; no automatic native Alias/Tag change |
-| Nested native Tag/reference metadata | Exact Rem ID relationships, never inferred from display labels |
+| Hidden native Tag/reference metadata | Read-only exact Rem ID relationships, never inferred from display labels |
 | `![[path/note]]` | An Obsidian embed, not automatically a RemNote reference or Portal |
 
-Use full vault paths. Broken paths, missing block IDs, ambiguous short names and
+Generated links use full vault paths. Input resolves exact paths first, then a
+unique basename; `[[path/note#Current H1]]` resolves that note's sole current H1.
+Broken paths, missing block IDs, ambiguous short names and
 duplicate identities fail lint instead of guessing a target. Renames must leave
 references resolvable. Display aliases do not change native identity. New embeds
 without a verified public-SDK mapping fail the whole sync before remote writes;
 existing native Portals retain their original value and are explicitly read-only.
+Auxiliary reference/Portal areas are distinct from actual multiline answer items;
+they are not flattened into diagnostic body text or presented as working
+Obsidian dynamic queries.
 
-Top-level aliases and tags use standard Obsidian properties. Edit nested native
-YAML in **Source mode**: the Properties GUI does not support nested properties.
+Top-level aliases and tags use standard Obsidian properties. Edit the optional
+nested content-kind attributes in **Source mode**: the Properties GUI does not support nested properties.
 These conventions use Obsidian's documented [links](https://help.obsidian.md/links),
 [embeds](https://help.obsidian.md/embeds),
 [properties](https://help.obsidian.md/properties) and
 [aliases](https://help.obsidian.md/aliases). Obsidian readability is not proof of
 RemNote semantic acceptance.
 
+### Explicit format conversion
+
+`sync format DIR` is an explicit offline conversion of a clean, sealed legacy
+publication to human Markdown. It requires a complete manifest, no pending remote
+journal or local publication, unchanged published source hashes, complete document
+coverage and intact native records. It preserves native/original record bytes,
+publishes short anchors and tracked identity through staged local publication,
+then validates the resulting vault. It makes zero backend calls and performs no
+remote write. There is no legacy parse fallback in daily sync.
+
+Success returns `status: "formatted"`, `complete: true`, `remoteWrites: 0`,
+document/Rem counts, `identityPath`, previous/current manifest hashes and
+`originals: "unchanged"`. Already-human input is validated and returns
+`status: "already-formatted"` without publication. Invalid or forged identity is
+refused, not silently rebuilt. Dirty legacy source is preserved and refused rather
+than reformatted from stale records; reconcile that work first.
+
 ### Supported write boundary
 
 The first write surface is plain text, bold/italic text, inline and fenced code,
 exact wikilinks, basic-card back text, new plain Rems, multiline cards and explicit
 bounded deletion. A multiline question is an ordinary bullet with answer child
-bullets; YAML card semantics and each answer's `isCardItem` determine the native
-card. For a basic card, the first paragraph is the front and a blockquote inside
+bullets. Existing type comes from identity-bound records; a new question uses the
+explicit multiline attribute, and each actual answer has native `isCardItem`.
+Auxiliary Portal/reference children are not answer items. For a basic card, the first paragraph is the front and a blockquote inside
 the same list item is the back, not a new Rem. Literal `===` and `>>` in ordinary
 text do not declare cards.
 
@@ -437,8 +473,9 @@ and must be reconciled. A recovered local publication reports `status: "recovere
 original operation had zero remote writes.
 
 Development acceptance needs a frozen candidate, exclusive live ownership and
-the guarded integration wrapper. The draft `scripts/sync-agent-acceptance.mjs`
-uses a new synthetic subtree with guarded local new-card saves, native-YAML fixtures,
+the guarded integration wrapper. Exercise `scripts/sync-agent-acceptance.mjs`
+against current-format fixtures before any authorized native run. Acceptance must
+use a new synthetic subtree with guarded local new-card saves, current-format
 stable-block checks, incoming-only, mixed-direction, same-result convergence,
 both version-time winners with pre-apply archives and same-Rem conflict
 cases. The deliberate conflict must prove zero remote writes and preserve both

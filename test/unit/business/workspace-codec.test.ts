@@ -1,14 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   documentMetadata,
   normalizeRichText,
-  parseDocument,
-  renderDocument,
+  parseDocument as parseBoundDocument,
+  renderDocument as renderNativeDocument,
   renderParsedDocument,
 } from '../../../src/business/workspace/markdown.js';
-import { parseFrontmatter, renderFrontmatter } from '../../../src/business/workspace/metadata.js';
+import {
+  parseFrontmatter,
+  renderFrontmatter,
+  type WorkspaceMetadata,
+} from '../../../src/business/workspace/metadata.js';
+import { nativeBlockId } from '../../../src/business/workspace/identity.js';
 import { WorkspaceLinks } from '../../../src/business/workspace/links.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
+
+// The standalone codec receives the same authoritative fixture bindings that inspectLocal hydrates.
+const bindings = new Map<string, WorkspaceMetadata>();
+beforeEach(() => bindings.clear());
+function renderDocument(...args: Parameters<typeof renderNativeDocument>): string {
+  for (const [id, path] of args[3])
+    bindings.set(path, documentMetadata(id, args[2], args[3], args[4]));
+  return renderNativeDocument(...args);
+}
+function parseDocument(path: string, source: string, links?: WorkspaceLinks) {
+  return parseBoundDocument(path, source, bindings.get(path)!, links);
+}
 
 function rem(id: string, text: unknown, extra: Partial<WorkspaceRem> = {}): WorkspaceRem {
   return {
@@ -164,18 +181,19 @@ describe('Obsidian Rem codec', () => {
     }
   );
 
-  it('uses YAML kinds, native H1, stable blocks and ordinary Markdown without HTML or card markers', () => {
+  it('uses hidden identity, native H1, short blocks and ordinary Markdown without default YAML or card markers', () => {
     const source = renderDocument(
       'root',
       'Folder/Note.md',
       codecFixture(),
       new Map([['root', 'Folder/Note.md']])
     );
-    expect(source).not.toContain('<!--');
+    expect(source).toContain(`<!-- remnote:${nativeBlockId('root')} -->`);
+    expect(source).not.toContain('schema:');
     expect(source).not.toContain('Question? ===');
     expect(source).not.toContain('Front >>');
     expect(source).toContain('> Back');
-    expect(source).toContain('[[Folder/Note#^rn-61|');
+    expect(source).toContain(`[[Folder/Note#^${nativeBlockId('a')}|`);
     const parsed = parseDocument('Folder/Note.md', source);
     expect(parsed.diagnostics).toEqual([]);
     const nodes = new Map(parsed.document.nodes.map((node) => [node.key, node]));
@@ -198,12 +216,11 @@ describe('Obsidian Rem codec', () => {
       new Map([['root', rem('root', ['Note'], { parent: null })]]),
       new Map([['root', 'Note.md']])
     );
-    const meta = parseFrontmatter('Note.md', source).metadata!;
-    meta.rems['new:q'] = { id: null, block: 'local-q', content: 'multiline' };
-    meta.rems['new:a'] = { id: null, block: 'local-a', content: 'text' };
+    const header = parseFrontmatter('Note.md', source);
     const parsed = parseDocument(
       'Note.md',
-      renderFrontmatter(meta) +
+      renderFrontmatter({ rems: { 'local-q': { content: 'multiline' } } }) +
+        `<!-- remnote:${header.documentKey} -->\n\n` +
         '# Different native title\n\n- Question === >> ^local-q\n  - Answer ^local-a\n'
     );
     expect(parsed.diagnostics).toEqual([]);
@@ -229,11 +246,15 @@ describe('Obsidian Rem codec', () => {
     expect(
       parseDocument(
         'Note.md',
-        source.replace('Answer ^rn-61', 'Answer ^rn-61\n\n    > ordinary quote')
+        source.replace(
+          `Answer ^${nativeBlockId('a')}`,
+          `Answer ^${nativeBlockId('a')}\n\n    > ordinary quote`
+        )
       ).diagnostics.length
     ).toBeGreaterThan(0);
     expect(
-      parseDocument('Note.md', source.replace('^rn-61', '^missing')).diagnostics.length
+      parseDocument('Note.md', source.replace(`^${nativeBlockId('a')}`, '^missing')).diagnostics
+        .length
     ).toBeGreaterThan(0);
   });
 
@@ -254,24 +275,18 @@ describe('Obsidian Rem codec', () => {
     expect(parsed.document.nodes.find((node) => node.key === 'child')!.text).toEqual(
       byId.get('child')!.text
     );
-    const metadata = parseFrontmatter('Root.md', source).metadata!;
+    const metadata = bindings.get('Root.md')!;
     for (const text of ['[[|empty]]', '**[[Root]]**', '[[unclosed', '![[Root|*embed*]]']) {
       const invalid = parseDocument(
         'Root.md',
-        renderFrontmatter(metadata) + `# Root\n\n- ${text} ^${metadata.rems.child!.block}\n`
+        `<!-- remnote:${metadata.rems.root!.block} -->\n\n# Root\n\n- ${text} ^${metadata.rems.child!.block}\n`
       );
       expect(invalid.diagnostics.length).toBeGreaterThan(0);
     }
   });
 
   it('resolves exact vault paths and unique headings but refuses ambiguous short names and unknown blocks', () => {
-    const source = renderDocument(
-      'root',
-      'One/Note.md',
-      codecFixture(),
-      new Map([['root', 'One/Note.md']])
-    );
-    const metadata = parseFrontmatter('One/Note.md', source).metadata!;
+    const metadata = documentMetadata('root', codecFixture(), new Map([['root', 'One/Note.md']]));
     const other = structuredClone(metadata);
     other.root = 'other';
     other.rems = {
@@ -281,10 +296,13 @@ describe('Obsidian Rem codec', () => {
       { path: 'One/Note.md', title: 'Note', metadata },
       { path: 'Two/Note.md', title: 'Other', metadata: other },
     ]);
-    expect(links.resolve('One/Note.md', '#^rn-61').id).toBe('a');
+    expect(links.resolve('One/Note.md', `#^${nativeBlockId('a')}`).id).toBe('a');
     expect(links.resolve('One/Note.md', 'Two/Note#Other').id).toBe('other');
     expect(() => links.resolve('One/Note.md', 'Note')).toThrow('Ambiguous');
     expect(() => links.resolve('One/Note.md', '#^absent')).toThrow('Unknown');
+    expect(() => links.resolve('One/Note.md', `#^${nativeBlockId('root')}`)).toThrow(
+      'no visible block'
+    );
   });
   it('projects unsupported media and portals readably without inventing Obsidian embeds or writable media', () => {
     const rems = codecFixture();
@@ -295,8 +313,9 @@ describe('Obsidian Rem codec', () => {
     );
     const source = renderDocument('root', 'Note.md', rems, new Map([['root', 'Note.md']]));
     expect(source).toContain('![Native image](https://example.com/image.png)');
-    expect(source).toContain('Portal directly included targets');
-    expect(source).toContain('[[Note#^rn-61|');
+    expect(source).toContain('关联引用〔只读〕');
+    expect(source).not.toContain('Portal directly');
+    expect(source).toContain(`[[Note#^${nativeBlockId('a')}|`);
     expect(source).not.toContain('![[Note');
     const parsed = parseDocument('Note.md', source);
     expect(parsed.diagnostics).toEqual([]);

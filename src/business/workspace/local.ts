@@ -6,6 +6,7 @@ import { LocalState } from '../../remnote-cli/client/local-state.js';
 import {
   allFiles,
   assertFileSize,
+  isContentMarkdown,
   MAX_METADATA_BYTES,
   OFFICIAL_MANIFEST,
   readPrivate,
@@ -16,6 +17,7 @@ import { FrozenFiles } from './frozen-files.js';
 import { stageSnapshot } from './publication.js';
 import {
   documentMetadata,
+  bindPreparedDocument,
   nodeKind,
   parsePreparedDocument,
   prepareDocument,
@@ -30,7 +32,10 @@ import {
   blockSchema,
   idSchema,
   keySchema,
-  nativeBlockId,
+  IDENTITY,
+  identitySchema,
+  shortBlockId,
+  workspaceIdentity,
   originalPath,
   recordPath,
 } from './identity.js';
@@ -314,7 +319,13 @@ export async function writeSnapshot(
   for (const source of sources.values())
     for (const node of source.nodes)
       if (node.kind !== 'mount') blocks.set(assignedIds[node.key] ?? node.key, node.blockId);
-  for (const id of byId.keys()) if (!blocks.has(id)) blocks.set(id, nativeBlockId(id));
+  const usedBlocks = new Set(blocks.values());
+  for (const id of byId.keys())
+    if (!blocks.has(id)) {
+      const block = shortBlockId(id, usedBlocks);
+      blocks.set(id, block);
+      usedBlocks.add(block);
+    }
   const originalIds = new Set(
     Object.entries(previous?.entries ?? {})
       .filter(([, entry]) => entry.originalHash)
@@ -328,6 +339,11 @@ export async function writeSnapshot(
         const { root, title, aliases, tags } = source.metadata!;
         return [root, { ...(title === undefined ? {} : { title }), aliases, tags }];
       })
+  );
+  const attributes = new Map(
+    [...sources.values()]
+      .filter((source) => source.metadata)
+      .map((source) => [source.metadata!.root, source.attributes ?? {}])
   );
   const links = new WorkspaceLinks(
     [...paths].map(([id, path]) => ({
@@ -365,6 +381,7 @@ export async function writeSnapshot(
     const options = {
       blocks,
       display: displays.get(id),
+      attributes: attributes.get(id),
       originalIds,
       links,
     };
@@ -429,6 +446,7 @@ export async function writeSnapshot(
     throw new Error('Outline did not cover every enumerated Rem');
   state.complete = true;
   state.errors = [];
+  writes.set(IDENTITY, JSON.stringify(workspaceIdentity(state), null, 2) + '\n');
   for (const id of removedIds)
     if (previous?.entries[id]) writes.set(previous.entries[id]!.rawPath, null);
   const frozenHashes = files.hashes();
@@ -450,7 +468,7 @@ export interface LocalContext {
 }
 
 /** One operation's bytes/ASTs only. Every write boundary still rereads through FrozenFiles. */
-class InspectionInputs {
+export class InspectionInputs {
   private readonly reads = new Map<string, Promise<string>>();
   private readonly documents = new Map<string, { source: string; prepared: PreparedDocument }>();
   private constructor(
@@ -476,19 +494,15 @@ class InspectionInputs {
   }
 }
 
-export async function inspectLocal(
+/** One shared offline verification of every native/original record; format and sync use the same guards. */
+export async function inspectNativeRecords(
   root: string,
-  suppliedState?: WorkspaceState,
-  sources: ReadonlyMap<string, string> = new Map(),
+  state: WorkspaceState,
   suppliedInputs?: InspectionInputs
-): Promise<LocalContext> {
-  const state = suppliedState ?? (await loadState(root));
+) {
   const inputs = suppliedInputs ?? (await InspectionInputs.scan(root));
-  const files = inputs.paths,
-    native = new Map<string, WorkspaceRem>(),
-    diagnostics: Diagnostic[] = [],
-    dirty: string[] = [],
-    missing: string[] = [];
+  const native = new Map<string, WorkspaceRem>(),
+    diagnostics: Diagnostic[] = [];
   const fail = (path: string, line: number, code: string, message: string) =>
     diagnostics.push({ path, line, code, message });
   if (state.official) {
@@ -549,16 +563,53 @@ export async function inspectLocal(
     if (record.rem) native.set(record.id, record.rem);
     else diagnostics.push(record.diagnostic!);
   }
+  return { inputs, native, diagnostics };
+}
+
+export async function inspectLocal(
+  root: string,
+  suppliedState?: WorkspaceState,
+  sources: ReadonlyMap<string, string> = new Map(),
+  suppliedInputs?: InspectionInputs
+): Promise<LocalContext> {
+  const state = suppliedState ?? (await loadState(root));
+  const { inputs, native, diagnostics } = await inspectNativeRecords(root, state, suppliedInputs);
+  const files = inputs.paths,
+    dirty: string[] = [],
+    missing: string[] = [];
+  const fail = (path: string, line: number, code: string, message: string) =>
+    diagnostics.push({ path, line, code, message });
+  try {
+    const identity = identitySchema.parse(JSON.parse(await inputs.read(IDENTITY)));
+    if (hash(identity) !== hash(workspaceIdentity(state)))
+      throw new Error('Tracked identity map differs from the authoritative manifest');
+  } catch (error) {
+    const missingIdentity =
+      error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
+    fail(
+      IDENTITY,
+      1,
+      'IDENTITY',
+      missingIdentity
+        ? 'Missing tracked identity; a clean sealed legacy vault requires explicit sync format DIR before normal sync'
+        : error instanceof Error
+          ? error.message
+          : String(error)
+    );
+  }
   const parsed = new Map<string, ParsedDocument>(),
     baseline = new Map<string, ParsedOutline>(),
     allKeys = new Set<string>();
   const expectedRoots = new Map(
     Object.entries(state.documents).map(([path, doc]) => [doc.rootId, { path, doc }])
   );
+  const rootsByKey = new Map(
+    [...expectedRoots.keys()].map((id) => [state.entries[id]!.blockId, id])
+  );
   const paths = new Map<string, string>();
   const currentFiles = new Map<string, { source: string; prepared: PreparedDocument }>();
   const foldedPaths = new Set<string>();
-  for (const path of files.filter((file) => file.endsWith('.md'))) {
+  for (const path of files.filter(isContentMarkdown)) {
     if (foldedPaths.has(pathKey(path)))
       fail(path, 1, 'AMBIGUOUS_PATH', 'Case/Unicode-colliding Markdown paths are unsupported');
     foldedPaths.add(pathKey(path));
@@ -567,25 +618,39 @@ export async function inspectLocal(
       frontmatter = prepared.frontmatter;
     currentFiles.set(path, { source, prepared });
     diagnostics.push(...frontmatter.diagnostics);
-    const metadata = frontmatter.metadata;
-    if (!metadata) continue;
-    if (!expectedRoots.has(metadata.root)) {
+    if (!frontmatter.documentKey || !frontmatter.attributes) continue;
+    const rootId = rootsByKey.get(frontmatter.documentKey);
+    if (!rootId) {
       fail(
         path,
         1,
         'UNTRACKED_FILE',
-        'Document YAML root is not an imported native root; a filename does not create or move a native Rem'
+        'Hidden document key is not an imported native root; a filename does not create or move a native Rem'
       );
       continue;
     }
-    if (paths.has(metadata.root))
+    if (paths.has(rootId))
       fail(path, 1, 'DUPLICATE_ROOT', 'One native root is claimed by multiple Markdown files');
-    else paths.set(metadata.root, path);
+    else paths.set(rootId, path);
   }
   for (const [id, { path }] of expectedRoots)
     if (!paths.has(id)) {
       missing.push(path);
       fail(path, 1, 'MISSING_FILE', 'Missing file is not a remote deletion');
+    }
+  const blocks = new Map(Object.entries(state.entries).map(([id, entry]) => [id, entry.blockId]));
+  const originalIds = new Set(
+    Object.entries(state.entries)
+      .filter(([, entry]) => entry.originalHash)
+      .map(([id]) => id)
+  );
+  if (native.size === Object.keys(state.entries).length)
+    for (const [rootId, path] of paths) {
+      const value = currentFiles.get(path)!;
+      value.prepared = bindPreparedDocument(
+        value.prepared,
+        documentMetadata(rootId, native, paths, { blocks, originalIds })
+      );
     }
   const links = new WorkspaceLinks(
     [...currentFiles]
@@ -595,12 +660,6 @@ export async function inspectLocal(
         metadata: value.prepared.frontmatter.metadata!,
         title: preparedTitle(value.prepared),
       }))
-  );
-  const blocks = new Map(Object.entries(state.entries).map(([id, entry]) => [id, entry.blockId]));
-  const originalIds = new Set(
-    Object.entries(state.entries)
-      .filter(([, entry]) => entry.originalHash)
-      .map(([id]) => id)
   );
   for (const [rootId, path] of paths) {
     const doc = expectedRoots.get(rootId)!.doc;
@@ -618,6 +677,7 @@ export async function inspectLocal(
       originalIds,
       display,
       links,
+      attributes: frontmatter.attributes,
     }).document;
     baseline.set(path, old);
     if (current.document.nodes[0]?.key !== doc.rootId)
@@ -646,7 +706,7 @@ export async function inspectLocal(
             path,
             node.line,
             'NEW_SHAPE',
-            'New nodes must have YAML content text or multiline under an existing mapped root'
+            'New nodes must be text or explicitly declared multiline under an existing mapped root'
           );
         const parent = current.document.nodes.find((candidate) => candidate.key === node.parent);
         if (!parent || ['opaque', 'mount', 'basic'].includes(parent.kind))

@@ -60,6 +60,13 @@ export const RemType = {
   DEPRECATED_TEXT: 8,
 } as unknown as typeof import('@remnote/plugin-sdk').RemType;
 export type RemType = import('@remnote/plugin-sdk').RemType;
+export const PORTAL_TYPE = {
+  PORTAL: 0,
+  EMBEDDED_QUEUE: 2,
+  SCAFFOLD: 3,
+  SEARCH_PORTAL: 4,
+} as typeof import('@remnote/plugin-sdk').PORTAL_TYPE;
+export type PORTAL_TYPE = import('@remnote/plugin-sdk').PORTAL_TYPE;
 export const PowerupSlotCodeMap = {
   ha: {},
   l: { Aliases: 'a' },

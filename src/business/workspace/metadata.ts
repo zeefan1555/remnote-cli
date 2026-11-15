@@ -1,6 +1,13 @@
 import { isAlias, parseDocument, stringify, visit } from 'yaml';
 import { z } from 'zod';
-import { blockSchema, idSchema, keySchema, originalPath, recordPath } from './identity.js';
+import {
+  blockSchema,
+  idSchema,
+  keySchema,
+  originalPath,
+  recordPath,
+  shortBlockSchema,
+} from './identity.js';
 import type { Diagnostic } from './types.js';
 
 const bool = () => z.boolean().nullable().default(null);
@@ -130,6 +137,7 @@ const entrySchema = z.union([
       id: idSchema,
       block: blockSchema,
       content: z.enum(['text', 'multiline', 'basic', 'readonly']),
+      projection: z.enum(['reference-wrapper', 'anchor-required']).optional(),
       native: nativeSchema,
       readOnly: z
         .object({
@@ -192,53 +200,96 @@ export type WorkspaceMetadata = z.infer<typeof metadataSchema>;
 export type RemMetadata = WorkspaceMetadata['rems'][string];
 export type NativeMetadata = z.infer<typeof nativeSchema>;
 
-export function renderFrontmatter(metadata: WorkspaceMetadata): string {
-  return `---\n${stringify(metadataSchema.parse(metadata), { lineWidth: 0, aliasDuplicateObjects: false })}---\n\n`;
+/** User-authored attributes only. Native facts are hydrated from the sealed record baseline. */
+export const attributesSchema = z
+  .object({
+    title: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
+    tags: z.array(z.string()).optional(),
+    rems: z
+      .record(
+        shortBlockSchema,
+        z.object({ content: z.enum(['text', 'multiline']).optional() }).strict()
+      )
+      .optional(),
+  })
+  .strict();
+export type DocumentAttributes = z.infer<typeof attributesSchema>;
+
+export function renderFrontmatter(attributes: DocumentAttributes = {}): string {
+  const value = attributesSchema.parse(attributes);
+  if (!Object.keys(value).length) return '';
+  return `---\n${stringify(value, { lineWidth: 0, aliasDuplicateObjects: false })}---\n\n`;
 }
 
 /** Strict YAML 1.2 source mode: neither aliases, unknown tags nor duplicate keys are executable input. */
-export function parseFrontmatter(
-  path: string,
-  source: string
-): {
+export function readMetadataYaml(source: string): unknown {
+  const document = parseDocument(source, {
+    version: '1.2',
+    uniqueKeys: true,
+    stringKeys: true,
+    strict: true,
+    prettyErrors: false,
+  });
+  if (document.errors.length || document.warnings.length)
+    throw new Error(
+      [...document.errors, ...document.warnings].map((error) => error.message).join('; ')
+    );
+  visit(document, (_key, node) => {
+    if (isAlias(node)) throw new Error('YAML aliases are not supported in workspace attributes');
+  });
+  return document.toJS({ maxAliasCount: 0 });
+}
+
+export interface DocumentHeader {
+  attributes?: DocumentAttributes;
+  documentKey?: string;
+  /** Populated only by the identity-bound record hydration, never by YAML parsing. */
   metadata?: WorkspaceMetadata;
   body: string;
   bodyLine: number;
   diagnostics: Diagnostic[];
-} {
+}
+
+export function parseFrontmatter(path: string, source: string): DocumentHeader {
   const diagnostics: Diagnostic[] = [];
-  const fail = (message: string) =>
-    diagnostics.push({ path, line: 1, code: 'YAML_METADATA', message });
-  const match = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
-  if (!match) {
-    fail('Require one remnote-sync/1 YAML frontmatter block before the H1');
-    return { body: source, bodyLine: 1, diagnostics };
+  const fail = (code: string, message: string) =>
+    diagnostics.push({ path, line: 1, code, message });
+  let rest = source.replace(/^\uFEFF/, ''),
+    attributes: DocumentAttributes | undefined = {};
+  if (rest.startsWith('---\n') || rest.startsWith('---\r\n')) {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(rest);
+    if (!match) {
+      fail('YAML_METADATA', 'Unclosed optional YAML attributes');
+      return { body: source, bodyLine: 1, diagnostics };
+    }
+    rest = rest.slice(match[0].length).replace(/^\r?\n/, '');
+    try {
+      attributes = attributesSchema.parse(readMetadataYaml(match[1]!));
+    } catch (error) {
+      attributes = undefined;
+      fail('YAML_METADATA', error instanceof Error ? error.message : String(error));
+    }
   }
-  const bodyOffset = match[0].length;
-  // One optional separator line belongs to frontmatter, not the Markdown root.
-  const rest = source.slice(bodyOffset),
-    separator = /^\r?\n/.exec(rest)?.[0] ?? '';
-  const body = rest.slice(separator.length);
-  const bodyLine = source.slice(0, bodyOffset + separator.length).split('\n').length;
-  try {
-    const document = parseDocument(match[1]!, {
-      version: '1.2',
-      uniqueKeys: true,
-      stringKeys: true,
-      strict: true,
-      prettyErrors: false,
-    });
-    if (document.errors.length || document.warnings.length)
-      throw new Error(
-        [...document.errors, ...document.warnings].map((error) => error.message).join('; ')
-      );
-    visit(document, (_key, node) => {
-      if (isAlias(node)) throw new Error('YAML aliases are not supported in workspace metadata');
-    });
-    const metadata = metadataSchema.parse(document.toJS({ maxAliasCount: 0 }));
-    return { metadata, body, bodyLine, diagnostics };
-  } catch (error) {
-    fail(error instanceof Error ? error.message : String(error));
-    return { body, bodyLine, diagnostics };
+  const marker = /^<!-- remnote:([A-Za-z0-9-]{1,64}) -->\r?\n(?:\r?\n)?/.exec(rest);
+  if (!marker || [...source.matchAll(/<!--\s*remnote:/g)].length !== 1) {
+    fail(
+      'ROOT_BINDING',
+      'Require exactly one hidden <!-- remnote:document-key --> before the H1; old native YAML requires explicit sync format'
+    );
+    return {
+      attributes,
+      body: rest,
+      bodyLine: source.slice(0, source.length - rest.length).split('\n').length,
+      diagnostics,
+    };
   }
+  const body = rest.slice(marker[0].length);
+  return {
+    attributes,
+    documentKey: marker[1]!,
+    body,
+    bodyLine: source.slice(0, source.length - body.length).split('\n').length,
+    diagnostics,
+  };
 }

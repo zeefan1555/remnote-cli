@@ -9,6 +9,21 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Human-readable sync Markdown uses one hidden document-root binding and short
+  stable block anchors; ordinary new bullets need no anchor or YAML. Optional
+  sparse attributes accept display `title`/`aliases`/`tags` and explicit new
+  `text`/`multiline` kinds. Native facts and Card history stay in sealed records,
+  with a tracked `.remnote/identity.json` mapping checked against the CLI manifest.
+  Missing existing identities fail before connection; moving a file is only layout.
+- Offline `sync format DIR` converts a clean, complete, sealed legacy publication
+  to the human protocol with no native/backend calls. It preserves original/raw
+  bytes and retains displaced source files; edited sources, pending outcomes and
+  forged identities are refused. Daily sync has no legacy-format fallback.
+- Verified multiline answer items stay editable beside read-only reference portals.
+  Fresh public SDK portal subtype/membership facts retain unknown/null values;
+  compact reference projections preserve all native identities and structural order.
+  Proven empty wrappers may be folded, but native reference targets retain visible
+  anchors. Search portals are not labeled as automatic backlinks or dynamic queries.
 - `sync DIR --apply` plans, validates, applies and verifies in one invocation;
   an explicit `--plan-hash` still binds an exact previous preview. Neither mode
   retries unknown writes or relaxes explicit deletion and native permission gates.
@@ -19,7 +34,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `sync DIR` preview/apply and `sync import|status|lint|diff|recover` for a private,
   exact-KB-bound Obsidian vault. The updated design permits edits in both RemNote
-  and the shared Markdown/native-YAML files, using a common baseline and per-Rem
+  and the shared Markdown files, using a common baseline and per-Rem
   semantic three-way merge. Preview/apply reports incoming, outgoing, converged
   and metadata-only changes; native acceptance remains separate from offline tests.
 - Offline `sync read|save` binds guarded local edits to per-Rem content hashes and
@@ -34,7 +49,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   Review history/scheduling remain RemNote-owned, and local snapshots never write
   them back. Absence on either side never implies automatic deletion.
 - Stable Obsidian block-ID to Rem-ID mapping and full-path wikilinks, preserving
-  native identity across local renames. Native YAML is edited in Source mode;
+  native identity across local renames. Sparse attributes are edited in Source mode;
   display aliases/tags and embeds are distinct from native Rem relationships.
   Unsupported or unverified structures, including Portals, remain lossless and read-only.
 - Whole-sync offline lint, frozen-plan apply, explicit bounded deletion, preserved
@@ -49,7 +64,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   Rems and reparenting are rejected or conflicted; new top-level roots are outside
   scope. Client pre/post revision checks are not server-side atomic CAS.
 - A draft opt-in `scripts/sync-agent-acceptance.mjs` driver for serialized, guarded
-  live tests in one synthetic subtree, using YAML/block identities and incoming /
+  live tests in one synthetic subtree, using hidden/tracked identities and incoming /
   mixed-direction, convergence and conflict-preservation checks. Deletion uses
   explicit missing-ID receipts and fresh-root cleanup guards. Its synthetic self-test is offline only; a new native
   run still requires exclusive ownership, a frozen candidate and explicit approval.

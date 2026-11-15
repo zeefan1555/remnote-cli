@@ -46,8 +46,15 @@ import {
   withWorkspaceLock,
   writePrivate,
 } from '../../../src/business/workspace/files.js';
-import { parseDocument } from '../../../src/business/workspace/markdown.js';
 import { parseFrontmatter, renderFrontmatter } from '../../../src/business/workspace/metadata.js';
+import {
+  IDENTITY,
+  identitySchema,
+  localNodeKey,
+  nativeBlockId,
+  recordPath,
+  shortBlockId,
+} from '../../../src/business/workspace/identity.js';
 import * as metadataOps from '../../../src/business/workspace/metadata.js';
 import {
   contentProjection,
@@ -55,6 +62,8 @@ import {
 } from '../../../src/business/workspace/snapshots.js';
 import { reconcile } from '../../../src/business/workspace/reconcile.js';
 import { readPublication } from '../../../src/business/workspace/publication.js';
+import { formatWorkspace } from '../../../src/business/workspace/format.js';
+import { stringify as yamlStringify } from 'yaml';
 
 let temporary: string, directory: string;
 beforeEach(async () => {
@@ -238,6 +247,355 @@ async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
 }
 
+describe('human Markdown workspace', () => {
+  it('extends colliding short identities without changing an already allocated identity', () => {
+    const first = shortBlockId('synthetic-native-id', new Set());
+    const next = shortBlockId('synthetic-native-id', new Set([first]));
+    const third = shortBlockId('synthetic-native-id', new Set([first, next]));
+    expect(first).toMatch(/^r-[a-f0-9]{8}$/);
+    expect(next).toBe(
+      first + createHash('sha256').update('synthetic-native-id').digest('hex').slice(8, 10)
+    );
+    expect(third).toHaveLength(next.length + 2);
+    expect(shortBlockId('synthetic-native-id', new Set())).toBe(first);
+  });
+
+  it('publishes no default YAML, one hidden root binding and a complete tracked identity map', async () => {
+    const f = await prepare();
+    const source = await readPrivate(directory, f.path);
+    expect(source).toMatch(/^<!-- remnote:[A-Za-z0-9-]{1,16} -->\n\n# Today\n/);
+    expect(source).not.toContain('schema:');
+    expect(source).not.toContain('Read only:');
+    expect(source).not.toContain('.remnote/records/');
+    const identity = JSON.parse(await readPrivate(directory, IDENTITY)) as {
+      documents: Record<string, { blocks: Record<string, string> }>;
+    };
+    expect(identity).toMatchObject({ schema: 'remnote-identity/1', kbId: 'kb' });
+    expect(
+      Object.values(identity.documents)
+        .flatMap((doc) => Object.values(doc.blocks))
+        .sort()
+    ).toEqual(Object.keys(f.state.entries).sort());
+    expect(JSON.stringify(identity)).not.toContain(directory);
+  });
+
+  it('accepts ordinary unanchored new bullets but fails the entire batch when an old anchor is lost', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source + '\n- A plain new note\n');
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+    });
+    expect(f.rems.get('created_1')!.text).toEqual(['A plain new note']);
+    expect(await readPrivate(directory, f.path)).toMatch(/A plain new note \^[A-Za-z0-9-]+/);
+    f.calls.length = 0;
+    await edit(
+      f.path,
+      (source) =>
+        source.replace(`^${f.state.entries.answer!.blockId}`, '') + '\n- Another new note\n'
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow('MISSING_ID');
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('rejects identity tampering before opening a native connection', async () => {
+    const f = await prepare();
+    await edit('.remnote/identity.json', (source) => source.replace('"answer"', '"forged"'));
+    const factory = vi.fn(async () => f.backend);
+    await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow('IDENTITY');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('retains the complete identity mapping in tracked files without trusting a clone as a bound workspace', async () => {
+    const f = await prepare(),
+      clone = join(temporary, 'portable-clone');
+    await mkdir(clone, { mode: 0o700 });
+    const paths = [
+      IDENTITY,
+      ...Object.keys(f.state.documents),
+      ...Object.values(f.state.entries).map((entry) => entry.rawPath),
+    ];
+    for (const path of paths) await writePrivate(clone, path, await readPrivate(directory, path));
+    vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'fresh-machine', 'connection.json'));
+    const identity = identitySchema.parse(JSON.parse(await readPrivate(clone, IDENTITY)));
+    const restored = new Map<string, { documentKey: string; rootId: string; blockId: string }>();
+    for (const path of paths.filter((path) => path.endsWith('.md'))) {
+      const marker = parseFrontmatter(path, await readPrivate(clone, path)).documentKey!;
+      const document = identity.documents[marker]!;
+      expect(document.blocks[marker]).toBe(document.rootId);
+      for (const [blockId, id] of Object.entries(document.blocks)) {
+        expect(JSON.parse(await readPrivate(clone, recordPath(id))).id).toBe(id);
+        expect(restored.has(id)).toBe(false);
+        restored.set(id, { documentKey: marker, rootId: document.rootId, blockId });
+      }
+    }
+    expect([...restored.keys()].sort()).toEqual(Object.keys(f.state.entries).sort());
+    for (const [id, binding] of restored) {
+      const entry = f.state.entries[id]!;
+      expect(binding.blockId).toBe(entry.blockId);
+      expect(binding.rootId).toBe(f.state.documents[entry.path]!.rootId);
+    }
+    expect(JSON.stringify(identity)).not.toContain(temporary);
+    const factory = vi.fn(async () => f.backend);
+    await expect(pushWorkspace(clone, factory, { apply: true })).rejects.toThrow(
+      'No sync manifest'
+    );
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('creates explicit multiline questions with ordinary unanchored answer bullets', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({ rems: { 'my-question': { content: 'multiline' } } }) +
+        source +
+        '\n- A new question ^my-question\n  - First answer\n  - Second answer\n'
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+    });
+    expect(f.rems.get('created_1')).toMatchObject({
+      text: ['A new question'],
+      children: ['created_2', 'created_3'],
+    });
+    expect(f.rems.get('created_2')).toMatchObject({ text: ['First answer'], cardItem: true });
+    expect(f.rems.get('created_3')).toMatchObject({ text: ['Second answer'], cardItem: true });
+    const source = await readPrivate(directory, f.path);
+    expect(source).toMatch(/First answer \^[A-Za-z0-9-]+/);
+    expect(source).toMatch(/Second answer \^[A-Za-z0-9-]+/);
+  });
+
+  it.each(['missing', 'duplicate', 'forged'] as const)(
+    'rejects a %s document comment before any native connection',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) =>
+        kind === 'missing'
+          ? source.replace(/^<!--.*-->\n\n/, '')
+          : kind === 'duplicate'
+            ? source + `\n<!-- remnote:${f.state.entries.daily!.blockId} -->\n`
+            : source.replace(f.state.entries.daily!.blockId, 'unbound-root')
+      );
+      const factory = vi.fn(async () => f.backend);
+      await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow();
+      expect(factory).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps native unknown/false/null facts when attributes are absent and rejects unsupported attributes', async () => {
+    const f = await prepare();
+    const original = await readPrivate(directory, f.state.entries.answer!.rawPath);
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({ title: 'Local title', aliases: ['Alias'], tags: ['local'] }) + source
+    );
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+      remoteWrites: 0,
+    });
+    expect(await readPrivate(directory, f.state.entries.answer!.rawPath)).toBe(original);
+    for (const attrs of ['tags: []', 'native: {}', 'readOnly: false', 'content: basic']) {
+      const source = await readPrivate(directory, f.path),
+        header = parseFrontmatter(f.path, source);
+      await writePrivate(
+        directory,
+        f.path,
+        `---\nrems:\n  ${f.state.entries.answer!.blockId}:\n    ${attrs}\n---\n\n<!-- remnote:${header.documentKey} -->\n\n${header.body}`
+      );
+      const factory = vi.fn(async () => f.backend);
+      await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        'YAML_METADATA'
+      );
+      expect(factory).not.toHaveBeenCalled();
+      await writePrivate(directory, f.path, source);
+    }
+  });
+
+  it('scopes human-chosen new anchors per document', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source + '\n- One ^my-note\n');
+    await edit(f.state.entries.subdoc!.path, (source) => source + '\n- Two ^my-note\n');
+    const plan = planLocal(await inspectLocal(directory));
+    expect(plan.changes.map((change) => change.key).sort()).toEqual(
+      [localNodeKey('daily', 'my-note'), localNodeKey('subdoc', 'my-note')].sort()
+    );
+  });
+
+  it('excludes only exact guide paths from Markdown parsing while freezing their bytes', async () => {
+    const f = await prepare();
+    const paths = ['AGENTS.md', '.agents/skills/remnote-data/SKILL.md'];
+    for (const path of paths) await writePrivate(directory, path, '# Synthetic guide\n');
+    const local = await inspectLocal(directory);
+    expect(local.diagnostics).toEqual([]);
+    const frozen = await local.inputs.freeze();
+    for (const path of paths) expect(frozen.hashes()[path]).toBe(hash('# Synthetic guide\n'));
+    for (const path of ['README.md', 'Other/SKILL.md']) {
+      await writePrivate(directory, path, '# Not a bound document\n');
+      const factory = vi.fn(async () => f.backend);
+      await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        'ROOT_BINDING'
+      );
+      expect(factory).not.toHaveBeenCalled();
+      await rm(join(directory, path));
+    }
+  });
+
+  it('keeps a multiline question editable when its verified non-answer children are reference portals', async () => {
+    const f = fixture();
+    for (let index = 2; index <= 8; index++) {
+      const id = `answer-${index}`;
+      f.rems.get('question')!.children.push(id);
+      f.rems.set(
+        id,
+        native(id, [`Knowledge point ${index}`], { parent: 'question', cardItem: true })
+      );
+    }
+    f.rems.get('question')!.children.push('references');
+    f.rems.set(
+      'references',
+      native('references', [], {
+        type: 6,
+        parent: 'question',
+        children: ['wrapper'],
+        portal: { type: 4, directlyIncludedRemIds: ['wrapper'] },
+      })
+    );
+    f.rems.set(
+      'wrapper',
+      native('wrapper', [], {
+        type: 6,
+        parent: 'references',
+        portal: { type: null, directlyIncludedRemIds: ['basic'] },
+      })
+    );
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory);
+    const beforeCards = await f.backend.cardFacts('question');
+    const path = state.entries.question!.path;
+    const source = await readPrivate(directory, path);
+    expect(state.entries.question!.editable).toBe(true);
+    expect(source).not.toContain('Read only:');
+    expect(source).not.toContain('反向链接');
+    expect(source).toContain('只读');
+    expect(source).not.toContain(`^${state.entries.wrapper!.blockId}`);
+    const wrapperBefore = await readPrivate(directory, state.entries.wrapper!.rawPath);
+    await edit(path, (source) => source.replace('Because ^', 'Answer revised ^'));
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+      updated: ['answer'],
+    });
+    expect(f.rems.get('question')!.children).toEqual([
+      'answer',
+      ...Array.from({ length: 7 }, (_, index) => `answer-${index + 2}`),
+      'references',
+    ]);
+    expect(f.rems.get('references')!.children).toEqual(['wrapper']);
+    expect(await f.backend.cardFacts('question')).toEqual(beforeCards);
+    expect(await readPrivate(directory, state.entries.wrapper!.rawPath)).toBe(wrapperBefore);
+    expect(f.calls).toEqual(['answer:text']);
+  });
+
+  it.each([
+    'text',
+    'backText',
+    'cards',
+    'membership',
+    'unknown-parent',
+    'reference-target',
+    'cross-document-target',
+  ] as const)(
+    'keeps an unknown portal wrapper visible when %s facts do not justify folding',
+    async (kind) => {
+      const f = fixture();
+      f.rems.get('question')!.children.push('references');
+      f.rems.set(
+        'references',
+        native('references', [], {
+          type: 6,
+          parent: 'question',
+          children: ['wrapper'],
+          portal: {
+            type: kind === 'unknown-parent' ? 99 : 4,
+            directlyIncludedRemIds: kind === 'membership' ? [] : ['wrapper'],
+          },
+        })
+      );
+      f.rems.set(
+        'wrapper',
+        native('wrapper', kind === 'text' ? ['Own native text'] : [], {
+          type: 6,
+          parent: 'references',
+          backText: kind === 'backText' ? ['Own back'] : null,
+          cards:
+            kind === 'cards'
+              ? [
+                  {
+                    id: 'wrapper-card',
+                    remId: 'wrapper',
+                    type: 'forward',
+                    createdAt: 1,
+                    repetitionHistory: [],
+                    nextRepetitionTime: null,
+                    lastRepetitionTime: null,
+                    timesWrongInRow: null,
+                  },
+                ]
+              : [],
+          portal: { type: null, directlyIncludedRemIds: ['basic'] },
+        })
+      );
+      if (kind === 'reference-target') f.rems.get('answer')!.text = [{ i: 'q', _id: 'wrapper' }];
+      if (kind === 'cross-document-target') {
+        f.rems.get('subdoc')!.children.push('outside-reference');
+        f.rems.set(
+          'outside-reference',
+          native('outside-reference', [{ i: 'q', _id: 'wrapper' }], { parent: 'subdoc' })
+        );
+      }
+      await importWorkspace(directory, 'kb', async () => f.backend);
+      const state = await loadState(directory),
+        path = state.entries.wrapper!.path;
+      const source = await readPrivate(directory, path);
+      expect(source).toContain(`^${state.entries.wrapper!.blockId}`);
+      expect(source).not.toContain('反向链接');
+      if (kind === 'reference-target') {
+        expect(source).toContain(`#^${state.entries.wrapper!.blockId}|`);
+        expect(
+          (await inspectLocal(directory)).parsed
+            .get(path)!
+            .nodes.find((node) => node.key === 'answer')!.text
+        ).toEqual([{ i: 'q', _id: 'wrapper' }]);
+      }
+      if (kind === 'cross-document-target') {
+        const referencePath = state.entries['outside-reference']!.path;
+        expect(referencePath).not.toBe(path);
+        expect(await readPrivate(directory, referencePath)).toContain(
+          `#^${state.entries.wrapper!.blockId}|`
+        );
+        expect(
+          (await inspectLocal(directory)).parsed
+            .get(referencePath)!
+            .nodes.find((node) => node.key === 'outside-reference')!.text
+        ).toEqual([{ i: 'q', _id: 'wrapper' }]);
+      }
+      if (kind === 'unknown-parent') expect(state.entries.question!.editable).toBe(false);
+      await edit(path, (source) =>
+        source.replace(new RegExp(` \\^${state.entries.wrapper!.blockId}$`, 'm'), '')
+      );
+      const factory = vi.fn(async () => f.backend);
+      await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        'MISSING_ID'
+      );
+      expect(factory).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('single-invocation sync', () => {
   it('plans and applies a local edit without a previous preview, preserving native cards', async () => {
     const f = await prepare();
@@ -393,11 +751,166 @@ function addNodes(
   body: string
 ): string {
   const parsed = parseFrontmatter('test.md', source),
-    metadata = parsed.metadata!;
+    attributes = parsed.attributes!;
   for (const [key, content] of Object.entries(nodes))
-    metadata.rems[`new:${key}`] = { id: null, block: `local-${key}`, content };
-  return renderFrontmatter(metadata) + parsed.body + body;
+    (attributes.rems ??= {})[`local-${key}`] = { content };
+  return (
+    renderFrontmatter(attributes) +
+    `<!-- remnote:${parsed.documentKey} -->\n\n` +
+    parsed.body +
+    body
+  );
 }
+const newKeys = Object.fromEntries(
+  ['q', 'a', 'n', 'note'].map((key) => [key, localNodeKey('daily', `local-${key}`)])
+);
+
+/** A synthetic, sealed publication of the retired dense protocol; never reads a real vault. */
+async function legacyFixture() {
+  const f = fixture();
+  f.rems.get('answer')!.text = [{ i: 'q', _id: 'subdoc' }, ' ', { i: 'q', _id: 'basic' }];
+  await importWorkspace(directory, 'kb', async () => f.backend);
+  const local = await inspectLocal(directory),
+    state = structuredClone(local.state);
+  const oldBlocks = new Map(
+    Object.entries(state.entries).map(([id, entry]) => [
+      entry.blockId,
+      `rn-${Buffer.from(id).toString('hex')}`,
+    ])
+  );
+  const sources = new Map<string, string>();
+  for (const [path, document] of local.parsed) {
+    const metadata = structuredClone(document.metadata!);
+    let body = parseFrontmatter(path, await readPrivate(directory, path)).body;
+    for (const [block, old] of oldBlocks) body = body.replaceAll(`^${block}`, `^${old}`);
+    // An old root-fragment alias is rewritten from the native target, not kept as a nonexistent anchor.
+    const subdocPath = state.entries.subdoc!.path.replace(/\.md$/, '');
+    body = body.replaceAll(
+      `${subdocPath}|`,
+      `${subdocPath}#^${oldBlocks.get(state.entries.subdoc!.blockId)}|`
+    );
+    for (const entry of Object.values(metadata.rems)) entry.block = oldBlocks.get(entry.block)!;
+    const source = `---\n${yamlStringify(metadata, { lineWidth: 0, aliasDuplicateObjects: false })}---\n\n${body}`;
+    await writePrivate(directory, path, source);
+    state.documents[path]!.fileHash = hash(source);
+    sources.set(path, source);
+  }
+  for (const entry of Object.values(state.entries)) entry.blockId = oldBlocks.get(entry.blockId)!;
+  await rm(join(directory, IDENTITY));
+  await saveState(directory, state);
+  return { ...f, state, sources };
+}
+
+describe('explicit offline format', () => {
+  it('converts a clean sealed dense publication, preserving every raw record and native link target', async () => {
+    const f = await legacyFixture();
+    const filesBefore = new Map(
+      await Promise.all(
+        (await fileOps.allFiles(directory))
+          .filter((path) => path.startsWith('.remnote/'))
+          .map(async (path) => [path, await readPrivate(directory, path)] as const)
+      )
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({
+      ok: false,
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'IDENTITY',
+          message: expect.stringContaining('sync format DIR'),
+        }),
+      ]),
+    });
+    const factory = vi.fn(async () => f.backend);
+    await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow('IDENTITY');
+    expect(factory).not.toHaveBeenCalled();
+    expect(await formatWorkspace(directory)).toMatchObject({
+      status: 'formatted',
+      complete: true,
+      remoteWrites: 0,
+      documents: 3,
+      rems: 8,
+      originals: 'unchanged',
+    });
+    const local = await inspectLocal(directory);
+    expect(local.diagnostics).toEqual([]);
+    expect(planLocal(local).changes).toEqual([]);
+    expect(Object.keys(local.state.entries).sort()).toEqual(Object.keys(f.state.entries).sort());
+    for (const [path, content] of filesBefore)
+      expect(await readPrivate(directory, path)).toBe(content);
+    const answer = local.parsed
+      .get(local.state.entries.answer!.path)!
+      .nodes.find((node) => node.key === 'answer')!;
+    expect(answer.text).toEqual(f.rems.get('answer')!.text);
+    const source = await readPrivate(directory, local.state.entries.answer!.path);
+    expect(source).not.toContain('schema:');
+    expect(source).not.toContain('#^rn-');
+    expect(source).not.toContain(`${local.state.entries.subdoc!.path.replace(/\.md$/, '')}#^`);
+    const retained = await fileOps.allFiles(directory, '.sync/staging');
+    const displaced = await Promise.all(
+      retained
+        .filter((path) => path.endsWith('.displaced'))
+        .map((path) => readPrivate(directory, path))
+    );
+    for (const old of f.sources.values()) expect(displaced).toContain(old);
+    expect(await formatWorkspace(directory)).toMatchObject({
+      status: 'already-formatted',
+      remoteWrites: 0,
+    });
+    expect(f.calls).toEqual([]);
+  });
+
+  it('refuses local edits, missing documents and corrupted raw records without rewriting them', async () => {
+    const f = await legacyFixture();
+    const path = f.state.entries.answer!.path;
+    await edit(path, (source) => source + '\n- Unsaved local text\n');
+    const edited = await readPrivate(directory, path);
+    await expect(formatWorkspace(directory)).rejects.toThrow('locally edited');
+    expect(await readPrivate(directory, path)).toBe(edited);
+    await writePrivate(directory, path, f.sources.get(path)!);
+    await rm(join(directory, path));
+    await expect(formatWorkspace(directory)).rejects.toThrow('missing legacy');
+    await writePrivate(directory, path, f.sources.get(path)!);
+    await writePrivate(directory, f.state.entries.answer!.rawPath, '{}');
+    await expect(formatWorkspace(directory)).rejects.toThrow('READONLY_METADATA');
+    expect(await readPrivate(directory, path)).toBe(f.sources.get(path));
+    expect(f.calls).toEqual([]);
+  });
+
+  it('refuses unknown remote journals and never uses format to repair a forged identity', async () => {
+    const f = await legacyFixture();
+    await saveState(directory, {
+      ...f.state,
+      pending: { planHash: 'a'.repeat(64), journalKey: 'unknown' },
+    });
+    await expect(formatWorkspace(directory)).rejects.toThrow('pending remote journal');
+    await saveState(directory, f.state);
+    await formatWorkspace(directory);
+    await edit(IDENTITY, (source) => source.replace('"answer"', '"forged"'));
+    await expect(formatWorkspace(directory)).rejects.toThrow('IDENTITY');
+    expect(await readPrivate(directory, IDENTITY)).toContain('"forged"');
+    expect(f.calls).toEqual([]);
+  });
+
+  it('freezes source and raw files before staging conversion', async () => {
+    const f = await legacyFixture();
+    const path = f.state.entries.answer!.path;
+    const write = fileOps.writePrivate;
+    let tampered = false;
+    vi.spyOn(fileOps, 'writePrivate').mockImplementation(async (root, name, content, maxBytes) => {
+      if (!tampered && name.startsWith('.sync/staging/')) {
+        tampered = true;
+        await write(root, path, f.sources.get(path)! + '\nConcurrent edit\n');
+      }
+      return write(root, name, content, maxBytes);
+    });
+    await expect(formatWorkspace(directory)).rejects.toThrow('Local file changed');
+    expect(await readPrivate(directory, path)).toContain('Concurrent edit');
+    expect((await loadState(directory)).entries.answer!.blockId).toBe(
+      f.state.entries.answer!.blockId
+    );
+    expect(f.calls).toEqual([]);
+  });
+});
 
 describe('versioned sync', () => {
   async function save(path: string, replace: (source: string) => string) {
@@ -443,13 +956,12 @@ describe('versioned sync', () => {
     );
     expect(saved).toMatchObject({
       status: 'saved',
-      changed: ['new:a', 'new:q'],
+      changed: [newKeys.a, newKeys.q].sort(),
       remoteWrites: 0,
     });
-    expect(Object.keys((await loadState(directory)).localVersions!).sort()).toEqual([
-      'new:a',
-      'new:q',
-    ]);
+    expect(Object.keys((await loadState(directory)).localVersions!).sort()).toEqual(
+      [newKeys.a, newKeys.q].sort()
+    );
     const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
     expect(preview).toMatchObject({ status: 'preview', creates: 2, updates: 0 });
     expect(f.calls).toEqual([]);
@@ -460,7 +972,7 @@ describe('versioned sync', () => {
       })
     ).toMatchObject({
       status: 'verified',
-      ids: { 'new:q': 'created_1', 'new:a': 'created_2' },
+      ids: { [newKeys.q!]: 'created_1', [newKeys.a!]: 'created_2' },
     });
     expect((await loadState(directory)).localVersions).toEqual({});
     expect(f.rems.get('created_1')!.children).toEqual(['created_2']);
@@ -560,10 +1072,9 @@ describe('versioned sync', () => {
           planHash: preview.planHash,
         })
       ).toMatchObject({ status: 'verified' });
-      const current = await workspace.readWorkspace(directory, f.path);
-      const basic = parseDocument(f.path, current.content).document.nodes.find(
-        (node) => node.key === 'basic'
-      )!;
+      const basic = (await inspectLocal(directory)).parsed
+        .get(f.path)!
+        .nodes.find((node) => node.key === 'basic')!;
       expect(basic.text).toEqual(winner === 'local' ? ['Local front'] : ['Front']);
       expect(basic.backText).toEqual(winner === 'local' ? ['Back'] : ['Remote back']);
       expect(f.rems.get('basic')!.cards).toEqual(history);
@@ -1224,7 +1735,10 @@ describe('controlled RemNote workspace', () => {
     expect(f.state.documents[f.path]!.nodeIds).toContain('chapter');
     expect(f.state.entries.chapter!.editable).toBe(true);
     expect(f.state.entries.opaque!.editable).toBe(false);
-    expect(await readPrivate(directory, f.path)).toContain('content: multiline');
+    expect(await readPrivate(directory, f.path)).not.toContain('content:');
+    expect(
+      (await inspectLocal(directory)).parsed.get(f.path)!.metadata!.rems.question!.content
+    ).toBe('multiline');
     expect(Object.keys(f.state.documents)).toEqual([
       'HOME/HOME.md',
       'HOME/Today.md',
@@ -1274,14 +1788,14 @@ describe('controlled RemNote workspace', () => {
     });
     expect(result).toMatchObject({
       status: 'verified',
-      ids: { 'new:q': 'created_1', 'new:a': 'created_2' },
+      ids: { [newKeys.q!]: 'created_1', [newKeys.a!]: 'created_2' },
     });
     expect(f.rems.get('created_1')!.document).toBe(false);
     expect(f.rems.get('created_1')!.cardItem).toBe(false);
     expect(f.rems.get('created_2')!.parent).toBe('created_1');
     expect(f.rems.get('created_2')!.cardItem).toBe(true);
     expect(f.backend.setCardItem).toHaveBeenCalledWith('created_2', true);
-    expect(await readPrivate(directory, f.path)).toContain('id: created_1');
+    expect(await readPrivate(directory, IDENTITY)).toContain('"local-q": "created_1"');
     expect(await readPrivate(directory, f.path)).toContain('New question ^local-q');
     expect((await loadState(directory)).entries.created_1!.blockId).toBe('local-q');
     expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
@@ -1321,16 +1835,17 @@ describe('controlled RemNote workspace', () => {
       'EMPTY_ANSWER',
     ],
     ['new embed', (s: string) => s.replace('Why? ^', '![[HOME/Today]] ^'), 'UNSUPPORTED_EMBED'],
-    ['remove ID', (s: string) => s.replace('^rn-616e73776572', ''), 'BLOCK_BINDING'],
+    ['remove ID', (s: string) => s.replace(`^${nativeBlockId('answer')}`, ''), 'MISSING_ID'],
     [
       'unknown reference',
       (s: string) => s.replace('Because', '[missing](remnote:missing)'),
       'DANGLING_REFERENCE',
     ],
-    ['opaque edit', (s: string) => s.replace('Cloze ^', 'Changed cloze ^'), 'OPAQUE_EDIT'],
+    ['opaque edit', (s: string) => s.replace('Cloze', 'Changed cloze'), 'OPAQUE_EDIT'],
     [
       'card-kind change',
-      (s: string) => s.replace('content: multiline', 'content: text'),
+      (s: string) =>
+        renderFrontmatter({ rems: { [nativeBlockId('question')]: { content: 'text' } } }) + s,
       'IMMUTABLE_STRUCTURE',
     ],
   ])('lint rejects %s before any remote call', async (_label, change, code) => {
@@ -1405,7 +1920,7 @@ describe('controlled RemNote workspace', () => {
         apply: true,
         planHash: preview.planHash,
       })
-    ).toMatchObject({ status: 'unknown', ids: { 'new:n': 'created_1' } });
+    ).toMatchObject({ status: 'unknown', ids: { [newKeys.n!]: 'created_1' } });
     expect(f.backend.create).toHaveBeenCalledTimes(1);
   });
   it('records incomplete global discovery and does not substitute a known-root scan', async () => {
@@ -1545,7 +2060,7 @@ describe('controlled RemNote workspace', () => {
   });
   it('parses only the controlled outline, not arbitrary markdown documents', () => {
     expect(
-      parseDocument('test.md', '# Root <!-- rem:r -->\n\n| table |\n').diagnostics
+      parseFrontmatter('test.md', '# Root <!-- rem:r -->\n\n| table |\n').diagnostics
     ).not.toEqual([]);
   });
   it('imports an exact subtree without global discovery, retaining its native external parent', async () => {
@@ -1638,7 +2153,9 @@ describe('controlled RemNote workspace', () => {
         planHash: preview.planHash,
       })
     ).toMatchObject({ status: 'verified', updated: [], incoming: ['question'] });
-    expect(await readPrivate(directory, f.path)).toContain('Why now? ^rn-7175657374696f6e');
+    expect(await readPrivate(directory, f.path)).toContain(
+      `Why now? ^${nativeBlockId('question')}`
+    );
     expect(await f.backend.cardFacts('question')).toEqual(cards);
     expect(f.calls).toEqual([]);
   });
@@ -1660,8 +2177,8 @@ describe('controlled RemNote workspace', () => {
     expect(f.calls).toEqual([]);
     const state = await loadState(directory),
       path = state.entries.answer!.path;
-    const parsed = parseDocument(path, await readPrivate(directory, path));
-    expect(parsed.document.nodes.find((node) => node.key === 'answer')!.text).toEqual([
+    const parsed = (await inspectLocal(directory)).parsed.get(path)!;
+    expect(parsed.nodes.find((node) => node.key === 'answer')!.text).toEqual([
       'First line\nRemote second line',
     ]);
   });
@@ -1769,8 +2286,7 @@ describe('controlled RemNote workspace', () => {
     const raw = JSON.parse(await readPrivate(directory, entry.rawPath));
     expect(raw.facts).toEqual({ isTodo: null, propertyType: 0 });
     expect(raw.public.futureField).toEqual({ nested: [null, { value: 'original' }] });
-    const meta = parseFrontmatter(entry.path, await readPrivate(directory, entry.path)).metadata!
-      .rems.answer!;
+    const meta = (await inspectLocal(directory)).parsed.get(entry.path)!.metadata!.rems.answer!;
     if (meta.id === null) throw new Error('Expected existing native metadata');
     expect(meta.native.collected).toContain('isTodo');
     expect(meta.native.collected).not.toContain('isQuote');
@@ -1881,15 +2397,17 @@ describe('controlled RemNote workspace', () => {
     const renamedPath = 'HOME/Renamed.md';
     await edit(f.path, (source) => {
       const parsed = parseFrontmatter(f.path, source),
-        metadata = parsed.metadata!;
+        metadata = parsed.attributes!;
       metadata.title = 'Display only';
       metadata.aliases = ['Alternative'];
       metadata.tags = ['obsidian-tag'];
       return (
         renderFrontmatter(metadata).replace(
-          'schema: remnote-sync/1',
-          'schema: "remnote-sync/1" # preserve comment'
-        ) + parsed.body
+          'title: Display only',
+          'title: "Display only" # preserve comment'
+        ) +
+        `<!-- remnote:${parsed.documentKey} -->\n\n` +
+        parsed.body
       );
     });
     await rename(join(directory, f.path), join(directory, renamedPath));
@@ -1928,7 +2446,7 @@ describe('controlled RemNote workspace', () => {
       apply: true,
       planHash: first.planHash,
     })) as { ids: Record<string, string> };
-    const created = applied.ids['new:note']!;
+    const created = applied.ids[newKeys.note!]!;
     expect((await loadState(directory)).entries[created]!.blockId).toBe('local-note');
     await edit(f.path, (source) =>
       source.replace('Because', '[[HOME/Today#^local-note|New note]]')

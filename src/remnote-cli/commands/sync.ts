@@ -10,6 +10,7 @@ import {
   saveWorkspace,
 } from '../../business/workspace/workspace.js';
 import { fileByteLimit } from '../../business/workspace/files.js';
+import { formatWorkspace } from '../../business/workspace/format.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatError, formatResult } from '../output/formatter.js';
@@ -43,7 +44,7 @@ export function registerSyncCommands(program: Command): void {
   );
 
   async function execute(
-    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover' | 'read' | 'save',
+    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover' | 'read' | 'save' | 'format',
     directory: string,
     options: SyncOptions,
     path?: string
@@ -53,6 +54,7 @@ export function registerSyncCommands(program: Command): void {
     try {
       let result: unknown;
       if (name === 'read') result = await readWorkspace(directory, path!);
+      else if (name === 'format') result = await formatWorkspace(directory);
       else if (name === 'save')
         result = await saveWorkspace(
           directory,
@@ -114,7 +116,7 @@ export function registerSyncCommands(program: Command): void {
     .action(async (directory: string, path: string, options: SyncOptions) =>
       execute('save', directory, options, path)
     );
-  for (const name of ['import', 'status', 'lint', 'diff', 'recover'] as const) {
+  for (const name of ['import', 'status', 'lint', 'diff', 'recover', 'format'] as const) {
     const command = workspace.command(name + ' <directory>').description(
       {
         import: 'Create the first local baseline in an empty directory; use sync for later changes',
@@ -122,6 +124,7 @@ export function registerSyncCommands(program: Command): void {
         lint: 'Offline native metadata, outline, card and identity validation',
         diff: 'Offline supported changes; never infer deletion or movement',
         recover: 'Finish staged local publication without remote writes',
+        format: 'Explicit offline conversion of a clean legacy publication to human Markdown',
       }[name]
     );
     if (name === 'import')

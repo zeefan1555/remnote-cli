@@ -160,27 +160,29 @@ function replaceOnce(source, original, replacement) {
 
 function documentParts(source) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n(?:\r?\n)?/.exec(source);
-  assert.ok(match, 'Imported YAML frontmatter is required');
-  const parsed = parseYaml(match[1], { uniqueKeys: true, strict: true });
-  assert.deepEqual(parsed.errors, [], 'Invalid YAML fixture');
-  assert.deepEqual(parsed.warnings, [], 'Unsupported YAML fixture');
-  const metadata = parsed.toJS({ maxAliasCount: 0 });
-  assert.equal(metadata.schema, 'remnote-sync/1');
-  assert.equal(metadata.rems[metadata.root].id, metadata.root);
-  return { metadata, body: source.slice(match[0].length) };
+  let metadata = {};
+  if (match) {
+    const parsed = parseYaml(match[1], { uniqueKeys: true, strict: true });
+    assert.deepEqual(parsed.errors, [], 'Invalid YAML fixture');
+    assert.deepEqual(parsed.warnings, [], 'Unsupported YAML fixture');
+    metadata = parsed.toJS({ maxAliasCount: 0 });
+  }
+  const body = source.slice(match?.[0].length ?? 0);
+  const markers = [...body.matchAll(/^<!-- remnote:([A-Za-z0-9-]{1,64}) -->$/gm)];
+  assert.equal(markers.length, 1, 'Exactly one hidden native root binding is required');
+  assert.equal(metadata.schema, undefined, 'Daily sync does not accept legacy native YAML');
+  return { metadata, body, documentKey: markers[0][1] };
 }
 
 function appendMultiline(source, blocks) {
   const { metadata, body } = documentParts(source);
-  for (const [key, content] of [
-    ['question', 'multiline'],
-    ['answer', 'text'],
-  ]) {
-    assert.equal(metadata.rems[`new:${key}`], undefined, 'Fixture key already exists');
+  for (const key of ['question', 'answer']) {
+    assert.equal(metadata.rems?.[blocks[key]], undefined, 'Fixture key already exists');
+    assert.ok(!body.includes(`^${blocks[key]}`), 'Fixture key already exists');
     assert.match(blocks[key], /^local-[A-Za-z0-9-]+$/);
-    metadata.rems[`new:${key}`] = { id: null, block: blocks[key], content };
   }
   assert.notEqual(blocks.question, blocks.answer, 'Question and answer need distinct blocks');
+  (metadata.rems ??= {})[blocks.question] = { content: 'multiline' };
   return `---\n${stringify(metadata, { lineWidth: 0, aliasDuplicateObjects: false })}---\n\n${body.trimEnd()}\n\n- Sync acceptance question ^${blocks.question}\n  - Sync acceptance answer ^${blocks.answer}\n`;
 }
 
@@ -189,16 +191,14 @@ function replaceBodyOnce(source, original, replacement) {
   return source.slice(0, source.length - body.length) + replaceOnce(body, original, replacement);
 }
 
-function assertPublishedBlocks(source, ids, blocks) {
-  const { metadata } = documentParts(source);
+function assertPublishedBlocks(source, identity, ids, blocks) {
+  const { documentKey, body } = documentParts(source);
+  assert.equal(identity.schema, 'remnote-identity/1');
+  const document = identity.documents[documentKey];
+  assert.equal(document?.rootId, ids.root);
   for (const key of ['question', 'answer']) {
-    assert.equal(metadata.rems[`new:${key}`], undefined);
-    assert.equal(metadata.rems[ids[key]]?.id, ids[key]);
-    assert.equal(
-      metadata.rems[ids[key]]?.block,
-      blocks[key],
-      'Publication replaced a stable block'
-    );
+    assert.equal(document.blocks[blocks[key]], ids[key], 'Publication replaced a stable block');
+    assert.match(body, new RegExp(` \\^${blocks[key]}$`, 'm'));
   }
 }
 
@@ -304,9 +304,10 @@ function assertDirections(value, expected, assigned = {}) {
 function rememberKnownIds(receipt, value, label) {
   if (label === 'create-root' && value.remIds?.[0]) receipt.testIds.root = value.remIds[0];
   for (const [key, id] of Object.entries(value.ids ?? {})) {
-    assert.match(key, /^new:(question|answer)$/);
+    assert.match(key, /^new:[a-f0-9]{32}$/);
     assert.match(id, /^[A-Za-z0-9_-]{1,256}$/);
-    const name = key.slice(4);
+    const name = Object.entries(receipt.localKeys ?? {}).find(([, value]) => value === key)?.[0];
+    assert.ok(name, 'Unexpected fixture local key');
     assert.ok(!receipt.testIds[name] || receipt.testIds[name] === id, 'Known ID changed');
     receipt.testIds[name] = id;
   }
@@ -434,6 +435,13 @@ async function main(argv) {
     return readFile(markdownPath, 'utf8');
   }
   const writeMarkdown = (value) => writeFile(markdownPath, value, { mode: 0o600 });
+  const assertPublished = async () =>
+    assertPublishedBlocks(
+      await markdown(),
+      JSON.parse(await readFile(join(workspace, '.remnote/identity.json'), 'utf8')),
+      receipt.testIds,
+      receipt.blocks
+    );
   async function saveMarkdown(label, transform) {
     await markdown();
     const path = relative(workspace, markdownPath);
@@ -573,23 +581,27 @@ async function main(argv) {
     assert.equal(imported.globalDiscoveryComplete, false);
     const initial = await markdown();
     const blocks = { question: `local-${randomUUID()}`, answer: `local-${randomUUID()}` };
+    const { localNodeKey } = await import('../dist/business/workspace/identity.js');
     receipt.blocks = blocks;
+    receipt.localKeys = Object.fromEntries(
+      Object.entries(blocks).map(([key, block]) => [key, localNodeKey(receipt.testIds.root, block)])
+    );
     await save('receipt.json', receipt);
     const savedCard = await saveMarkdown('create-local-card', (source) => {
       assert.equal(source, initial);
       return appendMultiline(source, blocks);
     });
-    assert.deepEqual(savedCard.changed, ['new:answer', 'new:question']);
+    assert.deepEqual([...savedCard.changed].sort(), Object.values(receipt.localKeys).sort());
     assert.equal((await sync('create-lint', 'lint')).ok, true);
     const delta = await sync('create-diff', 'diff');
     assert.equal(delta.changes.length, 2);
     assert.equal(delta.remoteChecked, false);
     const createdCard = await apply('create-card', {
       incoming: [],
-      outgoing: ['new:question', 'new:answer'],
+      outgoing: Object.values(receipt.localKeys),
       converged: [],
     });
-    assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+    await assertPublished();
     assert.deepEqual(
       JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8')).localVersions,
       {},
@@ -624,14 +636,14 @@ async function main(argv) {
       cardTypes: question.cards.map((card) => card.type),
     };
     const good = await markdown();
-    await writeMarkdown(`${good}\n- Missing stable anchor\n`);
+    await writeMarkdown(replaceOnce(good, ` ^${blocks.answer}\n`, '\n'));
     const lint = await sync('invalid-lint', 'lint', [], 1);
     assert.equal(lint.ok, false);
     assert.ok(
-      lint.diagnostics.some((item) => item.code === 'BLOCK_BINDING' && item.line > 0 && item.path)
+      lint.diagnostics.some((item) => item.code === 'MISSING_ID' && item.line > 0 && item.path)
     );
     const rejected = await sync('invalid-sync', '', [], 1);
-    assert.match(rejected.error, /BLOCK_BINDING/);
+    assert.match(rejected.error, /MISSING_ID/);
     const afterInvalid = await inspect('invalid-readback', ids);
     assert.deepEqual(afterInvalid, before, 'Lint-rejected sync changed native test state');
     receipt.lintFailureRemoteUnchanged = true;
@@ -665,7 +677,7 @@ async function main(argv) {
     await remoteText('remote-question-edit', question.id, 'Sync acceptance incoming question');
     await apply('incoming-only', { incoming: [question.id], outgoing: [], converged: [] });
     assert.ok((await markdown()).includes(`Sync acceptance incoming question ^${blocks.question}`));
-    assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+    await assertPublished();
     assert.deepEqual(remById(await inspect('incoming-readback', ids), question.id).text, [
       'Sync acceptance incoming question',
     ]);
@@ -688,7 +700,7 @@ async function main(argv) {
     assert.deepEqual(remById(mixed, answer.id).text, ['Sync acceptance mixed answer']);
     assert.deepEqual(cardIdentity(mixed), cardIdentity(before), 'Bidirectional sync changed cards');
     assert.ok((await markdown()).includes(`Sync acceptance mixed answer ^${blocks.answer}`));
-    assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+    await assertPublished();
     assert.deepEqual((await sync('mixed-diff', 'diff')).changes, []);
     await unchanged('mixed-noop');
 
@@ -701,7 +713,7 @@ async function main(argv) {
     );
     await remoteText('same-result-remote-edit', question.id, 'Sync acceptance identical question');
     await apply('same-result', { incoming: [], outgoing: [], converged: [question.id] });
-    assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+    await assertPublished();
     const sameResult = await inspect('same-result-readback', ids);
     assert.deepEqual(remById(sameResult, question.id).text, ['Sync acceptance identical question']);
     assert.deepEqual(cardIdentity(sameResult), cardIdentity(before));
@@ -751,7 +763,7 @@ async function main(argv) {
       remoteCopy,
       'Resolution removed or changed preserved conflict evidence'
     );
-    assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+    await assertPublished();
     const resolved = await inspect('conflict-resolved-readback', ids);
     assert.deepEqual(remById(resolved, question.id).text, [remoteConflictText]);
     assert.deepEqual(cardIdentity(resolved), cardIdentity(before));
@@ -787,7 +799,7 @@ async function main(argv) {
       assert.deepEqual(remById(verified, question.id).text, [commonText]);
       assert.deepEqual(cardIdentity(verified), cardIdentity(before));
       assert.ok((await markdown()).includes(`${commonText} ^${blocks.question}`));
-      assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+      await assertPublished();
       await unchanged(`${winner}-winner-noop`);
     }
 
@@ -894,8 +906,13 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     [parentChain[0], { ...parentChain[1], name: 'Sync acceptance revised question' }],
     parentChain
   );
-  const { renderDocument, parseDocument } = await import('../src/business/workspace/markdown.ts');
+  const {
+    renderDocument,
+    parseDocument: parseBoundDocument,
+    documentMetadata,
+  } = await import('../src/business/workspace/markdown.ts');
   const { renderFrontmatter } = await import('../src/business/workspace/metadata.ts');
+  const { localNodeKey } = await import('../src/business/workspace/identity.ts');
   const { reconcile } = await import('../src/business/workspace/reconcile.ts');
   const { hash } = await import('../src/business/workspace/types.ts');
   const { inspectState } = await import('../src/business/state-inspect.ts');
@@ -918,40 +935,48 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     new Map([['root', root]]),
     new Map([['root', 'Note.md']])
   );
+  const binding = documentMetadata(
+    'root',
+    new Map([['root', root]]),
+    new Map([['root', 'Note.md']])
+  );
+  const parseDocument = (path, source) => parseBoundDocument(path, source, binding);
   const blocks = {
     question: 'local-9a16e18d-9aa8-45dd-b3e3-aafc4ed0c501',
     answer: 'local-53f2289d-5ef8-42ae-bbc9-bf2d1430155f',
   };
   const fixture = appendMultiline(base, blocks);
+  const localKeys = Object.fromEntries(
+    Object.entries(blocks).map(([key, block]) => [key, localNodeKey(root.id, block)])
+  );
   const parsed = parseDocument('Note.md', fixture);
   assert.deepEqual(parsed.diagnostics, []);
   assert.deepEqual(
     parsed.document.nodes.map(({ key, kind }) => ({ key, kind })),
     [
       { key: 'root', kind: 'text' },
-      { key: 'new:question', kind: 'multiline' },
-      { key: 'new:answer', kind: 'text' },
+      { key: localKeys.question, kind: 'multiline' },
+      { key: localKeys.answer, kind: 'text' },
     ]
   );
-  assert.deepEqual(parsed.document.nodes[1].children, ['new:answer']);
+  assert.deepEqual(parsed.document.nodes[1].children, [localKeys.answer]);
   assert.deepEqual(parsed.document.nodes[2].text, ['Sync acceptance answer']);
-  assert.deepEqual(Object.keys(documentParts(fixture).metadata.rems['new:answer']).sort(), [
-    'block',
-    'content',
-    'id',
-  ]);
+  assert.deepEqual(documentParts(fixture).metadata.rems, {
+    [blocks.question]: { content: 'multiline' },
+  });
   assert.throws(() => appendMultiline(fixture, blocks), /already exists/);
   assert.throws(
     () => appendMultiline(base, { question: blocks.question, answer: blocks.question }),
     /distinct blocks/
   );
+  assert.deepEqual(parseDocument('Note.md', `${fixture}\n- No block\n`).diagnostics, []);
   assert.ok(
-    parseDocument('Note.md', `${fixture}\n- No block\n`).diagnostics.some(
-      ({ code }) => code === 'BLOCK_BINDING'
+    parseDocument('Note.md', fixture.replace(/<!-- remnote:[^>]+-->/, '')).diagnostics.some(
+      ({ code }) => code === 'ROOT_BINDING'
     )
   );
   const invalidMetadata = documentParts(fixture).metadata;
-  invalidMetadata.rems['new:answer'].native = { isCardItem: true };
+  invalidMetadata.rems[blocks.question].native = { isCardItem: true };
   assert.ok(
     parseDocument(
       'Note.md',
@@ -973,17 +998,38 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
   assert.deepEqual(parseDocument('Note.md', edited).document.nodes[1].text, [
     'Revised question === >>',
   ]);
-  const assigned = { question: 'nativeQuestion', answer: 'nativeAnswer' };
-  const published = documentParts(fixture).metadata;
-  for (const key of ['question', 'answer']) {
-    published.rems[assigned[key]] = { ...published.rems[`new:${key}`], id: assigned[key] };
-    delete published.rems[`new:${key}`];
-  }
-  const publication = `---\n${stringify(published)}---\n\n${documentParts(fixture).body}`;
-  assertPublishedBlocks(publication, assigned, blocks);
+  const assigned = { root: 'root', question: 'nativeQuestion', answer: 'nativeAnswer' };
+  const documentKey = documentParts(fixture).documentKey;
+  const identity = {
+    schema: 'remnote-identity/1',
+    kbId: 'synthetic',
+    documents: {
+      [documentKey]: {
+        rootId: 'root',
+        blocks: {
+          [documentKey]: 'root',
+          [blocks.question]: assigned.question,
+          [blocks.answer]: assigned.answer,
+        },
+      },
+    },
+  };
+  assertPublishedBlocks(fixture, identity, assigned, blocks);
   assert.throws(
-    () => assertPublishedBlocks(publication, assigned, { ...blocks, question: 'local-replaced' }),
+    () =>
+      assertPublishedBlocks(fixture, identity, assigned, { ...blocks, question: 'local-replaced' }),
     /stable block/
+  );
+  assert.throws(
+    () =>
+      assertPublishedBlocks(fixture, identity, { ...assigned, question: 'wrongQuestion' }, blocks),
+    /stable block/
+  );
+  assert.throws(() =>
+    assertPublishedBlocks(fixture.replace(` ^${blocks.answer}`, ''), identity, assigned, blocks)
+  );
+  assert.throws(() =>
+    assertPublishedBlocks(fixture, identity, { ...assigned, root: 'wrongRoot' }, blocks)
   );
 
   const coverage = {
@@ -1054,15 +1100,15 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
   assert.throws(() =>
     assertDirections({ ...coverage, atomic: false, ...directions, incoming: [] }, directions)
   );
-  const failed = { testIds: {} };
+  const failed = { testIds: {}, localKeys };
   rememberKnownIds(
     failed,
-    { status: 'conflict', ids: { 'new:question': 'knownWritten' } },
+    { status: 'conflict', ids: { [localKeys.question]: 'knownWritten' } },
     'apply'
   );
   assert.equal(failed.testIds.question, 'knownWritten');
   assert.throws(
-    () => rememberKnownIds(failed, { ids: { 'new:question': 'different' } }, 'apply'),
+    () => rememberKnownIds(failed, { ids: { [localKeys.question]: 'different' } }, 'apply'),
     /Known ID changed/
   );
 

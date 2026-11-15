@@ -4,6 +4,7 @@ import { SdkWorkspaceBackend } from '../../../src/business/workspace/sdk-backend
 import { remoteEditedAt } from '../../../src/business/workspace/snapshots.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
 import { mapReads } from '../../../src/business/workspace/read-pool.js';
+import { isReferencePortal } from '../../../src/business/workspace/reference-projection.js';
 
 function fixture(count = 2) {
   const objects = new Map<string, Record<string, unknown>>();
@@ -34,6 +35,8 @@ function fixture(count = 2) {
       getPracticeDirection: vi.fn(async () => 'forward'),
       getEnablePractice: vi.fn(async () => true),
       getCards: vi.fn(async () => []),
+      getPortalType: vi.fn(async () => 0),
+      getPortalDirectlyIncludedRem: vi.fn(async () => []),
       getTagRems: vi.fn(async () => []),
       setText: vi.fn(async (value) => {
         object.text = value;
@@ -85,6 +88,79 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('reads fresh portal subtype and direct membership only for native portal Rems', async () => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    const methods = f.flags.get('r0')!;
+    methods.getPortalType!.mockResolvedValue(4);
+    methods.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r1' }]);
+    const first = (await f.backend.read(['r0', 'r1']))[0]!;
+    expect(first.portal).toEqual({ type: 4, directlyIncludedRemIds: ['r1'] });
+    expect(isReferencePortal(first)).toBe(true);
+    expect(f.flags.get('r1')!.getPortalType).not.toHaveBeenCalled();
+    expect(f.flags.get('r1')!.getPortalDirectlyIncludedRem).not.toHaveBeenCalled();
+    methods.getPortalType!.mockResolvedValue(99);
+    methods.getPortalDirectlyIncludedRem!.mockResolvedValue([]);
+    const next = (await f.backend.read(['r0']))[0]!;
+    expect(next.portal).toEqual({ type: 99, directlyIncludedRemIds: [] });
+    expect(isReferencePortal(next)).toBe(false);
+    expect(methods.getPortalType).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves an observed null portal subtype without classifying it', async () => {
+    const f = fixture();
+    f.objects.get('r1')!.type = 6;
+    f.flags.get('r1')!.getPortalType!.mockResolvedValue(null);
+    f.flags.get('r1')!.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r0' }]);
+    const rem = (await f.backend.read(['r1']))[0]!;
+    expect(rem.portal).toEqual({ type: null, directlyIncludedRemIds: ['r0'] });
+    expect(isReferencePortal(rem)).toBe(false);
+  });
+
+  it.each([
+    { type: undefined, members: [] },
+    { type: '4', members: [] },
+    { type: 1.5, members: [] },
+    { type: Infinity, members: [] },
+    { type: 4, members: null },
+    { type: 4, members: [{ _id: 'r1' }, { _id: 'r1' }] },
+    { type: 4, members: [{}] },
+  ])('rejects incomplete or ambiguous portal facts: %j', async ({ type, members }) => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    f.flags.get('r0')!.getPortalType!.mockResolvedValue(type);
+    f.flags.get('r0')!.getPortalDirectlyIncludedRem!.mockResolvedValue(members);
+    await expect(f.backend.read(['r0'])).rejects.toThrow();
+  });
+
+  it('drains a portal membership read before reporting a sibling portal failure', async () => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    let release!: () => void, started!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const invoked = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    f.flags.get('r0')!.getPortalType!.mockRejectedValue(new Error('portal unavailable'));
+    f.flags.get('r0')!.getPortalDirectlyIncludedRem!.mockImplementation(async () => {
+      started();
+      await pending;
+      return [];
+    });
+    let finished = false;
+    const result = f.backend.read(['r0']).finally(() => {
+      finished = true;
+    });
+    const rejected = expect(result).rejects.toThrow('portal unavailable');
+    await invoked;
+    expect(finished).toBe(false);
+    release();
+    await rejected;
+    expect(finished).toBe(true);
+  });
+
   it('returns requested identity order even when findMany returns shuffled results', async () => {
     const f = fixture();
     f.findMany.mockImplementation(async (ids) => ids.map((id) => f.objects.get(id)!).reverse());

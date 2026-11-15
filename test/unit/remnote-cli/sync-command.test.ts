@@ -3,6 +3,10 @@ import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import * as sync from '../../../src/business/workspace/workspace.js';
 import * as contentInput from '../../../src/remnote-cli/commands/content-input.js';
+import * as format from '../../../src/business/workspace/format.js';
+vi.mock('../../../src/business/workspace/format.js', () => ({
+  formatWorkspace: vi.fn(async () => ({ complete: true, remoteWrites: 0 })),
+}));
 
 vi.mock('../../../src/business/workspace/workspace.js', () => ({
   importWorkspace: vi.fn(async () => ({ complete: true })),
@@ -23,6 +27,19 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe('sync command interface', () => {
+  it('routes explicit offline format without opening a native connection', async () => {
+    const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createProgram('test').parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'format',
+      '/private/tmp/sync',
+    ]);
+    expect(format.formatWorkspace).toHaveBeenCalledWith('/private/tmp/sync');
+    expect(backend).not.toHaveBeenCalled();
+  });
   it('routes guarded local read/save without opening a native connection', async () => {
     const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -139,6 +156,7 @@ describe('sync command interface', () => {
       'lint',
       'diff',
       'recover',
+      'format',
     ]);
   });
 });

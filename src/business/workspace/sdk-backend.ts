@@ -1,5 +1,7 @@
 import type { ReactRNPlugin, PluginRem, RichTextInterface } from '@remnote/plugin-sdk';
 import { cardMetadataSchema } from './metadata.js';
+import { RemType } from '../sdk-constants.generated.js';
+import { idSchema } from './identity.js';
 import { immutableProjection } from './snapshots.js';
 import { mapReads, settleReads } from './read-pool.js';
 import {
@@ -146,6 +148,22 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       .join(',');
     if (!['forward', 'backward', 'both', 'none'].includes(practice))
       throw new Error('Incomplete native practice direction');
+    const cards = cardsSnapshot(await rem.getCards(), rem._id);
+    let portal: WorkspaceRem['portal'];
+    if (rem.type === RemType.PORTAL) {
+      const [type, members] = await settleReads([
+        rem.getPortalType(),
+        rem.getPortalDirectlyIncludedRem(),
+      ]);
+      if (
+        (type !== null && (typeof type !== 'number' || !Number.isInteger(type))) ||
+        !Array.isArray(members)
+      )
+        throw new Error('Incomplete native portal membership');
+      const ids = members.map((member) => idSchema.parse(member?._id));
+      if (new Set(ids).size !== ids.length) throw new Error('Ambiguous native portal membership');
+      portal = { type, directlyIncludedRemIds: ids };
+    }
     return {
       id: rem._id,
       parent: rem.parent,
@@ -159,7 +177,8 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       practice,
       enablePractice: boolean(enablePractice, 'enablePractice'),
       public: publicSnapshot(rem),
-      cards: cardsSnapshot(await rem.getCards(), rem._id),
+      cards,
+      ...(portal === undefined ? {} : { portal }),
       facts: {
         isTable: boolean(table, 'table'),
         isProperty: boolean(property, 'property'),
