@@ -38,7 +38,7 @@ export async function flashcardsWorkflow(
 
   async function run(args: string[]): Promise<Record<string, unknown>> {
     const began = Date.now();
-    const result = await ctx.cli.run(args, 70000);
+    const result = await ctx.cli.run(args);
     await jsonFile(`command-${++commandIndex}.json`, {
       args,
       durationMs: Date.now() - began,

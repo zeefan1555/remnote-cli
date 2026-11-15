@@ -9,7 +9,8 @@ const cliBin = join(projectRoot, 'dist', 'remnote-cli', 'index.js');
 export interface CliResult {
   stdout: string;
   stderr: string;
-  exitCode: number;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
   json: unknown;
 }
 
@@ -21,14 +22,13 @@ export class CliTestClient {
   /**
    * Run a CLI command and return the result.
    */
-  async run(args: string[], timeoutMs = 70000): Promise<CliResult> {
+  async run(args: string[]): Promise<CliResult> {
     const fullArgs = [cliBin, '--json', ...args];
 
     return new Promise((resolve, reject) => {
       const proc = spawn(process.execPath, fullArgs, {
         cwd: projectRoot,
         env: { ...process.env },
-        timeout: timeoutMs,
       });
 
       let stdout = '';
@@ -37,7 +37,18 @@ export class CliTestClient {
       proc.stdout.setEncoding('utf8').on('data', (data) => (stdout += data));
       proc.stderr.setEncoding('utf8').on('data', (data) => (stderr += data));
 
-      proc.on('close', (code) => {
+      proc.on('close', (code, signal) => {
+        if (signal || code === null) {
+          const reason = signal
+            ? `terminated by signal ${signal}`
+            : 'closed without an exit code or signal';
+          stderr = [
+            stderr.trim(),
+            `CLI process ${reason}; write outcomes may be unknown. Do not automatically retry.`,
+          ]
+            .filter(Boolean)
+            .join('\n');
+        }
         let json: unknown = null;
         try {
           json = JSON.parse(stdout.trim());
@@ -47,7 +58,8 @@ export class CliTestClient {
         resolve({
           stdout: stdout.trim(),
           stderr: stderr.trim(),
-          exitCode: code ?? 1,
+          exitCode: code,
+          signal,
           json,
         });
       });
@@ -61,6 +73,7 @@ export class CliTestClient {
    */
   async runExpectSuccess(args: string[]): Promise<unknown> {
     const result = await this.run(args);
+    if (result.exitCode === null) throw new Error(result.stderr);
     if (result.exitCode !== 0) {
       throw new Error(`CLI exited with code ${result.exitCode}: ${result.stderr || result.stdout}`);
     }
@@ -71,10 +84,11 @@ export class CliTestClient {
   }
 
   /**
-   * Run a CLI command and expect failure (non-zero exit code).
+   * Run a CLI command and expect ordinary failure (non-zero exit code, not a signal).
    */
   async runExpectError(args: string[]): Promise<CliResult> {
     const result = await this.run(args);
+    if (result.exitCode === null) throw new Error(result.stderr);
     if (result.exitCode === 0) {
       throw new Error(`Expected non-zero exit code, got 0. Output: ${result.stdout}`);
     }

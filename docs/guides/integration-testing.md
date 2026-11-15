@@ -37,6 +37,15 @@ The wrapper builds the candidate CLI. Every spawned CLI command owns and closes
 its authenticated WebSocket session. `--suite` is removed; unknown wrapper flags
 fail before live work. Do not invoke the TypeScript live runner directly.
 
+The wrapper has no overall child-process timeout: long commands are allowed to
+finish, while the CLI's existing per-SDK request deadlines still apply. It never
+automatically kills, retries or reconnects a command. Command receipts retain the
+actual nullable `exitCode` and `signal`; signal termination is also reported on
+stderr with an unknown-write/no-retry warning. `--command` preserves ordinary
+exit codes and uses `128 + signal number` for signal termination (for example,
+143 for SIGTERM). A close with neither code nor signal is reported as unknown
+and the wrapper exits 1, rather than inventing a child exit code.
+
 ## Two-Card Acceptance
 
 `--flashcards-only` runs a targeted task without table/media fixtures:

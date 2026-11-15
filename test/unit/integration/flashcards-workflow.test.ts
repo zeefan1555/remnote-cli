@@ -67,7 +67,7 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
       default:
         throw new Error(`Unexpected command: ${args.join(' ')}`);
     }
-    return { json, exitCode, stdout: JSON.stringify(json), stderr: '' };
+    return { json, exitCode, signal: null, stdout: JSON.stringify(json), stderr: '' };
   });
 
   try {
@@ -75,7 +75,7 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
     expect(result.steps.map((step) => step.passed)).toEqual([true, true, false]);
     const writes = run.mock.calls.filter(([args]) => args.includes('--apply'));
     expect(writes).toHaveLength(1);
-    expect(writes[0][1]).toBe(70000);
+    expect(writes[0]).toHaveLength(1);
     const batch = JSON.parse(await readFile(`${directory}/batch.json`, 'utf8'));
     const plan = JSON.parse(await readFile(batch.planPath, 'utf8'));
     expect(plan.newCards).toHaveLength(2);

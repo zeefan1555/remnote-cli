@@ -14,6 +14,7 @@
  */
 
 import * as readline from 'node:readline';
+import { constants } from 'node:os';
 import { CliTestClient } from './cli-test-client.js';
 import { statusWorkflow } from './workflows/02-status.js';
 import { createSearchWorkflow } from './workflows/03-create-search.js';
@@ -312,7 +313,9 @@ async function main(): Promise<void> {
     const result = await cli.run(process.argv.slice(commandIndex + 1));
     if (result.stdout) console.log(result.stdout);
     if (result.stderr) console.error(result.stderr);
-    process.exitCode = result.exitCode;
+    process.exitCode = result.signal
+      ? 128 + constants.signals[result.signal]
+      : (result.exitCode ?? 1);
     return;
   }
   const results: WorkflowResult[] = [];

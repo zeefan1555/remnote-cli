@@ -9,6 +9,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Development integration commands no longer have an implicit 70-second process
+  kill timeout. Receipts retain the actual child exit code and signal, with a
+  distinct stderr warning for interrupted/unknown outcomes; `--command` reports
+  signal termination using the conventional signal exit status. Per-SDK deadlines
+  and no-retry behavior are unchanged.
+
 - Disconnected CLI sessions retain the unknown-write/no-replay warning and report
   the actual WebSocket close code. Only exact known Bridge close reasons become
   fixed diagnostic labels; arbitrary peer text is redacted. Pending requests still
