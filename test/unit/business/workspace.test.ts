@@ -40,6 +40,7 @@ import {
   saveState,
   documentPaths,
   inspectLocal,
+  publicationStore,
 } from '../../../src/business/workspace/local.js';
 import { LocalState } from '../../../src/remnote-cli/client/local-state.js';
 import * as fileOps from '../../../src/business/workspace/files.js';
@@ -66,7 +67,12 @@ import {
   immutableProjection,
 } from '../../../src/business/workspace/snapshots.js';
 import { reconcile } from '../../../src/business/workspace/reconcile.js';
-import { readPublication } from '../../../src/business/workspace/publication.js';
+import {
+  readPublication,
+  recoverWorkspace as recoverLocalPublication,
+  type Publication,
+} from '../../../src/business/workspace/publication.js';
+import type { Journal } from '../../../src/business/workspace/resume.js';
 import { formatWorkspace } from '../../../src/business/workspace/format.js';
 import { stringify as yamlStringify } from 'yaml';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
@@ -794,6 +800,718 @@ const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =
     ...(options.deleteId || options.scopeRoot ? {} : { scope: 'all' }),
     ...options,
   });
+
+describe('scoped publication proof', () => {
+  it.each(['complete', 'recover'] as const)(
+    'preserves the first verified outgoing observation through later review: %s',
+    async (mode) => {
+      const f = await prepare((f) => {
+        f.rems.get('basic')!.public = { updatedAt: 1 };
+      });
+      await edit(f.path, (source) => source.replace('Back', 'Outgoing back'));
+      const write = f.backend.writeField,
+        read = f.backend.read;
+      let wrote = false,
+        observed = false;
+      f.backend.writeField = async (...args) => {
+        await write(...args);
+        f.rems.get('basic')!.public = { updatedAt: 10 };
+        wrote = true;
+      };
+      f.backend.read = async (...args) => {
+        const result = await read(...args);
+        if (wrote && !observed && args[0].includes('basic')) {
+          observed = true;
+          f.rems.get('basic')!.public = { updatedAt: 25 };
+        }
+        return result;
+      };
+      const set = LocalState.prototype.setLocal;
+      const interrupt = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (mode === 'recover' && key.startsWith('publication:') && value !== null)
+            throw new Error('Before ledger');
+          return set.call(this, key, value);
+        });
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: mode === 'recover' ? 'publication-incomplete' : 'verified',
+      });
+      interrupt.mockRestore();
+      if (mode === 'recover')
+        expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+          status: 'recovered',
+          remoteWrites: 0,
+        });
+      expect(observed).toBe(true);
+      expect((await loadState(directory)).remoteVersions!.basic!.timestamp).toBe(10);
+      expect(f.rems.get('basic')!.public!.updatedAt).toBe(25);
+      expect(f.calls).toEqual(['basic:backText']);
+    }
+  );
+
+  it.each([
+    ['normal', 10, 20, 20],
+    ['missing', 10, null, null],
+    ['backward', 20, 10, null],
+  ] as const)(
+    'keeps first observed P clock through same-run review drift: %s',
+    async (_case, beforeTime, contentTime, expectedTime) => {
+      const f = await prepare((f) => {
+        f.rems.get('basic')!.public = { updatedAt: beforeTime };
+      });
+      f.rems.get('basic')!.backText = ['Incoming back'];
+      f.rems.get('basic')!.public = contentTime === null ? {} : { updatedAt: contentTime };
+      const guard = f.backend.guard;
+      f.backend.guard = async (ids) => {
+        const result = await guard(ids);
+        f.rems.get('basic')!.public = { updatedAt: 30 };
+        return result;
+      };
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'verified',
+        incoming: ['basic'],
+      });
+      const state = await loadState(directory);
+      expect(state.remoteVersions!.basic!.timestamp).toBe(expectedTime);
+      expect(state.remoteVersions!.basic!.sinceBaseline).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('preserves observed A to B to A time while clearing published sinceBaseline', async () => {
+    const f = await prepare((f) => {
+      f.rems.get('basic')!.public = { updatedAt: 10 };
+    });
+    f.rems.get('basic')!.backText = ['B'];
+    f.rems.get('basic')!.public = { updatedAt: 20 };
+    expect(await syncWorkspace(directory, async () => f.backend)).toMatchObject({
+      incoming: ['basic'],
+    });
+    expect((await loadState(directory)).remoteVersions!.basic).toMatchObject({
+      timestamp: 20,
+      sinceBaseline: true,
+    });
+    f.rems.get('basic')!.backText = ['Back'];
+    f.rems.get('basic')!.public = { updatedAt: 30 };
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+    });
+    expect((await loadState(directory)).remoteVersions!.basic).toMatchObject({ timestamp: 30 });
+    expect((await loadState(directory)).remoteVersions!.basic!.sinceBaseline).toBeUndefined();
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['all', 'guarded'] as const)(
+    'retains complete original publication for %s',
+    async (mode) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Full proof answer'));
+      const before = await workspace.readWorkspace(directory, f.path);
+      const result = (await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        ...(mode === 'all'
+          ? { scope: 'all' as const }
+          : { paths: [f.path], expectedFileHash: before.fileHash }),
+      })) as { planHash: string };
+      expect(result).toMatchObject({ status: 'verified' });
+      const journal = (await localStore('kb').getLocal<Journal>(
+        `workspace-v2:kb:${hash(directory)}:${result.planHash}`
+      ))!;
+      expect(journal.final!.publicationIds).toEqual([...journal.selection.reconcileIds].sort());
+    }
+  );
+
+  async function stagedFixture(point: 'before-install' | 'displaced' | 'installed') {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Frozen answer'));
+    const set = LocalState.prototype.setLocal,
+      displace = fileOps.displacePrivate,
+      link = fileOps.linkPrivate;
+    const stateSpy = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+      this: LocalState,
+      key,
+      value
+    ) {
+      if (point === 'installed' && key.startsWith('publication:') && value === null)
+        throw new Error('After installed state');
+      return set.call(this, key, value);
+    });
+    const displaceSpy = vi.spyOn(fileOps, 'displacePrivate').mockImplementation(async (...args) => {
+      if (point === 'before-install') throw new Error('Before first installation');
+      return displace(...args);
+    });
+    const linkSpy = vi.spyOn(fileOps, 'linkPrivate').mockImplementation(async (...args) => {
+      if (point === 'displaced' && args[2] === f.state.entries.answer!.rawPath)
+        throw new Error('After exact target displacement');
+      return link(...args);
+    });
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'publication-incomplete',
+    });
+    stateSpy.mockRestore();
+    displaceSpy.mockRestore();
+    linkSpy.mockRestore();
+    const publication = (await readPublication(directory))!;
+    expect(publication.recovery.kind).toBe('sync');
+    if (point === 'installed') expect((await loadState(directory)).pending).toBeUndefined();
+    return { f, publication };
+  }
+
+  const payloadSnapshot = async (publication: Publication) =>
+    Promise.all(
+      [
+        ...new Set([
+          ...Object.keys(publication.baseline),
+          ...publication.writes.flatMap(({ path, stage, backup }) => [
+            path,
+            backup,
+            ...(stage ? [stage] : []),
+          ]),
+        ]),
+      ].map(async (path) => {
+        try {
+          return [
+            path,
+            hash(await readFile(join(directory, path), 'utf8')),
+            (await stat(join(directory, path))).mode,
+          ];
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [path, null];
+          throw error;
+        }
+      })
+    );
+
+  it('refuses a sync ledger appearing after the unlocked lookup and before locked recovery', async () => {
+    const { f, publication } = await stagedFixture('installed'),
+      before = await payloadSnapshot(publication),
+      authoritative = await authoritativeState(directory),
+      get = LocalState.prototype.getLocal;
+    let initial = true;
+    const lookup = vi.spyOn(LocalState.prototype, 'getLocal').mockImplementation(async function <T>(
+      this: LocalState,
+      key: string | undefined
+    ): Promise<T | undefined> {
+      if (initial && key === `publication:${hash(directory)}`) {
+        initial = false;
+        return undefined;
+      }
+      return get.call(this, key) as Promise<T | undefined>;
+    });
+    const factory = vi.fn(async () => f.backend);
+    await expect(recoverWorkspace(directory, factory)).rejects.toThrow(
+      'Unfinished local snapshot publication'
+    );
+    lookup.mockRestore();
+    expect(factory).not.toHaveBeenCalled();
+    expect(await authoritativeState(directory)).toEqual(authoritative);
+    expect(await payloadSnapshot(publication)).toEqual(before);
+    expect(await readPublication(directory)).toEqual(publication);
+  });
+
+  it.each([
+    'missing',
+    'extra',
+    'source',
+    'hash',
+    'time',
+    'content',
+    'next-clock',
+    'sinceBaseline',
+  ] as const)(
+    'rejects sealed P version %s mismatch before activating installed recovery',
+    async (kind) => {
+      const { f, publication } = await stagedFixture('installed');
+      if (publication.recovery.kind !== 'sync') throw new Error('Expected sync binding');
+      const journal = (await localStore('kb').getLocal<Journal>(publication.recovery.journalKey))!,
+        versions = journal.final!.remoteVersions,
+        version = versions.answer!,
+        { finalProofHash } = await import('../../../src/business/workspace/resume.js');
+      if (kind === 'missing') delete versions.answer;
+      if (kind === 'extra') versions.basic = { ...version };
+      if (kind === 'source') version.source = 'cli-save';
+      if (kind === 'hash') version.contentHash = 'not-a-digest';
+      if (kind === 'time') version.timestamp = -1;
+      if (kind === 'content') version.contentHash = '0'.repeat(64);
+      if (kind === 'next-clock') version.timestamp = 100;
+      if (kind === 'sinceBaseline') version.sinceBaseline = true;
+      journal.final!.proofHash = finalProofHash(journal);
+      publication.recovery.proofHash = journal.final!.proofHash;
+      const { integrityHash: _seal, ...unsealed } = publication;
+      publication.integrityHash = hash(unsealed);
+      await localStore('kb').setLocal(publication.recovery.journalKey, journal);
+      await publicationStore().setLocal(`publication:${hash(directory)}`, publication);
+      const factory = vi.fn(async () => f.backend),
+        before = await payloadSnapshot(publication),
+        authoritative = await authoritativeState(directory);
+      await expect(recoverWorkspace(directory, factory)).rejects.toThrow(
+        /publication proof|content version proof/
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(await payloadSnapshot(publication)).toEqual(before);
+      expect(await authoritativeState(directory)).toEqual(authoritative);
+    }
+  );
+
+  it.each(['root', 'kb', 'plan', 'journal', 'proof', 'live-kb'] as const)(
+    'refuses installed sync publication with a mismatched %s binding',
+    async (field) => {
+      const { f, publication } = await stagedFixture('installed'),
+        authoritative = await authoritativeState(directory),
+        bytes = await payloadSnapshot(publication),
+        altered = structuredClone(publication);
+      if (altered.recovery.kind !== 'sync') throw new Error('Expected sync binding');
+      if (field === 'root') altered.directory += '-different';
+      if (field === 'kb') altered.next.kbId = 'another-kb';
+      if (field === 'plan') altered.recovery.planHash = '0'.repeat(64);
+      if (field === 'journal') altered.recovery.journalKey += '-different';
+      if (field === 'proof') altered.recovery.proofHash = '0'.repeat(64);
+      if (field === 'live-kb')
+        f.backend.identity = vi.fn(async () => ({ kbId: 'another-kb', writable: true }));
+      const { integrityHash: _seal, ...unsealed } = altered;
+      altered.integrityHash = hash(unsealed);
+      await publicationStore().setLocal(`publication:${hash(directory)}`, altered);
+      const factory = vi.fn(async () => f.backend),
+        install = vi.spyOn(fileOps, 'linkPrivate'),
+        calls = [...f.calls];
+      await expect(recoverWorkspace(directory, factory)).rejects.toThrow(
+        /binding|metadata|KB mismatch/
+      );
+      expect(factory).toHaveBeenCalledTimes(field === 'live-kb' ? 1 : 0);
+      expect(install).not.toHaveBeenCalled();
+      expect(f.calls).toEqual(calls);
+      expect(await authoritativeState(directory)).toEqual(authoritative);
+      expect(await payloadSnapshot(publication)).toEqual(bytes);
+      expect(await publicationStore().getLocal(`publication:${hash(directory)}`)).toEqual(altered);
+    }
+  );
+
+  it.each([
+    ['before-install', 'corrupt'],
+    ['before-install', 'oversize'],
+    ['displaced', 'mode'],
+    ['displaced', 'backup'],
+    ['installed', 'corrupt'],
+    ['installed', 'unsafe-path'],
+  ] as const)(
+    'prechecks sync payloads at %s for %s before native activation',
+    async (point, fault) => {
+      const { f, publication } = await stagedFixture(point),
+        item = publication.writes.find(({ path }) => path === f.state.entries.answer!.rawPath)!;
+      if (fault === 'corrupt') await writePrivate(directory, item.stage!, 'corrupt');
+      if (fault === 'oversize')
+        await writeFile(join(directory, item.stage!), 'x'.repeat(4 * 1024 * 1024 + 1), {
+          mode: 0o600,
+        });
+      if (fault === 'mode') await chmod(join(directory, item.stage!), 0o644);
+      if (fault === 'backup')
+        await writeFile(join(directory, item.backup), 'corrupt backup', { mode: 0o600 });
+      if (fault === 'unsafe-path') {
+        item.stage = '../out-of-vault';
+        const { integrityHash: _seal, ...unsealed } = publication;
+        publication.integrityHash = hash(unsealed);
+        await publicationStore().setLocal(`publication:${hash(directory)}`, publication);
+      }
+      const before = await payloadSnapshot(publication),
+        authoritative = await authoritativeState(directory),
+        factory = vi.fn(async () => f.backend),
+        install = vi.spyOn(fileOps, 'linkPrivate'),
+        calls = [...f.calls];
+      await expect(recoverWorkspace(directory, factory)).rejects.toThrow(
+        /integrity|oversized|Unsafe|Concurrent|escapes/
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(install).not.toHaveBeenCalled();
+      expect(f.calls).toEqual(calls);
+      expect(await authoritativeState(directory)).toEqual(authoritative);
+      expect(await payloadSnapshot(publication)).toEqual(before);
+      expect(await readPublication(directory)).toEqual(publication);
+    }
+  );
+
+  it('uses only recorded G on recovery and seals unchanged selected identities outside P and G', async () => {
+    const { f, publication } = await stagedFixture('installed');
+    if (publication.recovery.kind !== 'sync') throw new Error('Expected sync binding');
+    const journal = (await localStore('kb').getLocal<Journal>(publication.recovery.journalKey))!,
+      frozenIds = Object.keys(journal.final!.hashes).sort();
+    expect(journal.final!.publicationIds).toEqual(['answer']);
+    expect(journal.selection.reconcileIds).toContain('basic');
+    expect(frozenIds).not.toContain('basic');
+    vi.mocked(f.backend.read).mockClear();
+    vi.mocked(f.backend.readProbe).mockClear();
+    for (const method of ['enumerate', 'discover', 'subtree'] as const)
+      f.backend[method] = vi.fn(async () => {
+        throw new Error(`No ${method} during recovery`);
+      });
+    expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+      status: 'recovered',
+      remoteWrites: 0,
+    });
+    expect(
+      vi
+        .mocked(f.backend.read)
+        .mock.calls.flatMap(([ids]) => ids)
+        .sort()
+    ).toEqual(frozenIds);
+    expect(f.backend.readProbe).not.toHaveBeenCalled();
+    for (const method of ['enumerate', 'discover', 'subtree'] as const)
+      expect(f.backend[method]).not.toHaveBeenCalled();
+    const local = await inspectLocal(directory),
+      { publishedBaselineHash } = await import('../../../src/business/workspace/resume.js');
+    expect(publishedBaselineHash(journal, local.native)).toBe(journal.final!.publishedBaselineHash);
+    local.native.get('basic')!.text = ['Changed unchanged selected baseline'];
+    expect(publishedBaselineHash(journal, local.native)).not.toBe(
+      journal.final!.publishedBaselineHash
+    );
+    await writePrivate(
+      directory,
+      local.state.entries.basic!.rawPath,
+      JSON.stringify(local.native.get('basic'))
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(resumeWorkspace(directory, factory, journal.planHash)).rejects.toThrow();
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it.each(['unstaged', 'staged', 'installed'] as const)(
+    'recovers %s publication despite remote-only review and scheduling changes',
+    async (point) => {
+      const f = await prepare((f) => {
+        f.rems.get('basic')!.public = { updatedAt: 10 };
+      });
+      await edit(f.path, (source) => source.replace('Back', 'Published back'));
+      const before = await loadState(directory),
+        raw = new Map(
+          await Promise.all(
+            Object.entries(before.entries)
+              .filter(([id]) => id !== 'basic')
+              .map(
+                async ([id, entry]) => [id, await readPrivate(directory, entry.rawPath)] as const
+              )
+          )
+        ),
+        original = LocalState.prototype.setLocal,
+        link = fileOps.linkPrivate;
+      const stateSpy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (
+            key.startsWith('publication:') &&
+            ((point === 'unstaged' && value !== null) || (point === 'installed' && value === null))
+          )
+            throw new Error('Interrupt publication');
+          return original.call(this, key, value);
+        });
+      const fileSpy = vi
+        .spyOn(fileOps, 'linkPrivate')
+        .mockImplementation(async (root, from, to) => {
+          if (point === 'staged' && to === before.entries.basic!.rawPath)
+            throw new Error('Interrupt staged payload');
+          return link(root, from, to);
+        });
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'publication-incomplete',
+      });
+      stateSpy.mockRestore();
+      fileSpy.mockRestore();
+      const nativeBefore = await f.backend.read(['basic', 'question']);
+      for (const rem of nativeBefore) {
+        f.rems.get(rem.id)!.cards = rem.cards!.map((card) => ({
+          ...card,
+          repetitionHistory: [{ time: 25 }],
+          nextRepetitionTime: 40,
+          lastRepetitionTime: 25,
+          timesWrongInRow: 0,
+        }));
+        f.rems.get(rem.id)!.public = { updatedAt: 25, localUpdatedAt: 50 };
+        f.rems.get(rem.id)!.facts = { updatedAt: 25, localUpdatedAt: 50, createdAt: 1 };
+      }
+      const remoteOnly = structuredClone([...f.rems]),
+        calls = [...f.calls];
+      expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+        status: 'recovered',
+        remoteWrites: 0,
+      });
+      expect([...f.rems]).toEqual(remoteOnly);
+      expect(f.calls).toEqual(calls);
+      const after = await loadState(directory);
+      expect(after.remoteVersions!.basic!.timestamp).toBe(10);
+      for (const [id, bytes] of raw) {
+        expect(await readPrivate(directory, after.entries[id]!.rawPath)).toBe(bytes);
+        expect(after.localVersions?.[id]).toEqual(before.localVersions?.[id]);
+        expect(after.remoteVersions?.[id]).toEqual(before.remoteVersions?.[id]);
+      }
+      expect(
+        (await inspectLocal(directory)).native.get('basic')!.cards!.map(({ id }) => id)
+      ).toEqual(nativeBefore.find(({ id }) => id === 'basic')!.cards!.map(({ id }) => id));
+      expect(await readPrivate(directory, f.path)).toContain('Published back');
+    }
+  );
+
+  it.each(['ledger', 'stage', 'throw'] as const)(
+    'keeps the writer lock and fails closed when %s changes during native recovery',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Sealed answer'));
+      const original = LocalState.prototype.setLocal;
+      const failure = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+        this: LocalState,
+        key,
+        value
+      ) {
+        if (key.startsWith('publication:') && value === null)
+          throw new Error('Before clearing installed publication');
+        return original.call(this, key, value);
+      });
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'publication-incomplete',
+      });
+      failure.mockRestore();
+      const publication = (await readPublication(directory))!,
+        calls = [...f.calls],
+        identity = f.backend.identity;
+      f.backend.identity = async () => {
+        await expect(withWorkspaceLock(directory, async () => true)).rejects.toThrow(
+          /lock|writer/i
+        );
+        if (kind === 'throw') throw new Error('Injected native verifier failure');
+        if (kind === 'stage') {
+          const item = publication.writes.find(
+            (item) => item.path === f.state.entries.answer!.rawPath
+          )!;
+          await writePrivate(directory, item.stage!, 'changed staged payload');
+        } else {
+          const { publicationStore } = await import('../../../src/business/workspace/local.js');
+          await publicationStore().setLocal(`publication:${hash(directory)}`, {
+            ...publication,
+            integrityHash: '0'.repeat(64),
+          });
+        }
+        return identity();
+      };
+      await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(
+        /publication|Staged|verifier/
+      );
+      expect(f.calls).toEqual(calls);
+      const { publicationStore } = await import('../../../src/business/workspace/local.js');
+      expect(await publicationStore().getLocal(`publication:${hash(directory)}`)).toBeTruthy();
+    }
+  );
+
+  it('does not use stale Powerup facts when recovering an unknown-native dependency', async () => {
+    const f = await prepare((f) => {
+      f.rems.get('basic')!.text = [{ i: 'q', _id: 'subdoc' }];
+      f.rems.get('subdoc')!.unsupported = 'unverified-native-flags';
+      f.rems.get('subdoc')!.powerupPresence = { cc: false };
+    });
+    await edit(f.path, (source) => source.replace('Back', 'Recovery answer'));
+    const original = LocalState.prototype.setLocal;
+    const failure = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+      this: LocalState,
+      key,
+      value
+    ) {
+      if (key.startsWith('publication:') && value !== null) throw new Error('Before ledger');
+      return original.call(this, key, value);
+    });
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'publication-incomplete',
+    });
+    failure.mockRestore();
+    f.rems.get('subdoc')!.powerupPresence!.cc = true;
+    await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow('subdoc/cc');
+    expect(f.calls).toEqual(['basic:backText']);
+  });
+
+  it.each(['body', 'tag'] as const)(
+    'leaves a late unrelated %s edit for the next original discovery',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'New answer'));
+      const before = await loadState(directory),
+        raw = await readPrivate(directory, before.entries.basic!.rawPath);
+      const guard = f.backend.guard;
+      let late = false;
+      f.backend.guard = async (ids) => {
+        const result = await guard(ids);
+        if (!late) {
+          late = true;
+          if (kind === 'body') f.rems.get('basic')!.text = ['Late unrelated body'];
+          else f.rems.get('basic')!.tags = ['home'];
+        }
+        return result;
+      };
+      const result = (await syncWorkspace(directory, async () => f.backend, { apply: true })) as {
+        planHash: string;
+      };
+      expect(result).toMatchObject({ status: 'verified', updated: ['answer'] });
+      const after = await loadState(directory);
+      expect(await readPrivate(directory, after.entries.basic!.rawPath)).toBe(raw);
+      expect(after.localVersions?.basic).toEqual(before.localVersions?.basic);
+      expect(after.remoteVersions?.basic).toEqual(before.remoteVersions?.basic);
+      expect(
+        await resumeWorkspace(
+          directory,
+          async () => {
+            throw new Error('ordinary completed resume is offline');
+          },
+          result.planHash
+        )
+      ).toMatchObject({ status: 'already-complete' });
+      expect(await syncWorkspace(directory, async () => f.backend)).toMatchObject({
+        incoming: ['basic'],
+      });
+    }
+  );
+
+  it.each(['before', 'after'] as const)(
+    'checks in-selection reference dependencies at the %s public boundary',
+    async (boundary) => {
+      const f = await prepare((f) => {
+        f.rems.get('basic')!.text = [{ i: 'q', _id: 'subdoc' }];
+      });
+      await edit(f.path, (source) => source.replace('Back', 'Edited back'));
+      const probe = f.backend.readProbe;
+      let checks = 0;
+      f.backend.readProbe = async (ids, options) => {
+        checks++;
+        if (checks === (boundary === 'before' ? 2 : 3))
+          f.rems.get('subdoc')!.text = ['Late dependency'];
+        return probe(ids, options);
+      };
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        error: expect.stringMatching(/Concurrent remote change.*subdoc/),
+      });
+      expect(f.calls).toHaveLength(boundary === 'before' ? 0 : 1);
+    }
+  );
+
+  it.each(['staging', 'installed'] as const)(
+    'verifies frozen G while recovering %s publication after pending disappears',
+    async (point) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Published answer'));
+      const original = LocalState.prototype.setLocal,
+        link = fileOps.linkPrivate;
+      const stateSpy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (point === 'installed' && key.startsWith('publication:') && value === null)
+            throw new Error('After next manifest');
+          return original.call(this, key, value);
+        });
+      const fileSpy = vi
+        .spyOn(fileOps, 'linkPrivate')
+        .mockImplementation(async (root, from, to) => {
+          if (point === 'staging' && to === f.state.entries.answer!.rawPath)
+            throw new Error('After displacement');
+          return link(root, from, to);
+        });
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'publication-incomplete',
+      });
+      stateSpy.mockRestore();
+      fileSpy.mockRestore();
+      const pending = await readPublication(directory),
+        calls = [...f.calls];
+      expect(pending!.recovery.kind).toBe('sync');
+      if (point === 'installed') expect((await loadState(directory)).pending).toBeUndefined();
+      await expect(recoverLocalPublication(directory)).rejects.toThrow(
+        'exact native proof verifier'
+      );
+      f.rems.get('answer')!.text = ['Changed after verification'];
+      await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(
+        'Remote changed after verified sync'
+      );
+      expect(await readPublication(directory)).toEqual(pending);
+      expect(f.calls).toEqual(calls);
+      f.rems.get('answer')!.text = ['Published answer'];
+      expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+        status: 'recovered',
+        remoteWrites: 0,
+      });
+      expect(f.calls).toEqual(calls);
+    }
+  );
+
+  it.each([
+    'publicationIds',
+    'publishedBaselineHash',
+    'hashes',
+    'selection',
+    'inputHash',
+    'structuralIds',
+  ] as const)('rejects tampered %s before recovering or blessing any baseline', async (field) => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Proof answer'));
+    const original = LocalState.prototype.setLocal;
+    const failure = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+      this: LocalState,
+      key,
+      value
+    ) {
+      if (key.startsWith('publication:') && value !== null) throw new Error('Before publication');
+      return original.call(this, key, value);
+    });
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'publication-incomplete',
+    });
+    failure.mockRestore();
+    const before = await loadState(directory),
+      store = localStore('kb'),
+      key = before.pending!.journalKey;
+    const journal = (await store.getLocal<Journal>(key))!;
+    if (field === 'selection') journal.selection.reconcileIds = ['answer'];
+    else if (field === 'publicationIds' || field === 'structuralIds')
+      journal.final![field] = ['basic'];
+    else if (field === 'hashes') delete journal.final!.hashes.chapter;
+    else journal.final![field] = '0'.repeat(64);
+    await store.setLocal(key, journal);
+    const factory = vi.fn(async () => f.backend),
+      calls = [...f.calls];
+    await expect(recoverWorkspace(directory, factory)).rejects.toThrow('publication proof');
+    expect(factory).not.toHaveBeenCalled();
+    expect(await loadState(directory)).toEqual(before);
+    expect(f.calls).toEqual(calls);
+  });
+
+  it.each(['before', 'after'] as const)(
+    'retains unknown native dependency public facts at the %s boundary',
+    async (boundary) => {
+      const f = await prepare((f) => {
+        f.rems.get('basic')!.text = [{ i: 'q', _id: 'subdoc' }];
+        f.rems.get('subdoc')!.unsupported = 'unverified-native-flags';
+        f.rems.get('subdoc')!.powerupPresence = { cc: false };
+      });
+      await edit(f.path, (source) => source.replace('Back', 'Unknown dependency answer'));
+      const read = f.backend.read,
+        probe = f.backend.readProbe;
+      f.backend.read = async (ids, options) =>
+        (await read(ids, options)).map((rem) =>
+          rem.id === 'subdoc' ? { ...rem, unsupported: undefined } : rem
+        );
+      let checks = 0;
+      f.backend.readProbe = async (ids, options) => {
+        checks++;
+        if (checks === (boundary === 'before' ? 2 : 3))
+          f.rems.get('subdoc')!.powerupPresence!.cc = true;
+        return probe(ids, options);
+      };
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        error: expect.stringMatching(/Powerup.*subdoc/),
+      });
+      expect(f.calls).toHaveLength(boundary === 'before' ? 0 : 1);
+      expect((await inspectLocal(directory)).native.get('subdoc')!.unsupported).toBe(
+        'unverified-native-flags'
+      );
+    }
+  );
+});
 
 it('CLI relocate keeps a nonempty imported identity/card baseline usable by offline status and lint', async () => {
   const f = await prepare();

@@ -594,6 +594,14 @@ parent/child ownership and query/Card/tag observations; they are not ignored as
 SDK noise. Additions after the plan is frozen are concurrent changes, not an
 invitation to expand an in-progress write or replay an uncertain operation.
 Cheap probes still omit Card/history and full native-flag reads.
+Ordinary `--scope changed` still initially probes **every selected bound ID** to
+discover remote-only changes; omitting `--path` selects the whole vault. It is not
+a remote changes-since API. Only the two later public checks are narrowed to the
+actual publication/mutation set and its complete before/observed/intended
+dependency closure, including ancestors, references, tag paths and Portal/card
+relationships inside the selection. Full native/Card/permission/pre-mutation
+guards remain in force; unknown native flags remain unknown. `all`, guarded
+apply and explicit deletion retain their complete original proof scopes.
 Read results retain input order; failures stop their pool and drain in-flight
 work before returning, without passing partial reads into writes. Parsed source
 and bytes are reused only within one operation. Full content hashes, safe paths,
@@ -624,6 +632,13 @@ optional `addedIds` for fully observed incoming descendants. New native descenda
 also appear in `incoming`; they do not use the outgoing `new:key` assignment map.
 Verification-only dependencies do not advance their shared native baseline or
 content clocks. Unselected bytes and unassigned bullets remain intact. Selected
+but unpublished Rems also retain their raw baseline and both content clocks.
+Actual incoming/converged/outgoing changes, selected metadata refreshes, incoming
+descendants and assigned creations are published; structural-only parents receive
+only their verified children projection. A late unrelated body/tag edit is left
+for the next selected-set discovery, not silently absorbed into this publication.
+Previews/conflicts still retain legitimate observed remote version clocks.
+Selected
 layout-only apply advances only local layout/file hashes and display attributes;
 it preserves all native records/clocks and any separate pending native plan.
 The acceptance driver records wall time and native mutation steps separately;
@@ -673,6 +688,26 @@ original operation had zero remote writes.
 The original incoming ID set remains sealed in the journal. Recovery verifies
 those identities and final hashes, distinguishes recorded outgoing creations,
 and refuses additional descendants or changed query/card/structure facts.
+The final journal separately seals exact native verification hashes, bounded
+`publicationIds`, and `publishedBaselineHash` over the complete original relevant
+resulting semantic baseline (including unchanged records and deleted identities,
+excluding remote-owned review history/scheduling and arrival timestamps). Its
+integrity hash binds those fields to the original plan, selection, inputs and
+assigned IDs. Missing or inconsistent proof is refused without migration.
+The journal also seals exactly P's verified content-version observations. Normal
+publication and unstaged recovery reuse these clocks, so later review timestamps
+cannot promote an unchanged content version; staged recovery checks them against
+the next manifest before connecting. Published versions clear `sinceBaseline`.
+These checksums detect corruption and mismatches, not malicious writers able to
+rewrite the same journal and recompute its checksum.
+Recovery reads frozen verification IDs without rediscovery and validates the
+projected baseline before publication; it performs zero native mutations.
+Interrupted staged sync publications retain that exact journal binding even
+after the next manifest is installed and `pending` disappears. Under the same
+writer lock, recovery checks all staged/backup integrity before activating the
+backend, verifies the frozen native proof and resulting baseline, then rechecks
+the unchanged ledger/content before finishing. Local-only import/save/format
+recovery remains offline. Neither path provides a native/local atomic transaction.
 
 `sync resume DIR --plan-hash HASH` is a separate, explicit write entry point,
 not an automatic retry by `apply`. Ensure the original CLI writer has stopped;
@@ -702,7 +737,7 @@ require reconciliation outside this command. Do not delete state to bypass a
 refusal. A verified remote journal delegates to publication recovery; guarded
 resume then refreshes exact native proof without replaying mutations.
 
-Old journals do not record the creation-time Card identities of newly made Rems.
+Outgoing journals do not record the creation-time Card identities of newly made Rems.
 Resume therefore validates their constructor/default shape plus recorded effects,
 including explicitly collected empty tags, and establishes their Card identity
 baseline at this exact readback. It does **not** prove those new Card IDs are the

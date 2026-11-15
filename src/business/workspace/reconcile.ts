@@ -65,7 +65,9 @@ export async function readRemote(
       seen.set(
         id,
         hash(publicRevision(before)) === hash(publicRevision(current)) &&
-          hash(before.tags) === hash(tags)
+          hash(before.tags) === hash(tags) &&
+          (!context.state.remoteVersions?.[id] ||
+            context.state.remoteVersions[id]!.contentHash === hash(contentProjection(before)))
           ? before
           : current
       );
@@ -173,7 +175,11 @@ export async function readRemote(
         throw new Error(`Concurrent remote change while reading ${rem.id}`);
     }
     const byId = new Map(rems.map((rem) => [rem.id, rem]));
-    return batch.map((id) => withNativeSnapshot(context.native.get(id)!, byId.get(id)!));
+    return batch.map((id) =>
+      context.native.get(id)!.unsupported === 'unverified-native-flags'
+        ? result.get(id)!
+        : withNativeSnapshot(context.native.get(id)!, byId.get(id)!)
+    );
   });
   for (const rem of nativeReads.flat()) result.set(rem.id, rem);
   const addedIds = await readIncoming(context, local, result, backend, new Set(created.keys()));
@@ -457,11 +463,12 @@ export function reconcile(
 /** Client-side optimistic readback over the bound content set. SDK setters have no conditional version argument. */
 export async function checkPublicRevision(
   backend: WorkspaceBackend,
-  expected: Map<string, WorkspaceRem>
+  expected: Map<string, WorkspaceRem>,
+  powerupCodes?: Record<string, string[]>
 ): Promise<void> {
   const ids = [...expected.keys()].sort();
   const checked = await mapReads(batches(ids), 4, async (batch) => {
-    const probes = await backend.readProbe(batch),
+    const probes = await backend.readProbe(batch, powerupCodes ? { powerupCodes } : undefined),
       snapshots = probes.map((probe) => probe.snapshot);
     if (
       snapshots.length !== batch.length ||
@@ -478,6 +485,16 @@ export async function checkPublicRevision(
           ...withPublicSnapshot(before, snapshot),
           tags: probes.find((probe) => probe.snapshot.id === id)!.tags,
         };
+      for (const code of powerupCodes?.[id] ?? []) {
+        const presence = probes.find((probe) => probe.snapshot.id === id)!.powerupPresence?.[code];
+        if (
+          typeof presence !== 'boolean' ||
+          presence !==
+            (before.powerupPresence?.[code] ??
+              before.powerups?.some((powerup) => powerup.code === code))
+        )
+          throw new Error(`Concurrent native Powerup change on ${id}/${code}`);
+      }
       if (
         hash(publicRevision(before)) !== hash(publicRevision(current)) ||
         (Array.isArray(before.tags) && hash(before.tags) !== hash(current.tags))

@@ -52,6 +52,7 @@ import {
   type SyncSelection,
   type WorkspaceRem,
   type WorkspaceState,
+  type ContentVersion,
 } from './types.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -298,11 +299,25 @@ export async function prepareSnapshot(
   removedIds: string[] = [],
   sources: Map<string, ParsedDocument> = new Map(),
   assignedIds: Record<string, string> = {},
-  selection?: SyncSelection
+  selection?: SyncSelection,
+  publicationIds?: string[],
+  syncRecovery?: import('./publication.js').SyncRecovery,
+  publishedVersions?: Record<string, ContentVersion>
 ) {
   const errors = validateGraph(rems, coverage.rootIds);
   if (errors.length) throw new Error(`Incomplete native graph: ${errors.slice(0, 10).join('; ')}`);
   const byId = new Map(rems.map((rem) => [rem.id, rem]));
+  if (
+    publishedVersions &&
+    (!publicationIds ||
+      hash(Object.keys(publishedVersions).sort()) !== hash([...publicationIds].sort()) ||
+      publicationIds.some(
+        (id) =>
+          !byId.has(id) ||
+          remoteVersion(byId.get(id)!).contentHash !== publishedVersions[id]?.contentHash
+      ))
+  )
+    throw new Error('Publication content version proof does not match projected content');
   const sourcePaths = new Map([...sources].map(([path, source]) => [source.metadata?.root, path]));
   const renamed = previous
     ? {
@@ -386,9 +401,10 @@ export async function prepareSnapshot(
   const files = frozen ?? (await FrozenFiles.capture(root));
   await files.check();
   const reconciled = new Set(
-    selection
-      ? [...selection.reconcileIds, ...(selection.addedIds ?? []), ...Object.values(assignedIds)]
-      : byId.keys()
+    publicationIds ??
+      (selection
+        ? [...selection.reconcileIds, ...(selection.addedIds ?? []), ...Object.values(assignedIds)]
+        : byId.keys())
   );
   const localVersions = { ...previous?.localVersions },
     remoteVersions = { ...previous?.remoteVersions };
@@ -397,7 +413,9 @@ export async function prepareSnapshot(
   for (const id of removedIds) delete remoteVersions[id];
   for (const rem of rems)
     if (reconciled.has(rem.id))
-      remoteVersions[rem.id] = remoteVersion(rem, previous?.remoteVersions?.[rem.id]);
+      remoteVersions[rem.id] = publishedVersions
+        ? publishedVersions[rem.id]!
+        : remoteVersion(rem, previous?.remoteVersions?.[rem.id]);
   const state: WorkspaceState = {
     version: 1,
     directory: root,
@@ -511,15 +529,15 @@ export async function prepareSnapshot(
   const frozenHashes = files.hashes();
   for (const [path, content] of writes)
     if (content !== null && frozenHashes[path] === hash(content)) writes.delete(path);
-  preparePublication(root, state, previous, writes, files);
-  return { state, writes, files };
+  preparePublication(root, state, previous, writes, files, syncRecovery);
+  return { state, writes, files, syncRecovery };
 }
 
 export async function writeSnapshot(
   ...args: Parameters<typeof prepareSnapshot>
 ): Promise<WorkspaceState> {
-  const { state, writes, files } = await prepareSnapshot(...args);
-  await stageSnapshot(args[0], state, args[3], writes, files);
+  const { state, writes, files, syncRecovery } = await prepareSnapshot(...args);
+  await stageSnapshot(args[0], state, args[3], writes, files, syncRecovery);
   return state;
 }
 

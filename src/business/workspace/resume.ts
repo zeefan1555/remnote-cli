@@ -12,6 +12,16 @@ import {
   type WorkspaceRem,
 } from './types.js';
 import { nativeProof } from './outline.js';
+import { z } from 'zod';
+import type { ContentVersion } from './types.js';
+
+const publishedVersionSchema = z
+  .object({
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    timestamp: z.number().int().nonnegative().nullable(),
+    source: z.literal('rem-updated-at'),
+  })
+  .strict();
 
 export interface Journal {
   version: 2;
@@ -30,7 +40,63 @@ export interface Journal {
     inputHash: string;
     deleted: string[];
     structuralIds: string[];
+    publicationIds: string[];
+    remoteVersions: Record<string, ContentVersion>;
+    publishedBaselineHash: string;
+    proofHash: string;
   };
+}
+
+/** Detect accidental proof corruption/mismatches; a writer can recompute this checksum. */
+export function finalProofHash(journal: Journal): string {
+  const { proofHash: _proofHash, ...final } = journal.final!;
+  return hash({
+    planHash: journal.planHash,
+    selection: journal.selection,
+    ids: journal.ids,
+    final,
+  });
+}
+
+export function requireFinalProof(journal: Journal): NonNullable<Journal['final']> {
+  const final = journal.final;
+  if (
+    !final ||
+    !Array.isArray(final.publicationIds) ||
+    !Array.isArray(final.structuralIds) ||
+    !Array.isArray(final.deleted) ||
+    !final.hashes ||
+    !final.remoteVersions ||
+    hash(Object.keys(final.remoteVersions).sort()) !== hash(final.publicationIds) ||
+    Object.values(final.remoteVersions).some(
+      (version) => !publishedVersionSchema.safeParse(version).success
+    ) ||
+    !/^[a-f0-9]{64}$/.test(final.publishedBaselineHash ?? '') ||
+    !/^[a-f0-9]{64}$/.test(final.inputHash ?? '') ||
+    final.proofHash !== finalProofHash(journal) ||
+    hash(final.publicationIds) !== hash([...new Set(final.publicationIds)].sort()) ||
+    final.publicationIds.some((id) => !Object.hasOwn(final.hashes, id))
+  )
+    throw new Error('Missing or inconsistent verified publication proof; preserve the journal');
+  return final;
+}
+
+/** Complete projected semantic baseline: includes unchanged/deleted identities, excludes review clocks/history. */
+export function publishedBaselineHash(journal: Journal, native: Map<string, WorkspaceRem>): string {
+  const final = journal.final!;
+  const ids = [
+    ...new Set([
+      ...journal.selection.reconcileIds,
+      ...journal.selection.verificationIds,
+      ...(journal.selection.addedIds ?? []),
+      ...Object.values(journal.ids),
+      ...Object.keys(final.hashes),
+      ...final.deleted,
+    ]),
+  ].sort();
+  return hash(
+    ids.map((id) => [id, native.has(id) ? publicationRevisionHash(native.get(id)!) : null])
+  );
 }
 
 export function guardedBinding(journal: Journal) {

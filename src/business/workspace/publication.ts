@@ -22,13 +22,25 @@ import { FrozenFiles } from './frozen-files.js';
 import { hash, type WorkspaceState } from './types.js';
 import { mapReads } from './read-pool.js';
 
-interface Publication {
+export interface SyncRecovery {
+  kind: 'sync';
+  journalKey: string;
+  planHash: string;
+  proofHash: string;
+}
+export interface Publication {
   version: 1;
   directory: string;
   previousHash: string | null;
   next: WorkspaceState;
   baseline: Record<string, string>;
   writes: Array<{ path: string; stage: string | null; hash: string | null; backup: string }>;
+  recovery: SyncRecovery | { kind: 'local' };
+  integrityHash: string;
+}
+function publicationHash(publication: Publication) {
+  const { integrityHash: _integrityHash, ...value } = publication;
+  return hash(value);
 }
 async function currentHash(
   root: string,
@@ -45,9 +57,15 @@ async function currentHash(
 export async function readPublication(root: string): Promise<Publication | undefined> {
   const value = await publicationStore().getLocal<Publication | null>(`publication:${hash(root)}`);
   if (!value) return;
-  if (value.version !== 1 || value.directory !== root || value.next.directory !== root)
-    throw new Error('Invalid snapshot publication binding');
   serializeState(value.next);
+  if (
+    value.version !== 1 ||
+    value.directory !== root ||
+    value.next.directory !== root ||
+    !['local', 'sync'].includes(value.recovery?.kind) ||
+    value.integrityHash !== publicationHash(value)
+  )
+    throw new Error('Unfinished local snapshot publication has an invalid binding; preserve it');
   return value;
 }
 export async function requireNoPublication(root: string): Promise<void> {
@@ -57,48 +75,49 @@ export async function requireNoPublication(root: string): Promise<void> {
     );
 }
 
-async function publish(root: string, publication: Publication): Promise<void> {
+async function checkPublication(
+  root: string,
+  publication: Publication,
+  final = false
+): Promise<void> {
   const writes = new Map(publication.writes.map((item) => [item.path, item]));
-  const check = async (final = false) => {
-    let current: WorkspaceState | undefined;
-    try {
-      // This single-file authoritative ledger already authorizes exactly the old/new manifest hashes.
-      // Reading the manifest directly also repairs interruption between manifest and its ordinary seal.
-      current = await authoritativeState(root);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+  let current: WorkspaceState | undefined;
+  try {
+    // This single-file authoritative ledger already authorizes exactly the old/new manifest hashes.
+    // Reading the manifest directly also repairs interruption between manifest and its ordinary seal.
+    current = await authoritativeState(root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (
+    (current ? hash(current) : null) !== publication.previousHash &&
+    (!current || hash(current) !== hash(publication.next))
+  )
+    throw new Error('Sync metadata changed during local publication');
+  const paths = await allFiles(root),
+    allowed = new Set([...Object.keys(publication.baseline), ...writes.keys()]);
+  if (paths.some((path) => !allowed.has(path)))
+    throw new Error('Local file set changed during sync publication');
+  await mapReads([...allowed], 16, async (path) => {
+    const actual = await currentHash(root, path),
+      write = writes.get(path),
+      before = publication.baseline[path] ?? null;
+    const displaced = write ? await currentHash(root, write.backup, fileByteLimit(path)) : null;
+    if (displaced !== null && displaced !== before)
+      throw new Error(`Concurrent content preserved in ${write!.backup}; reconcile before recover`);
     if (
-      (current ? hash(current) : null) !== publication.previousHash &&
-      (!current || hash(current) !== hash(publication.next))
+      write
+        ? final
+          ? actual !== write.hash
+          : actual !== before && actual !== write.hash && !(actual === null && displaced === before)
+        : actual !== before
     )
-      throw new Error('Sync metadata changed during local publication');
-    const paths = await allFiles(root),
-      allowed = new Set([...Object.keys(publication.baseline), ...writes.keys()]);
-    if (paths.some((path) => !allowed.has(path)))
-      throw new Error('Local file set changed during sync publication');
-    await mapReads([...allowed], 16, async (path) => {
-      const actual = await currentHash(root, path),
-        write = writes.get(path),
-        before = publication.baseline[path] ?? null;
-      const displaced = write ? await currentHash(root, write.backup, fileByteLimit(path)) : null;
-      if (displaced !== null && displaced !== before)
-        throw new Error(
-          `Concurrent content preserved in ${write!.backup}; reconcile before recover`
-        );
-      if (
-        write
-          ? final
-            ? actual !== write.hash
-            : actual !== before &&
-              actual !== write.hash &&
-              !(actual === null && displaced === before)
-          : actual !== before
-      )
-        throw new Error(`Local file changed during sync publication: ${path}`);
-    });
-  };
-  await check();
+      throw new Error(`Local file changed during sync publication: ${path}`);
+  });
+}
+
+async function publish(root: string, publication: Publication): Promise<void> {
+  await checkPublication(root, publication);
   for (const item of publication.writes) {
     const maxBytes = fileByteLimit(item.path);
     const actual = await currentHash(root, item.path);
@@ -123,7 +142,7 @@ async function publish(root: string, publication: Publication): Promise<void> {
       await linkPrivate(root, item.stage, item.path);
     }
   }
-  await check(true);
+  await checkPublication(root, publication, true);
   await saveState(root, publication.next);
   await publicationStore().setLocal(`publication:${hash(root)}`, null);
 }
@@ -134,7 +153,8 @@ export function preparePublication(
   next: WorkspaceState,
   previous: WorkspaceState | undefined,
   writes: Map<string, string | null>,
-  frozen: FrozenFiles
+  frozen: FrozenFiles,
+  recovery?: SyncRecovery
 ): Publication {
   serializeState(next);
   const publication: Publication = {
@@ -144,6 +164,8 @@ export function preparePublication(
     next,
     baseline: frozen.hashes(),
     writes: [],
+    recovery: recovery ?? { kind: 'local' },
+    integrityHash: '',
   };
   const stageRoot = `.sync/staging/${randomUUID()}`;
   for (const [path, content] of writes) {
@@ -156,6 +178,15 @@ export function preparePublication(
       backup: `${stageRoot}/${publication.writes.length}.displaced`,
     });
   }
+  if (
+    recovery &&
+    (!previous?.pending ||
+      previous.pending.journalKey !== recovery.journalKey ||
+      previous.pending.planHash !== recovery.planHash ||
+      !/^[a-f0-9]{64}$/.test(recovery.proofHash))
+  )
+    throw new Error('Sync publication requires the exact pending journal proof');
+  publication.integrityHash = publicationHash(publication);
   if (Buffer.byteLength(JSON.stringify(publication)) > MAX_METADATA_BYTES)
     throw new Error('Snapshot publication metadata exceeds 32 MiB');
   return publication;
@@ -167,10 +198,11 @@ export async function stageSnapshot(
   next: WorkspaceState,
   previous: WorkspaceState | undefined,
   writes: Map<string, string | null>,
-  frozen: FrozenFiles
+  frozen: FrozenFiles,
+  recovery?: SyncRecovery
 ): Promise<void> {
   await requireNoPublication(root);
-  const publication = preparePublication(root, next, previous, writes, frozen);
+  const publication = preparePublication(root, next, previous, writes, frozen, recovery);
   // Validate final serialized bytes before creating even the first staging file.
   for (const item of publication.writes)
     if (item.stage !== null)
@@ -183,7 +215,14 @@ export async function stageSnapshot(
   await publish(root, publication);
 }
 
-export async function recoverWorkspace(directory: string): Promise<unknown> {
+export async function recoverWorkspace(
+  directory: string,
+  verifySync?: (
+    publication: Readonly<Publication>,
+    before: (path: string) => string | null,
+    after: (path: string) => string | null
+  ) => Promise<void>
+): Promise<unknown> {
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     const publication = await readPublication(root);
@@ -194,6 +233,75 @@ export async function recoverWorkspace(directory: string): Promise<unknown> {
           'Remote push journal is pending; preserve its key/IDs and reconcile native outcome before further writes'
         );
       return { status: 'nothing-to-recover', complete: true, remoteWrites: 0 };
+    }
+    // Validate every payload before activating any native backend. A partially installed tree
+    // is never treated as a complete baseline: old bytes come only from exact target/backup,
+    // and resulting bytes only from the bound stage or an already installed exact target.
+    await checkPublication(root, publication);
+    const before = new Map<string, string | null>(),
+      after = new Map<string, string | null>();
+    const privatePayloads = new Map<string, { digest: string | null; limit: number }>();
+    const writes = new Map(publication.writes.map((write) => [write.path, write]));
+    await mapReads(
+      [...new Set([...Object.keys(publication.baseline), ...writes.keys()])],
+      16,
+      async (path) => {
+        const item = writes.get(path),
+          digest = publication.baseline[path] ?? null,
+          limit = fileByteLimit(path);
+        const read = async (source: string) => {
+          try {
+            return await readPrivate(root, source, limit);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+            throw error;
+          }
+        };
+        const target = await read(path),
+          backup = item ? await read(item.backup) : null;
+        const old =
+          digest === null ? null : target !== null && hash(target) === digest ? target : backup;
+        if ((old === null ? null : hash(old)) !== digest)
+          throw new Error(`Missing exact publication baseline: ${path}`);
+        before.set(path, old);
+        const staged = item?.stage ? await read(item.stage) : null;
+        if (item)
+          privatePayloads.set(item.backup, {
+            digest: backup === null ? null : hash(backup),
+            limit,
+          });
+        if (item?.stage)
+          privatePayloads.set(item.stage, { digest: staged === null ? null : hash(staged), limit });
+        // If a stage exists it must remain intact even when its target is already installed.
+        if (item?.stage && staged !== null && hash(staged) !== item.hash)
+          throw new Error('Staged snapshot content integrity mismatch');
+        const next = !item ? old : item.hash === null ? null : (staged ?? target);
+        if ((next === null ? null : hash(next)) !== (item ? item.hash : digest))
+          throw new Error('Staged snapshot content integrity mismatch');
+        after.set(path, next);
+      }
+    );
+    if (publication.recovery.kind === 'sync') {
+      if (!verifySync) throw new Error('Sync publication requires its exact native proof verifier');
+      const freeze = (value: unknown): void => {
+        if (value && typeof value === 'object') {
+          Object.freeze(value);
+          for (const child of Object.values(value)) freeze(child);
+        }
+      };
+      const view = structuredClone(publication);
+      freeze(view);
+      const get = (map: Map<string, string | null>) => (path: string) => {
+        if (!map.has(path)) throw new Error('Unbound publication payload path');
+        return map.get(path)!;
+      };
+      await verifySync(view, get(before), get(after));
+      if (hash(await readPublication(root)) !== hash(publication))
+        throw new Error('Publication ledger changed during native proof verification');
+      await mapReads([...privatePayloads], 16, async ([path, expected]) => {
+        if ((await currentHash(root, path, expected.limit)) !== expected.digest)
+          throw new Error('Staged snapshot content changed during native proof verification');
+      });
     }
     await publish(root, publication);
     return {

@@ -9,6 +9,17 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Ordinary changed sync retains full selected-ID discovery but bounds later public
+  verification to actual publication/mutation dependencies. Unpublished records
+  and clocks remain untouched; structural-only parents receive children only.
+  Separate frozen native and complete projected-baseline proofs drive recovery,
+  including staged sync publications whose next manifest has already installed.
+  Sealed P content-version observations prevent later review timestamps from
+  changing LWW ordering during normal publication or recovery.
+  Missing proof fails closed; local-only recovery stays offline, and unknown
+  native writes are never replayed. Synthetic call reductions are not native
+  persistence or performance acceptance.
+
 - Workspace writers use a permanent-inode OS advisory lock instead of an orphanable
   existence lock. Confirmed process death releases ownership without deleting
   metadata; relocation retains the same lock and original recovery receipt.

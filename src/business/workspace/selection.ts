@@ -107,6 +107,64 @@ export function verificationClosure(
   return sorted(required).filter((id) => !candidateIds.has(id));
 }
 
+/** Public proof includes unknown native flags; it is not the narrower full-native guard set. */
+export function publicVerificationIds(
+  context: LocalContext,
+  plan: WorkspacePlan,
+  observed: Map<string, WorkspaceRem>,
+  publicationIds: string[],
+  requiredIds: string[]
+): string[] {
+  if (plan.selection?.scope !== 'changed' || plan.guarded || plan.deletion)
+    return sorted(observed.keys());
+  const seeds = sorted([
+    ...publicationIds,
+    ...requiredIds,
+    ...(plan.selection.verificationIds ?? []),
+    ...plan.changes.flatMap((change) => [change.key, ...(change.parent ? [change.parent] : [])]),
+  ]).filter((id) => !id.startsWith('new:'));
+  const after = new Map([...context.native, ...observed]);
+  for (const change of plan.changes) {
+    const rem = after.get(change.key);
+    if (rem)
+      after.set(change.key, {
+        ...rem,
+        ...change.fields,
+        ...(change.tags ? { tags: change.tags.after } : {}),
+      });
+  }
+  const required = new Set(seeds);
+  // This closure belongs only to the later changed-mode verification scope. It does not alter
+  // discovery selection, original plan/input hashes or all/guarded/delete proof policies.
+  let previousSize: number;
+  do {
+    previousSize = required.size;
+    for (const native of [context.native, new Map([...context.native, ...observed]), after]) {
+      for (const id of required) {
+        const rem = native.get(id);
+        if (!rem) continue;
+        for (const dependency of verificationClosure({ ...context, native }, plan, [id]))
+          required.add(dependency);
+        for (const tag of [
+          ...(rem.tags ?? []),
+          ...plan.changes.flatMap((change) => change.tags?.before ?? []),
+        ]) {
+          if (native.has(tag)) {
+            required.add(tag);
+            for (const ancestor of verificationClosure(
+              { ...context, native },
+              { ...plan, changes: [] },
+              [tag]
+            ))
+              required.add(ancestor);
+          }
+        }
+      }
+    }
+  } while (required.size !== previousSize);
+  return sorted(required);
+}
+
 export async function selectPlan(
   context: LocalContext,
   plan: WorkspacePlan,

@@ -29,9 +29,8 @@ import {
   type WorkspaceState,
   type SyncPlan,
   type ContentVersion,
-  type SyncSelection,
 } from './types.js';
-import { selectPlan, type SelectionOptions } from './selection.js';
+import { selectPlan, publicVerificationIds, type SelectionOptions } from './selection.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
 import {
   contentProjection,
@@ -39,12 +38,22 @@ import {
   publicationRevisionHash,
   revisionHash,
   withNativeSnapshot,
+  withPublicSnapshot,
 } from './snapshots.js';
-import { nodeContent } from './versions.js';
+import { recordPath } from './identity.js';
+import { nodeContent, remoteVersion } from './versions.js';
 import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
-import { foldResume, guardedBinding, verifyResumeReadback, type Journal } from './resume.js';
+import {
+  foldResume,
+  guardedBinding,
+  verifyResumeReadback,
+  finalProofHash,
+  requireFinalProof,
+  publishedBaselineHash,
+  type Journal,
+} from './resume.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
 import {
   knownPowerupCodes,
@@ -534,20 +543,14 @@ function affectedIds(
 function publicationRems(
   context: LocalContext,
   remote: Map<string, WorkspaceRem>,
-  selection: SyncSelection,
-  assigned: Record<string, string>,
+  publicationIds: string[],
   deleted: string[],
   structuralIds: string[]
 ) {
   const result = new Map(context.native);
-  for (const id of [
-    ...selection.reconcileIds,
-    ...(selection.addedIds ?? []),
-    ...Object.values(assigned),
-  ])
-    if (remote.has(id)) result.set(id, remote.get(id)!);
+  for (const id of publicationIds) if (remote.has(id)) result.set(id, remote.get(id)!);
   for (const id of structuralIds) {
-    if (selection.reconcileIds.includes(id) || !result.has(id)) continue;
+    if (publicationIds.includes(id) || deleted.includes(id) || !result.has(id)) continue;
     const base = result.get(id)!,
       current = remote.get(id)!;
     result.set(id, {
@@ -560,11 +563,54 @@ function publicationRems(
   return [...result.values()];
 }
 
+function publicationIds(
+  plan: SyncPlan,
+  metadataIds: string[],
+  assigned: Record<string, string> = {}
+): string[] {
+  const deleted = new Set(plan.deletion?.ids ?? []);
+  return [
+    ...new Set([
+      ...(plan.selection!.scope === 'changed' && !plan.guarded
+        ? [
+            ...plan.incoming,
+            ...plan.converged,
+            ...metadataIds,
+            ...plan.changes
+              .filter((change) => !change.key.startsWith('new:'))
+              .map((change) => change.key),
+          ]
+        : plan.selection!.reconcileIds),
+      ...(plan.selection!.addedIds ?? []),
+      ...Object.values(assigned),
+    ]),
+  ]
+    .filter((id) => !deleted.has(id))
+    .sort();
+}
+
+/** Refresh only the explicitly verified identities; S minus G remains the first observation. */
+async function checkPublicScope(
+  backend: WorkspaceBackend,
+  remote: Map<string, WorkspaceRem>,
+  ids: string[]
+) {
+  const exact = new Map(
+    ids.map((id) => {
+      if (!remote.has(id)) throw new Error(`Missing public verification dependency: ${id}`);
+      return [id, remote.get(id)!] as const;
+    })
+  );
+  await checkPublicRevision(backend, exact, knownPowerupCodes(exact));
+  for (const [id, rem] of exact) remote.set(id, rem);
+}
+
 /** Preview the complete semantic publication before a mixed batch starts native mutations. */
 function plannedPublication(
   context: LocalContext,
   plan: SyncPlan,
-  remote: Map<string, WorkspaceRem>
+  remote: Map<string, WorkspaceRem>,
+  metadataIds: string[]
 ) {
   const rems = new Map(remote),
     assigned: Record<string, string> = {};
@@ -604,7 +650,18 @@ function plannedPublication(
       rems.set(id, { ...rems.get(id)!, parent });
     }
   }
-  return { assigned, rems: publicationRems(context, rems, plan.selection!, assigned, [], []) };
+  return {
+    assigned,
+    rems: publicationRems(
+      context,
+      rems,
+      publicationIds(plan, metadataIds, assigned),
+      [],
+      plan.changes
+        .filter((change) => change.key.startsWith('new:'))
+        .map((change) => assigned[change.parent!] ?? change.parent!)
+    ),
+  };
 }
 
 async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
@@ -637,6 +694,7 @@ export async function resumeWorkspace(
   const key = `workspace-v2:${state.kbId}:${hash(root)}:${planHash}`;
   const journal = await localStore(state.kbId).getLocal<Journal>(key);
   if (journal?.state === 'verified' && journal.final) {
+    requireFinalProof(journal);
     const binding = guardedBinding(journal);
     if (state.pending?.planHash === planHash || (await readPublication(root))) {
       const result = await recoverWorkspace(root, backendFactory);
@@ -646,7 +704,12 @@ export async function resumeWorkspace(
       return withWorkspaceLock(root, async () => {
         await requireNoPublication(root);
         const context = await inspectLocal(root);
-        if (context.diagnostics.length || context.dirty.length || context.state.pending)
+        if (
+          context.diagnostics.length ||
+          context.dirty.length ||
+          context.state.pending ||
+          publishedBaselineHash(journal, context.native) !== journal.final!.publishedBaselineHash
+        )
           throw new Error(
             'Guarded resume receipt requires the unchanged successfully published baseline'
           );
@@ -727,12 +790,11 @@ async function synchronizeWorkspace(
         throw new Error('Resume cannot find the exact original journal for this vault and KB');
       if (
         !state.pending &&
+        !context.diagnostics.length &&
         resuming.state === 'verified' &&
         resuming.final &&
-        Object.entries(resuming.final.hashes).every(
-          ([id, digest]) =>
-            context.native.has(id) && publicationRevisionHash(context.native.get(id)!) === digest
-        ) &&
+        requireFinalProof(resuming) &&
+        publishedBaselineHash(resuming, context.native) === resuming.final.publishedBaselineHash &&
         resuming.final.deleted.every((id) => !context.native.has(id))
       )
         return {
@@ -957,7 +1019,10 @@ async function synchronizeWorkspace(
       );
     await frozen.check();
     const stateBeforeObservations = hash(state);
-    if (!resuming) state.remoteVersions = remoteVersions;
+    // Previews/conflicts record observations (including A -> B -> A). Successful apply advances
+    // clocks only for published Rems, together with the atomic local snapshot manifest.
+    if (!resuming && (!options.apply || plan.conflicts.length))
+      state.remoteVersions = remoteVersions;
     if (state.pending && state.pending.planHash !== planHash) {
       delete state.pending;
     }
@@ -994,7 +1059,7 @@ async function synchronizeWorkspace(
       };
     }
     if (selection.addedIds?.length) {
-      const intended = plannedPublication(context, plan, remote);
+      const intended = plannedPublication(context, plan, remote, metadataChanged);
       await prepareSnapshot(
         root,
         state.kbId,
@@ -1034,10 +1099,73 @@ async function synchronizeWorkspace(
       throw new Error(
         'Prior write outcome requires exact-ID reconciliation; automatic replay is forbidden'
       );
-    const existingIds = affectedIds(plan, remote, metadataChanged);
+    let existingIds = affectedIds(plan, remote, metadataChanged);
+    const publishing = publicationIds(plan, metadataChanged);
+    const verificationIds = publicVerificationIds(context, plan, remote, publishing, existingIds);
+    const missingProof = verificationIds.filter((id) => !remote.has(id));
+    for (let start = 0; start < missingProof.length; start += 50) {
+      const batch = missingProof.slice(start, start + 50),
+        probes = await backend.readProbe(batch, {
+          powerupCodes: knownPowerupCodes(context.native),
+        });
+      if (
+        probes.length !== batch.length ||
+        new Set(probes.map((probe) => probe.snapshot.id)).size !== batch.length
+      )
+        throw new Error('Missing exact public verification dependency');
+      for (const probe of probes) {
+        const id = probe.snapshot.id;
+        if (typeof id !== 'string' || !batch.includes(id) || !context.native.has(id))
+          throw new Error('Unexpected public verification dependency');
+        const before = context.native.get(id)!;
+        if (
+          publicationRevisionHash({
+            ...withPublicSnapshot(before, probe.snapshot),
+            tags: probe.tags,
+          }) !== publicationRevisionHash(before)
+        )
+          throw new Error(`Unobserved verification dependency changed: ${id}`);
+        for (const code of knownPowerupCodes(context.native)[id] ?? []) {
+          const expected =
+            before.powerupPresence?.[code] ??
+            before.powerups?.some((powerup) => powerup.code === code);
+          if (
+            typeof probe.powerupPresence?.[code] !== 'boolean' ||
+            probe.powerupPresence[code] !== expected
+          )
+            throw new Error(`Verification dependency Powerup changed: ${id}/${code}`);
+        }
+        remote.set(id, {
+          ...withPublicSnapshot(before, probe.snapshot),
+          tags: probe.tags,
+          ...(probe.powerupPresence ? { powerupPresence: probe.powerupPresence } : {}),
+        });
+      }
+    }
+    if (selection.scope === 'changed') {
+      const extra = verificationIds.filter(
+        (id) =>
+          !existingIds.includes(id) && remote.get(id)?.unsupported !== 'unverified-native-flags'
+      );
+      for (const [id, rem] of await readExact(backend, extra, {
+        tags: true,
+        powerupCodes: knownPowerupCodes(context.native),
+      })) {
+        const before = remote.get(id)!;
+        if (
+          publicationRevisionHash(withNativeSnapshot(before, rem)) !==
+          publicationRevisionHash(before)
+        )
+          throw new Error(`Verification dependency changed: ${id}`);
+        remote.set(id, withNativeSnapshot(before, rem));
+      }
+      existingIds = [...new Set([...existingIds, ...extra])].sort();
+    }
     // Incoming descendants already exist natively; only outgoing creations may acquire new cards.
     const observedNativeIds = new Set([...context.native.keys(), ...(selection.addedIds ?? [])]);
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
+    if (folded)
+      for (const id of existingIds) if (!expected.has(id)) expected.set(id, remote.get(id)!);
     const protectedIds = existingIds.filter((id) => !plan.deletion?.ids.includes(id));
     const guardHash = await backend.guard(protectedIds);
     if (journal && journal.guardHash !== guardHash)
@@ -1187,7 +1315,12 @@ async function synchronizeWorkspace(
         checkedWriteBoundary = true;
       }
       // Refresh remote-owned review metadata only after the semantic revision and identities pass.
-      for (const [id, rem] of fresh) expected.set(id, rem);
+      for (const [id, rem] of fresh) {
+        expected.set(id, rem);
+        // Track only accepted native readbacks, never synthesized after-mutation expectations.
+        // A later review of this content must not replace its first observed version time.
+        remoteVersions[id] = remoteVersion(rem, remoteVersions[id]);
+      }
     }
     async function mutate<T>(
       step: string,
@@ -1209,7 +1342,7 @@ async function synchronizeWorkspace(
     }
     try {
       await preflight();
-      await checkPublicRevision(backend, remote);
+      await checkPublicScope(backend, remote, verificationIds);
       for (const id of plan.deletion?.ids ?? []) {
         await mutate(
           `${id}:delete`,
@@ -1374,23 +1507,40 @@ async function synchronizeWorkspace(
         throw new Error('Final deleted-ID absence check failed');
       for (const id of plan.deletion?.ids ?? []) remote.delete(id);
       for (const [id, rem] of expected) remote.set(id, rem);
-      await checkPublicRevision(backend, remote);
+      const finalIds = [...new Set([...verificationIds, ...Object.values(journal.ids)])]
+        .filter((id) => !plan.deletion?.ids.includes(id))
+        .sort();
+      await checkPublicScope(backend, remote, finalIds);
+      const publishedIds = publicationIds(plan, metadataChanged, journal.ids);
+      const projected = publicationRems(context, remote, publishedIds, plan.deletion?.ids ?? [], [
+        ...structuralIds,
+      ]);
       journal.final = {
         hashes: Object.fromEntries(
-          [...remote].map(([id, rem]) => [id, publicationRevisionHash(rem)])
+          finalIds.map((id) => [id, publicationRevisionHash(remote.get(id)!)])
         ),
         inputHash: plan.inputHash!,
         deleted: plan.deletion?.ids ?? [],
         structuralIds: [...structuralIds].sort(),
+        publicationIds: publishedIds,
+        remoteVersions: Object.fromEntries(
+          publishedIds.map((id) => [id, remoteVersion(remote.get(id)!, remoteVersions[id])])
+        ),
+        publishedBaselineHash: '',
+        proofHash: '',
       };
+      journal.final.publishedBaselineHash = publishedBaselineHash(
+        journal,
+        new Map(projected.map((rem) => [rem.id, rem]))
+      );
+      journal.final.proofHash = finalProofHash(journal);
+      requireFinalProof(journal);
       journal.state = 'verified';
       await store.setLocal(key, journal);
       await writeSnapshot(
         root,
         state.kbId,
-        publicationRems(context, remote, selection, journal.ids, plan.deletion?.ids ?? [], [
-          ...structuralIds,
-        ]),
+        projected,
         state,
         { ...state, globalDiscoveryComplete: false },
         frozen,
@@ -1399,7 +1549,10 @@ async function synchronizeWorkspace(
         plan.deletion?.ids,
         context.parsed,
         journal.ids,
-        selection
+        selection,
+        publishedIds,
+        { kind: 'sync', journalKey: key, planHash, proofHash: journal.final.proofHash },
+        journal.final.remoteVersions
       );
       const verification = proofPath
         ? {
@@ -1475,8 +1628,82 @@ export async function recoverWorkspace(
   backendFactory: () => Promise<WorkspaceBackend>
 ): Promise<unknown> {
   const root = await workspaceDirectory(directory);
-  if (await readPublication(root)) return recoverPublication(directory);
+  if (await readPublication(root))
+    return recoverPublication(directory, async (publication, before, after) => {
+      const binding = publication.recovery;
+      if (binding.kind !== 'sync') throw new Error('Unexpected local publication verifier');
+      const journal = await localStore(publication.next.kbId).getLocal<Journal>(binding.journalKey);
+      if (
+        !journal ||
+        journal.state !== 'verified' ||
+        journal.planHash !== binding.planHash ||
+        binding.journalKey !==
+          `workspace-v2:${publication.next.kbId}:${hash(root)}:${binding.planHash}` ||
+        requireFinalProof(journal).proofHash !== binding.proofHash
+      )
+        throw new Error('Sync publication journal binding changed');
+      const final = requireFinalProof(journal);
+      if (hash(publication.baseline) !== final.inputHash)
+        throw new Error('Sync publication input binding changed');
+      const oldNative = new Map<string, WorkspaceRem>(),
+        nextNative = new Map<string, WorkspaceRem>();
+      const paths = [
+        ...new Set([
+          ...Object.keys(publication.baseline),
+          ...publication.writes.map((write) => write.path),
+        ]),
+      ];
+      for (const path of paths.filter((path) => path.startsWith('.remnote/records/'))) {
+        for (const [reader, target] of [
+          [before, oldNative],
+          [after, nextNative],
+        ] as const) {
+          const bytes = reader(path);
+          if (bytes === null) continue;
+          const rem = JSON.parse(bytes) as WorkspaceRem;
+          if (recordPath(rem.id) !== path || target.has(rem.id))
+            throw new Error('Invalid staged native identity');
+          target.set(rem.id, rem);
+        }
+      }
+      if (
+        publishedBaselineHash(journal, nextNative) !== final.publishedBaselineHash ||
+        hash([...nextNative.keys()].sort()) !== hash(Object.keys(publication.next.entries).sort())
+      )
+        throw new Error('Projected publication baseline changed');
+      for (const [id, rem] of nextNative) {
+        const entry = publication.next.entries[id]!;
+        if (entry.nativeHash !== hash(rem) || entry.rawHash !== hash(after(entry.rawPath)))
+          throw new Error('Staged native manifest changed');
+      }
+      for (const id of final.publicationIds)
+        if (
+          remoteVersion(nextNative.get(id)!).contentHash !==
+            final.remoteVersions[id]!.contentHash ||
+          hash(publication.next.remoteVersions?.[id]) !== hash(final.remoteVersions[id])
+        )
+          throw new Error('Staged publication content version proof changed');
+      const backend = await backendFactory();
+      if ((await backend.identity()).kbId !== publication.next.kbId)
+        throw new Error('Recovery KB mismatch');
+      const rems = await readFrozenProof(backend, journal, new Map([...oldNative, ...nextNative]));
+      const projected = publicationRems(
+        { native: oldNative } as LocalContext,
+        rems,
+        final.publicationIds,
+        final.deleted,
+        final.structuralIds
+      );
+      if (
+        publishedBaselineHash(journal, new Map(projected.map((rem) => [rem.id, rem]))) !==
+        final.publishedBaselineHash
+      )
+        throw new Error('Projected publication baseline changed');
+    });
   return withWorkspaceLock(root, async () => {
+    // A writer may have published a ledger after the unlocked routing lookup.
+    // Refuse under this lock; retrying recovery must choose the staged path explicitly.
+    await requireNoPublication(root);
     const state = await authoritativeState(root);
     let repaired = false;
     try {
@@ -1505,6 +1732,7 @@ export async function recoverWorkspace(
       throw new Error(
         'Remote outcome is not verified; preserve the original journal and known IDs, never retry mutations'
       );
+    const final = requireFinalProof(journal);
     const local = await inspectLocal(root);
     if (local.diagnostics.length)
       throw new Error('Local content changed or failed lint; reconcile before recovery');
@@ -1513,43 +1741,24 @@ export async function recoverWorkspace(
       throw new Error('Local workspace changed since verified sync');
     const backend = await backendFactory();
     if ((await backend.identity()).kbId !== state.kbId) throw new Error('Recovery KB mismatch');
-    // Reuse the same full/public read policy as the verified pass, without turning unknown
-    // native flags into assumed values or re-executing any operation from the journal.
-    const localPlan = planLocal(local);
-    localPlan.changes = localPlan.changes.filter((change) =>
-      journal.selection.outgoingKeys.includes(change.key)
+    const rems = await readFrozenProof(backend, journal, local.native);
+    const projected = publicationRems(
+      local,
+      rems,
+      final.publicationIds,
+      final.deleted,
+      final.structuralIds
     );
-    localPlan.selection = journal.selection;
-    const codes = knownPowerupCodes(local.native);
-    for (const change of localPlan.changes)
-      if (change.cardCluster && journal.ids[change.key]) codes[journal.ids[change.key]!] = ['cc'];
-    const created = await readExact(backend, Object.values(journal.ids), {
-      tags: true,
-      powerupCodes: codes,
-    });
-    const rems = await readRemote(local, localPlan, backend, codes, created);
-    for (const change of localPlan.changes)
-      if (change.cardCluster && rems.get(journal.ids[change.key]!)?.powerupPresence?.cc !== true)
-        throw new Error('Created Card Cluster changed after verification');
-    if (rems.size !== Object.keys(journal.final.hashes).length)
-      throw new Error('Remote ID set changed after verified sync');
-    for (const [id, rem] of rems)
-      if (publicationRevisionHash(rem) !== journal.final.hashes[id])
-        throw new Error(`Remote changed after verified sync: ${id}`);
-    if (journal.final.deleted.length && (await backend.existingIds(journal.final.deleted)).length)
-      throw new Error('Verified deletion no longer matches native state');
+    if (
+      publishedBaselineHash(journal, new Map(projected.map((rem) => [rem.id, rem]))) !==
+      final.publishedBaselineHash
+    )
+      throw new Error('Projected publication baseline changed');
     await frozen.check();
     await writeSnapshot(
       root,
       state.kbId,
-      publicationRems(
-        local,
-        rems,
-        journal.selection,
-        journal.ids,
-        journal.final.deleted,
-        journal.final.structuralIds
-      ),
+      projected,
       state,
       { ...state, globalDiscoveryComplete: false },
       frozen,
@@ -1558,8 +1767,83 @@ export async function recoverWorkspace(
       journal.final.deleted,
       local.parsed,
       journal.ids,
-      journal.selection
+      journal.selection,
+      final.publicationIds,
+      {
+        kind: 'sync',
+        journalKey: state.pending.journalKey,
+        planHash: journal.planHash,
+        proofHash: final.proofHash,
+      },
+      final.remoteVersions
     );
     return { status: 'recovered', complete: true, remoteWrites: 0, ids: journal.ids };
   });
+}
+
+/** Recovery reads the frozen exact G, never re-runs discovery or native mutations. */
+async function readFrozenProof(
+  backend: WorkspaceBackend,
+  journal: Journal,
+  baseline: Map<string, WorkspaceRem>
+) {
+  const final = requireFinalProof(journal),
+    ids = Object.keys(final.hashes).sort();
+  const unknown = ids.filter((id) => baseline.get(id)?.unsupported === 'unverified-native-flags');
+  const codes = knownPowerupCodes(baseline);
+  for (const [key, id] of Object.entries(journal.ids))
+    if (journal.steps[`${key}:cardCluster`] === 'verified') codes[id] = ['cc'];
+  const rems = await readExact(
+    backend,
+    ids.filter((id) => !unknown.includes(id)),
+    { tags: true, powerupCodes: codes }
+  );
+  for (let start = 0; start < unknown.length; start += 50) {
+    const batch = unknown.slice(start, start + 50),
+      probes = await backend.readProbe(batch, { powerupCodes: codes });
+    if (
+      probes.length !== batch.length ||
+      new Set(probes.map((probe) => probe.snapshot.id)).size !== batch.length
+    )
+      throw new Error('Remote ID set changed after verified sync');
+    for (const probe of probes) {
+      const id = probe.snapshot.id;
+      if (typeof id !== 'string' || !batch.includes(id))
+        throw new Error('Unexpected recovery identity');
+      for (const code of codes[id] ?? []) {
+        const expected =
+          baseline.get(id)!.powerupPresence?.[code] ??
+          baseline.get(id)!.powerups?.some((powerup) => powerup.code === code);
+        if (
+          typeof probe.powerupPresence?.[code] !== 'boolean' ||
+          probe.powerupPresence[code] !== expected
+        )
+          throw new Error(`Remote changed after verified sync: ${id}/${code}`);
+      }
+      rems.set(id, {
+        ...withPublicSnapshot(baseline.get(id)!, probe.snapshot),
+        tags: probe.tags,
+        ...(probe.powerupPresence ? { powerupPresence: probe.powerupPresence } : {}),
+      });
+    }
+  }
+  for (const [id, rem] of rems) {
+    const current =
+      baseline.has(id) && !unknown.includes(id) ? withNativeSnapshot(baseline.get(id)!, rem) : rem;
+    if (
+      publicationRevisionHash(current) !== final.hashes[id] ||
+      (codes[id] ?? []).some(
+        (code) =>
+          rem.powerupPresence?.[code] !==
+          (baseline.get(id)?.powerupPresence?.[code] ??
+            baseline.get(id)?.powerups?.some((powerup) => powerup.code === code) ??
+            (Object.values(journal.ids).includes(id) && code === 'cc'))
+      )
+    )
+      throw new Error(`Remote changed after verified sync: ${id}`);
+    rems.set(id, current);
+  }
+  if (final.deleted.length && (await backend.existingIds(final.deleted)).length)
+    throw new Error('Verified deletion no longer matches native state');
+  return rems;
 }

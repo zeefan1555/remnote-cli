@@ -12,7 +12,11 @@ import {
   importWorkspace,
   pushWorkspace,
   readWorkspace,
+  saveWorkspace,
 } from '../../../src/business/workspace/workspace.js';
+import { loadState, localStore } from '../../../src/business/workspace/local.js';
+import { readPrivate } from '../../../src/business/workspace/files.js';
+import type { Journal } from '../../../src/business/workspace/resume.js';
 
 function fixture(count = 2) {
   const objects = new Map<string, Record<string, unknown>>();
@@ -732,6 +736,85 @@ describe('entity structure sync gates through the actual SDK backend', () => {
       });
     return { ...f, directory, apply };
   }
+
+  it('bounds default changed publication and later probes without narrowing initial discovery', async () => {
+    temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-publication-N200-')));
+    vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+    const directory = join(temporary, 'vault'),
+      f = fixture(20);
+    f.flags.get('r0')!.isDocument!.mockResolvedValue(true);
+    await importWorkspace(directory, 'kb', async () => f.backend, { rootId: 'r0' });
+    const count = () =>
+      f.findMany.mock.calls.length +
+      f.plugin.rem.findOne.mock.calls.length +
+      f.plugin.kb.getCurrentKnowledgeBaseData.mock.calls.length +
+      [...f.flags.values()].reduce(
+        (sum, methods) =>
+          sum + Object.values(methods).reduce((n, method) => n + method.mock.calls.length, 0),
+        0
+      );
+    const clear = () => {
+      f.findMany.mockClear();
+      f.plugin.rem.findOne.mockClear();
+      f.plugin.kb.getCurrentKnowledgeBaseData.mockClear();
+      for (const methods of f.flags.values())
+        for (const method of Object.values(methods)) method.mockClear();
+    };
+    clear();
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'unchanged',
+    });
+    expect(count()).toBe(42);
+    const read = await readWorkspace(directory, 'r0.md');
+    await saveWorkspace(
+      directory,
+      'r0.md',
+      read.content.replace('r11 ^', 'edited-r11 ^'),
+      read.fileHash
+    );
+    const before = await loadState(directory);
+    const bytes = new Map(
+      await Promise.all(
+        Object.entries(before.entries).map(
+          async ([id, entry]) => [id, await readPrivate(directory, entry.rawPath)] as const
+        )
+      )
+    );
+    const probe = vi.spyOn(f.backend, 'readProbe'),
+      guard = vi.spyOn(f.backend, 'guard'),
+      full = vi.spyOn(f.backend, 'read');
+    clear();
+    const result = (await pushWorkspace(directory, async () => f.backend, { apply: true })) as {
+      planHash: string;
+    };
+    expect(result).toMatchObject({ status: 'verified', updated: ['r11'], remoteWrites: 1 });
+    expect(probe.mock.calls.map(([ids]) => ids.length)).toEqual([20, 2, 2]);
+    expect(count()).toBe(274);
+    expect(guard.mock.calls.map(([ids]) => [...ids].sort())).toEqual(
+      Array.from({ length: 3 }, () => ['r0', 'r11'])
+    );
+    expect(full.mock.calls.map(([ids]) => [...ids].sort())).toEqual([
+      ['r0', 'r11'],
+      ['r0', 'r11'],
+      ['r11'],
+      ['r11'],
+      ['r0', 'r11'],
+    ]);
+    const after = await loadState(directory);
+    const { hash } = await import('../../../src/business/workspace/types.js');
+    const journal = await localStore('kb').getLocal<Journal>(
+      `workspace-v2:kb:${hash(directory)}:${result.planHash}`
+    );
+    expect(journal!.final!.publicationIds).toEqual(['r11']);
+    expect(Object.keys(journal!.final!.hashes).sort()).toEqual(['r0', 'r11']);
+    for (const [id, entry] of Object.entries(after.entries))
+      if (id !== 'r11') {
+        expect(await readPrivate(directory, entry.rawPath)).toBe(bytes.get(id));
+        expect(after.localVersions?.[id]).toEqual(before.localVersions?.[id]);
+        expect(after.remoteVersions?.[id]).toEqual(before.remoteVersions?.[id]);
+      }
+    expect(after.entries.r11!.rawHash).not.toBe(before.entries.r11!.rawHash);
+  });
 
   function noWrites(f: Fixture) {
     for (const methods of f.flags.values())
