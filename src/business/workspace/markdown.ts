@@ -1,5 +1,5 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
-import { toMarkdown } from 'mdast-util-to-markdown';
+import { defaultHandlers, toMarkdown, type Options } from 'mdast-util-to-markdown';
 import type { Root, RootContent, PhrasingContent, List, ListItem, Paragraph, Heading } from 'mdast';
 import {
   idSchema,
@@ -37,11 +37,26 @@ import {
 } from './types.js';
 
 export { idSchema } from './identity.js';
-const MARKDOWN_OPTIONS = {
+declare module 'mdast' {
+  interface ParagraphData {
+    remnoteBlockId?: string;
+  }
+}
+const MARKDOWN_OPTIONS: Options = {
   bullet: '-' as const,
   emphasis: '*' as const,
   strong: '*' as const,
   extensions: [wikiToMarkdown],
+  handlers: {
+    paragraph(node: Paragraph, parent, state, info) {
+      const body = defaultHandlers.paragraph(node, parent, state, info),
+        anchor = node.data?.remnoteBlockId;
+      // The block-ID delimiter is syntax, outside native text and attention escaping.
+      return anchor === undefined
+        ? body
+        : `${body}${body ? ' ' : ''}^${shortBlockSchema.parse(anchor)}`;
+    },
+  },
 };
 const PARSE_OPTIONS = { extensions: [wikiSyntax], mdastExtensions: [wikiFromMarkdown] };
 
@@ -375,12 +390,10 @@ function renderParts(
       });
     // Empty rich-text segments are not visible content before an Obsidian block ID.
     front.children = front.children.filter((node) => node.type !== 'text' || node.value !== '');
-    if (!heading)
-      front.children.push({ type: 'text', value: `${front.children.length ? ' ' : ''}^${anchor}` });
     return [
       {
         type: heading ? 'heading' : 'paragraph',
-        ...(heading ? { depth: 1 as const } : {}),
+        ...(heading ? { depth: 1 as const } : { data: { remnoteBlockId: anchor } }),
         children: front.children,
       } as Heading | Paragraph,
       ...extra,

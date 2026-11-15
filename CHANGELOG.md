@@ -93,6 +93,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Keep Obsidian block-ID delimiters literal after trailing native whitespace,
+  including line endings and rich-text boundaries. Standard paragraph escaping
+  preserves the original whitespace; existing anchors, card types and child order
+  remain unchanged.
 - Correct the README sync summary to describe guarded local save clocks and
   whole-Rem version-time LWW while retaining conflicts for untrusted ordering;
   no runtime behavior changes.

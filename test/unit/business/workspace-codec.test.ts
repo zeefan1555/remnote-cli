@@ -82,6 +82,70 @@ export function codecFixture() {
 }
 
 describe('Obsidian Rem codec', () => {
+  it.each([
+    { label: 'ordinary text', text: ['example'] },
+    { label: 'one trailing space', text: ['example '] },
+    { label: 'multiple trailing spaces', text: ['example  '] },
+    { label: 'trailing tab', text: ['example\t'] },
+    { label: 'mixed trailing whitespace', text: ['example \t '] },
+    { label: 'segmented trailing whitespace', text: ['example', '', ' ', '\t'] },
+    { label: 'whitespace-only text', text: [' \t '] },
+    { label: 'terminal LF', text: ['example\n'] },
+    { label: 'terminal CRLF', text: ['example\r\n'] },
+    { label: 'terminal LF and empty segment', text: ['example\n', ''] },
+    { label: 'space before terminal LF', text: ['example \n'] },
+    { label: 'literal anchor-like text', text: ['example ^literal '] },
+    { label: 'strong trailing space', text: [{ i: 'm', text: 'example ', b: true }] },
+    { label: 'emphasis trailing tab', text: [{ i: 'm', text: 'example\t', l: true }] },
+    { label: 'inline-code trailing space', text: [{ i: 'm', text: 'example ', q: true }] },
+    { label: 'strong trailing LF', text: [{ i: 'm', text: 'example\n', b: true }] },
+    {
+      label: 'rich-text adjacency',
+      text: [
+        'Before ',
+        { i: 'm', text: 'bold', b: true },
+        { i: 'm', text: ' italic', l: true },
+        '\t',
+      ],
+    },
+    { label: 'strong followed by terminal LF', text: [{ i: 'm', text: 'bold', b: true }, '\n'] },
+    { label: 'reference followed by terminal LF', text: [{ i: 'q', _id: 'question' }, '\n'] },
+  ])('keeps block-anchor syntax and exact semantics for $label', ({ text }) => {
+    const byId = new Map([
+      ['root', rem('root', ['Root'], { parent: null, children: ['question', 'ordinary'] })],
+      ['question', rem('question', ['Question'], { type: 1, backText: [], children: ['answer'] })],
+      ['answer', rem('answer', text, { parent: 'question', type: 2, cardItem: true })],
+      ['ordinary', rem('ordinary', text, { children: ['child'] })],
+      ['child', rem('child', ['Child'], { parent: 'ordinary' })],
+    ]);
+    const before = structuredClone(byId),
+      blocks = new Map([...byId.keys()].map((id) => [id, `custom-${id}`])),
+      source = renderDocument('root', 'Root.md', byId, new Map([['root', 'Root.md']]), { blocks }),
+      parsed = parseDocument('Root.md', source);
+    expect(parsed.diagnostics).toEqual([]);
+    expect(byId).toEqual(before);
+    expect(parsed.document.nodes.map(({ key }) => key)).toEqual([...byId.keys()]);
+    for (const node of parsed.document.nodes) {
+      const native = byId.get(node.key)!;
+      expect(node.blockId).toBe(blocks.get(node.key));
+      expect(node.parent).toBe(native.parent);
+      expect(node.children).toEqual(native.children);
+      expect(normalizeRichText(node.text)).toEqual(normalizeRichText(native.text));
+      expect(normalizeRichText(node.backText)).toEqual(normalizeRichText(native.backText ?? []));
+      expect(node.kind).toBe(node.key === 'question' ? 'multiline' : 'text');
+      const binding = parsed.document.metadata?.rems[node.key];
+      if (!binding || binding.id === null) throw new Error('Missing native binding');
+      expect(binding.id).toBe(native.id);
+      expect(binding.native).toMatchObject({
+        type: native.type,
+        isCardItem: native.cardItem,
+      });
+    }
+    // The delimiter is Markdown syntax: an entity decoding to a space is not sufficient.
+    expect(source).toContain(' ^custom-answer\n');
+    expect(source).toContain(' ^custom-ordinary\n');
+  });
+
   it('retains the same native facts and opaque/rich-text outline without a YAML roundtrip', () => {
     const byId = codecFixture();
     const paths = new Map([['root', 'Note.md']]);

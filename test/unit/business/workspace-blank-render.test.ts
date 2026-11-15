@@ -135,8 +135,8 @@ describe('blank native Rem rendering', () => {
 });
 
 /** A sealed synthetic old-renderer snapshot. No real vault or backend is accessed. */
-async function sealedHuman() {
-  const native = graph();
+async function sealedHuman(text?: unknown) {
+  const native = graph(text);
   const originals = new Map([[originalPath('rems', 'blank'), '{ "original": "untouched" }\n']]);
   const state = await writeSnapshot(
     directory,
@@ -155,6 +155,7 @@ async function sealedHuman() {
     source = source.replaceAll(old, entry.blockId);
   }
   source = source.replace(/(^\s*- )(?:&#x20;)?\^(custom-(?:blank|nested))$/gm, '$1&#x20;^$2');
+  if (text !== undefined) source = source.replace(' ^custom-blank\n', '&#x20;^custom-blank\n');
   const attributes = { title: 'My title', aliases: ['An alias'], tags: ['reading'], rems: {} };
   const frontmatter = parseFrontmatter(path, source);
   source = renderFrontmatter(attributes) + `<!-- remnote:custom-root -->\n\n` + frontmatter.body;
@@ -182,6 +183,29 @@ async function sealedHuman() {
 }
 
 describe('offline canonical human format', () => {
+  it.each(['example ', 'example\t', 'example\n', 'example\r\n'])(
+    'repairs an encoded anchor separator without consuming native whitespace in %j',
+    async (text) => {
+      const f = await sealedHuman([text]);
+      expect(await formatWorkspace(directory)).toMatchObject({
+        status: 'formatted',
+        remoteWrites: 0,
+      });
+      const source = await fileOps.readPrivate(directory, f.path),
+        local = await inspectLocal(directory);
+      expect(source).toContain(' ^custom-blank\n');
+      expect(local.diagnostics).toEqual([]);
+      expect(local.dirty).toEqual([]);
+      expect(semantics(local.parsed.get(f.path)!)).toEqual(semantics(f.local.parsed.get(f.path)!));
+      expect(local.parsed.get(f.path)!.nodes.find(({ key }) => key === 'blank')!.text).toEqual([
+        text,
+      ]);
+      expect(local.state.entries).toEqual(f.state.entries);
+      expect(local.state.localVersions).toEqual(f.state.localVersions);
+      expect(local.state.remoteVersions).toEqual(f.state.remoteVersions);
+    }
+  );
+
   it('rerenders a clean sealed human vault, preserving attributes, anchors, records, originals and clocks', async () => {
     const f = await sealedHuman();
     const raw = new Map(
