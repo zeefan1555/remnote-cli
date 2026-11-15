@@ -5,6 +5,8 @@ import {
   withWorkspaceLock,
   workspaceDirectory,
   writePrivate,
+  writePrivateOnce,
+  assertFileSize,
 } from './files.js';
 import {
   inspectLocal,
@@ -25,9 +27,16 @@ import {
   type WorkspaceRem,
   type WorkspaceState,
   type SyncPlan,
+  type ContentVersion,
 } from './types.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
-import { publicationRevisionHash, revisionHash, withNativeSnapshot } from './snapshots.js';
+import {
+  contentProjection,
+  publicationRevisionHash,
+  revisionHash,
+  withNativeSnapshot,
+} from './snapshots.js';
+import { nodeContent } from './versions.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
@@ -35,6 +44,7 @@ import {
   readPublication,
   requireNoPublication,
   recoverWorkspace as recoverPublication,
+  stageSnapshot,
 } from './publication.js';
 
 interface Journal {
@@ -45,6 +55,144 @@ interface Journal {
   steps: Record<string, 'started' | 'verified' | 'unknown'>;
   ids: Record<string, string>;
   final?: { hashes: Record<string, string>; files: Record<string, string>; deleted: string[] };
+}
+
+async function requirePreviewOnly(state: WorkspaceState): Promise<void> {
+  if (!state.pending) return;
+  const old = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
+  if (
+    !old ||
+    old.version !== 1 ||
+    old.planHash !== state.pending.planHash ||
+    old.state !== 'preview' ||
+    Object.keys(old.steps).length
+  )
+    throw new Error(
+      'Prior write outcome requires exact-ID reconciliation; never change its key or auto-replay it'
+    );
+}
+
+/** Return source and its guard from the same read, without opening a native connection. */
+export async function readWorkspace(directory: string, path: string) {
+  const root = await workspaceDirectory(directory);
+  return withWorkspaceLock(root, async () => {
+    await requireNoPublication(root);
+    const local = await inspectLocal(root);
+    if (!local.parsed.has(path)) throw new Error('Read requires an exact tracked Markdown path');
+    const content = await readPrivate(root, path);
+    return {
+      status: 'read',
+      kbId: local.state.kbId,
+      path,
+      content,
+      fileHash: hash(content),
+      remoteWrites: 0,
+    };
+  });
+}
+
+/** One offline publication binds the edited source and per-Rem clocks; the native baseline stays put. */
+export async function saveWorkspace(
+  directory: string,
+  path: string,
+  content: string,
+  expectedFileHash: string
+) {
+  const root = await workspaceDirectory(directory);
+  return withWorkspaceLock(root, async () => {
+    await requireNoPublication(root);
+    const frozen = await FrozenFiles.capture(root),
+      before = await inspectLocal(root);
+    await requirePreviewOnly(before.state);
+    const original = before.parsed.get(path);
+    if (
+      !original ||
+      !/^[a-f0-9]{64}$/.test(expectedFileHash) ||
+      original.fileHash !== expectedFileHash
+    )
+      throw new Error(
+        'Save requires the current fileHash from sync read for this exact Markdown path'
+      );
+    assertFileSize(path, content);
+    const after = await inspectLocal(root, before.state, new Map([[path, content]]));
+    planLocal(after);
+    await frozen.check();
+    if (hash(content) === expectedFileHash)
+      return {
+        status: 'unchanged',
+        path,
+        fileHash: expectedFileHash,
+        changed: [],
+        remoteWrites: 0,
+      };
+    const localVersions: Record<string, ContentVersion> = { ...before.state.localVersions };
+    // A previously stamped Rem edited outside this entrypoint loses that stamp, not its content.
+    for (const document of after.parsed.values())
+      for (const node of document.nodes) {
+        if (node.kind === 'mount') continue;
+        if (
+          localVersions[node.key]?.contentHash !==
+          hash(nodeContent(node, before.native.get(node.key)))
+        )
+          delete localVersions[node.key];
+      }
+    const previousNodes = new Map(original.nodes.map((node) => [node.key, node]));
+    const changed: string[] = [],
+      timestamp = Date.now();
+    for (const node of after.parsed.get(path)!.nodes) {
+      if (node.kind === 'mount' || node.kind === 'opaque') continue;
+      const previous = previousNodes.get(node.key),
+        base = before.native.get(node.key);
+      const contentHash = hash(nodeContent(node, base));
+      if (previous && hash(nodeContent(previous, base)) === contentHash) continue;
+      const priorTime = before.state.localVersions?.[node.key]?.timestamp;
+      localVersions[node.key] = {
+        contentHash,
+        source: 'cli-save',
+        timestamp:
+          priorTime !== null && priorTime !== undefined && timestamp < priorTime ? null : timestamp,
+      };
+      changed.push(node.key);
+    }
+    const next = { ...before.state, localVersions };
+    delete next.pending;
+    await stageSnapshot(root, next, before.state, new Map([[path, content]]), frozen);
+    return {
+      status: 'saved',
+      path,
+      fileHash: hash(content),
+      changed: changed.sort(),
+      remoteWrites: 0,
+    };
+  });
+}
+
+async function archiveResolutions(
+  root: string,
+  context: LocalContext,
+  plan: SyncPlan,
+  remote: Map<string, WorkspaceRem>
+) {
+  const histories = [];
+  for (const decision of plan.resolutions) {
+    const node = context.parsed.get(decision.path)!.nodes.find((node) => node.key === decision.id)!;
+    const local = nodeContent(node, context.native.get(decision.id)),
+      native = contentProjection(remote.get(decision.id)!);
+    if (hash(local) !== decision.local.contentHash || hash(native) !== decision.remote.contentHash)
+      throw new Error('LWW history does not match its frozen content versions');
+    const record = {
+      version: 1,
+      kbId: plan.kbId,
+      directoryHash: hash(root),
+      decision,
+      local,
+      remote: native,
+    };
+    const historyPath = `.sync/conflicts/${hash({ kbId: plan.kbId, directoryHash: hash(root), decision })}/${decision.id}.json`;
+    await writePrivateOnce(root, historyPath, JSON.stringify(record, null, 2) + '\n');
+    histories.push({ ...decision, historyPath, historyHash: hash(record) });
+  }
+  return histories;
 }
 
 export async function importWorkspace(
@@ -242,7 +390,11 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
       if (!before || hash(before.text) !== hash(node.text)) fields.text = node.text;
       if (node.kind === 'basic' && (!before || hash(before.backText) !== hash(node.backText)))
         fields.backText = node.backText;
-      if (!Object.keys(fields).length) continue;
+      if (
+        !Object.keys(fields).length &&
+        context.state.localVersions?.[node.key]?.contentHash !== hash(nodeContent(node, native))
+      )
+        continue;
       plan.changes.push({
         key: node.key,
         path,
@@ -367,19 +519,7 @@ export async function pushWorkspace(
       localPlan = planLocal(context, options);
     const frozen = await FrozenFiles.capture(root);
     const store = localStore(state.kbId);
-    if (state.pending) {
-      const old = await store.getLocal<Journal>(state.pending.journalKey);
-      if (
-        !old ||
-        old.version !== 1 ||
-        old.planHash !== state.pending.planHash ||
-        old.state !== 'preview' ||
-        Object.keys(old.steps).length
-      )
-        throw new Error(
-          'Prior write outcome requires exact-ID reconciliation; never change its key or auto-replay it'
-        );
-    }
+    await requirePreviewOnly(state);
     if (options.apply && (!state.pending || options.planHash !== state.pending.planHash))
       throw new Error(
         'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
@@ -389,7 +529,7 @@ export async function pushWorkspace(
     if (identity.kbId !== state.kbId)
       throw new Error('Connected KB does not match workspace binding');
     const remote = await readRemote(context, localPlan, backend),
-      { plan, metadataChanged } = reconcile(context, localPlan, remote),
+      { plan, metadataChanged, remoteVersions } = reconcile(context, localPlan, remote),
       planHash = hash(plan);
     const coverage = {
       discoveryScope: 'bound-ids',
@@ -401,10 +541,13 @@ export async function pushWorkspace(
         'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
       );
     await frozen.check();
+    const stateBeforeObservations = hash(state);
+    state.remoteVersions = remoteVersions;
     if (state.pending && state.pending.planHash !== planHash) {
       delete state.pending;
-      await saveState(root, state);
     }
+    if (hash(state) !== stateBeforeObservations) await saveState(root, state);
+    const resolutions = await archiveResolutions(root, context, plan, remote);
     if (plan.conflicts.length) {
       const conflicts = [];
       for (const conflict of plan.conflicts) {
@@ -414,13 +557,23 @@ export async function pushWorkspace(
           : null;
         if (remoteSnapshot)
           await writePrivate(root, remoteSnapshot, JSON.stringify(rem, null, 2) + '\n');
-        conflicts.push({ ...conflict, remoteSnapshot });
+        const node = context.parsed
+          .get(conflict.path)!
+          .nodes.find((node) => node.key === conflict.id)!;
+        const localSnapshot = `.sync/conflicts/${planHash}/${conflict.id}-${conflict.localHash}.local.json`;
+        await writePrivateOnce(
+          root,
+          localSnapshot,
+          JSON.stringify(nodeContent(node, context.native.get(conflict.id)), null, 2) + '\n'
+        );
+        conflicts.push({ ...conflict, localSnapshot, remoteSnapshot });
       }
       return {
         status: 'conflict',
         complete: false,
         planHash,
         conflicts,
+        resolutions,
         remoteWrites: 0,
         ...coverage,
       };
@@ -467,6 +620,7 @@ export async function pushWorkspace(
         converged: plan.converged,
         outgoing: plan.changes.map((change) => change.key),
         metadataRefresh: metadataChanged,
+        resolutions,
         deletion: plan.deletion,
         atomic: false,
         remoteWrites: 0,
@@ -669,6 +823,7 @@ export async function pushWorkspace(
         converged: plan.converged,
         outgoing: plan.changes.map((change) => journal.ids[change.key] ?? change.key),
         metadataRefresh: metadataChanged,
+        resolutions,
         deleted: plan.deletion?.ids ?? [],
         nativeCards: newCards,
         cardsPreserved: true,

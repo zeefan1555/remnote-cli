@@ -50,7 +50,7 @@ export function withNativeSnapshot(before: WorkspaceRem, snapshot: WorkspaceRem)
   };
 }
 
-export function contentProjection(rem: WorkspaceRem): unknown {
+export function contentProjection(rem: Pick<WorkspaceRem, 'text' | 'backText'>) {
   return { text: normalizeRichText(rem.text), backText: normalizeRichText(rem.backText) };
 }
 

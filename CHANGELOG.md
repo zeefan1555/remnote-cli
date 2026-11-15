@@ -14,10 +14,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   and the shared Markdown/native-YAML files, using a common baseline and per-Rem
   semantic three-way merge. Preview/apply reports incoming, outgoing, converged
   and metadata-only changes; native acceptance remains separate from offline tests.
-- Automatic newer-wins would require trustworthy comparable version evidence;
-  the current candidate has no trustworthy local per-Rem edit clock and
-  preserves divergent edits as `untrusted-edit-order`. No whole-file mtime LWW.
-  Edits to different Rems merge; divergent front/back edits within one Rem conflict.
+- Offline `sync read|save` binds guarded local edits to per-Rem content hashes and
+  save timestamps without advancing the native baseline. Staged recovery retains
+  the original clock; no-op/direct-file edits cannot be retroactively stamped.
+- Whole-Rem `version-time-lww` selects the later comparable, hash-bound local/native
+  version after archiving both versions immutably. Same-content metadata/review
+  drift does not retime observed content; explicit/observed reverts remain new
+  versions until publication. Missing/equal/invalid clocks preserve both versions
+  as `untrusted-edit-order`. Native `updatedAt` is not a text-only chronology, and
+  file mtime is never an ordering signal. Edits to different Rems merge.
   Review history/scheduling remain RemNote-owned, and local snapshots never write
   them back. Absence on either side never implies automatic deletion.
 - Stable Obsidian block-ID to Rem-ID mapping and full-path wikilinks, preserving

@@ -249,7 +249,33 @@ function assertPlanningConflict(value, id) {
     conflict.remoteSnapshot,
     /^\.sync\/conflicts\/[a-f0-9]{64}\/[A-Za-z0-9_-]+-[a-f0-9]{64}\.json$/
   );
+  assert.match(
+    conflict.localSnapshot,
+    /^\.sync\/conflicts\/[a-f0-9]{64}\/[A-Za-z0-9_-]+-[a-f0-9]{64}\.local\.json$/
+  );
   return conflict;
+}
+
+function assertVersionResolution(value, id, winner) {
+  assertCoverage(value);
+  assert.equal(value.resolutions.length, 1);
+  const decision = value.resolutions[0];
+  assert.equal(decision.id, id);
+  assert.equal(decision.policy, 'version-time-lww');
+  assert.equal(decision.winner, winner);
+  assert.equal(decision.local.source, 'cli-save');
+  assert.equal(decision.remote.source, 'rem-updated-at');
+  for (const version of [decision.local, decision.remote]) {
+    assert.match(version.contentHash, /^[a-f0-9]{64}$/);
+    assert.ok(Number.isSafeInteger(version.timestamp) && version.timestamp > 0);
+  }
+  assert.notEqual(decision.local.contentHash, decision.remote.contentHash);
+  assert.ok(
+    decision[winner].timestamp > decision[winner === 'local' ? 'remote' : 'local'].timestamp
+  );
+  assert.match(decision.historyPath, /^\.sync\/conflicts\/[a-f0-9]{64}\/[A-Za-z0-9_-]+\.json$/);
+  assert.match(decision.historyHash, /^[a-f0-9]{64}$/);
+  return decision;
 }
 
 function cardReadback(value, requestedIds) {
@@ -408,7 +434,27 @@ async function main(argv) {
     return readFile(markdownPath, 'utf8');
   }
   const writeMarkdown = (value) => writeFile(markdownPath, value, { mode: 0o600 });
-  async function apply(label, expected, extra = []) {
+  async function saveMarkdown(label, transform) {
+    await markdown();
+    const path = relative(workspace, markdownPath);
+    const source = await sync(`${label}-read`, 'read', [path]);
+    assert.equal(source.status, 'read');
+    assert.equal(source.remoteWrites, 0);
+    assert.equal(source.content, await markdown());
+    const contentFile = join(directory, `${label}.md`);
+    await writeFile(contentFile, transform(source.content), { mode: 0o600 });
+    const result = await sync(`${label}-save`, 'save', [
+      path,
+      '--content-file',
+      contentFile,
+      '--expected-file-hash',
+      source.fileHash,
+    ]);
+    assert.equal(result.status, 'saved');
+    assert.equal(result.remoteWrites, 0);
+    return result;
+  }
+  async function apply(label, expected, extra = [], expectedResolution) {
     const preview = await sync(`${label}-preview`, '', extra);
     assert.equal(preview.status, 'preview');
     assert.equal(preview.complete, true);
@@ -416,6 +462,21 @@ async function main(argv) {
     assertDirections(preview, expected);
     assert.equal(preview.creates, expected.outgoing.filter((id) => id.startsWith('new:')).length);
     assert.equal(preview.updates, expected.outgoing.filter((id) => !id.startsWith('new:')).length);
+    if (expectedResolution)
+      assertVersionResolution(preview, expectedResolution.id, expectedResolution.winner);
+    else assert.deepEqual(preview.resolutions, []);
+    const histories = new Map();
+    for (const resolution of preview.resolutions) {
+      const { hash } = await import('../dist/business/workspace/types.js');
+      const { historyPath, historyHash, ...decision } = resolution;
+      const source = await readFile(join(workspace, historyPath), 'utf8');
+      const record = JSON.parse(source);
+      assert.deepEqual(record.decision, decision);
+      assert.equal(hash(record), historyHash);
+      assert.equal(hash(record.local), decision.local.contentHash);
+      assert.equal(hash(record.remote), decision.remote.contentHash);
+      histories.set(historyPath, source);
+    }
     if (extra.length)
       assert.deepEqual(
         [...preview.deletion.ids].sort(),
@@ -437,6 +498,13 @@ async function main(argv) {
       expected.outgoing.filter((id) => !id.startsWith('new:')).sort()
     );
     assert.equal(applied.planHash, preview.planHash);
+    assert.deepEqual(applied.resolutions, preview.resolutions);
+    for (const [path, content] of histories)
+      assert.equal(
+        await readFile(join(workspace, path), 'utf8'),
+        content,
+        'Winner history changed'
+      );
     return applied;
   }
 
@@ -507,7 +575,11 @@ async function main(argv) {
     const blocks = { question: `local-${randomUUID()}`, answer: `local-${randomUUID()}` };
     receipt.blocks = blocks;
     await save('receipt.json', receipt);
-    await writeMarkdown(appendMultiline(initial, blocks));
+    const savedCard = await saveMarkdown('create-local-card', (source) => {
+      assert.equal(source, initial);
+      return appendMultiline(source, blocks);
+    });
+    assert.deepEqual(savedCard.changed, ['new:answer', 'new:question']);
     assert.equal((await sync('create-lint', 'lint')).ok, true);
     const delta = await sync('create-diff', 'diff');
     assert.equal(delta.changes.length, 2);
@@ -518,6 +590,11 @@ async function main(argv) {
       converged: [],
     });
     assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8')).localVersions,
+      {},
+      'Assigned native IDs retained temporary local clocks'
+    );
     const ids = [receipt.testIds.root, receipt.testIds.question, receipt.testIds.answer];
     assert.equal(new Set(ids).size, 3);
     const before = await inspect('card-readback', ids);
@@ -637,19 +714,21 @@ async function main(argv) {
     );
     await remoteText('conflict-remote-edit', question.id, remoteConflictText);
     const conflictSource = await markdown();
-    const conflictBaseline = await readFile(join(workspace, '.sync/state.json'), 'utf8');
+    const conflictBaseline = JSON.parse(
+      await readFile(join(workspace, '.sync/state.json'), 'utf8')
+    );
     const conflictBefore = await inspect('conflict-native-before', ids);
     const conflictReceipt = await sync('same-rem-conflict', '', [], 1);
     const conflict = assertPlanningConflict(conflictReceipt, question.id);
     assert.equal(await markdown(), conflictSource, 'Conflict overwrote the local version');
-    assert.equal(
-      await readFile(join(workspace, '.sync/state.json'), 'utf8'),
-      conflictBaseline,
-      'Conflict advanced the common baseline'
-    );
+    const afterConflict = JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8'));
+    for (const key of ['entries', 'documents', 'snapshotAt', 'localVersions'])
+      assert.deepEqual(afterConflict[key], conflictBaseline[key], 'Conflict advanced the baseline');
     const remoteCopy = JSON.parse(await readFile(join(workspace, conflict.remoteSnapshot), 'utf8'));
+    const localCopy = JSON.parse(await readFile(join(workspace, conflict.localSnapshot), 'utf8'));
     assert.equal(remoteCopy.id, question.id);
     assert.deepEqual(remoteCopy.text, [remoteConflictText]);
+    assert.deepEqual(localCopy.text, [localConflictText]);
     assert.deepEqual(
       await inspect('conflict-native-after', ids),
       conflictBefore,
@@ -677,6 +756,40 @@ async function main(argv) {
     assert.deepEqual(remById(resolved, question.id).text, [remoteConflictText]);
     assert.deepEqual(cardIdentity(resolved), cardIdentity(before));
     await unchanged('conflict-resolved-noop');
+
+    let commonText = remoteConflictText;
+    for (const winner of ['local', 'remote']) {
+      const localText = `Sync acceptance ${winner}-winner local version`;
+      const remoteValue = `Sync acceptance ${winner}-winner remote version`;
+      const saveLocal = () =>
+        saveMarkdown(`${winner}-winner-local`, (source) =>
+          replaceBodyOnce(source, commonText, localText)
+        );
+      if (winner === 'local') {
+        await remoteText('local-winner-remote-edit', question.id, remoteValue);
+        await saveLocal();
+      } else {
+        await saveLocal();
+        await remoteText('remote-winner-remote-edit', question.id, remoteValue);
+      }
+      await apply(
+        `${winner}-version-wins`,
+        {
+          incoming: winner === 'remote' ? [question.id] : [],
+          outgoing: winner === 'local' ? [question.id] : [],
+          converged: [],
+        },
+        [],
+        { id: question.id, winner }
+      );
+      commonText = winner === 'local' ? localText : remoteValue;
+      const verified = await inspect(`${winner}-winner-readback`, ids);
+      assert.deepEqual(remById(verified, question.id).text, [commonText]);
+      assert.deepEqual(cardIdentity(verified), cardIdentity(before));
+      assert.ok((await markdown()).includes(`${commonText} ^${blocks.question}`));
+      assertPublishedBlocks(await markdown(), receipt.testIds, blocks);
+      await unchanged(`${winner}-winner-noop`);
+    }
 
     const deletion = ['--delete-id', question.id, '--scope-root', receipt.testIds.root];
     await apply('delete-card', { incoming: [], outgoing: [], converged: [] }, deletion);
@@ -959,7 +1072,11 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     'Note.md',
     replaceBodyOnce(base, 'Synthetic title', 'Local edit')
   ).document;
-  const context = { native: new Map([['root', root]]), parsed: new Map([['Note.md', local]]) };
+  const context = {
+    state: {},
+    native: new Map([['root', root]]),
+    parsed: new Map([['Note.md', local]]),
+  };
   const localPlan = {
     version: 1,
     directory: '/synthetic',
@@ -995,12 +1112,58 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     remoteWrites: 0,
     conflicts: conflict.plan.conflicts.map((item) => ({
       ...item,
+      localSnapshot: `.sync/conflicts/${hash(conflict.plan)}/root-${item.localHash}.local.json`,
       remoteSnapshot: `.sync/conflicts/${hash(conflict.plan)}/root-${hash(root)}.json`,
     })),
   };
   assertPlanningConflict(conflictReceipt, 'root');
   assert.throws(() => assertPlanningConflict({ ...conflictReceipt, remoteWrites: 1 }, 'root'));
   assert.throws(() => assertPlanningConflict({ ...conflictReceipt, status: 'unknown' }, 'root'));
+  const timestamp = Date.now();
+  const versioned = {
+    ...context,
+    state: {
+      localVersions: {
+        root: {
+          source: 'cli-save',
+          contentHash: hash({ text: ['Local edit'], backText: null }),
+          timestamp,
+        },
+      },
+    },
+  };
+  for (const winner of ['local', 'remote']) {
+    const resolved = reconcile(
+      versioned,
+      localPlan,
+      new Map([
+        [
+          'root',
+          {
+            ...root,
+            text: ['Remote edit'],
+            public: { updatedAt: timestamp + (winner === 'local' ? -1_000 : 1_000) },
+          },
+        ],
+      ])
+    );
+    assert.deepEqual(resolved.plan.conflicts, []);
+    const resolution = {
+      ...resolved.plan.resolutions[0],
+      historyPath: `.sync/conflicts/${hash(resolved.plan)}/root.json`,
+      historyHash: hash('synthetic-archive'),
+    };
+    assertVersionResolution({ ...coverage, resolutions: [resolution] }, 'root', winner);
+    assert.throws(() =>
+      assertVersionResolution(
+        { ...coverage, resolutions: [{ ...resolution, winner: 'wrong' }] },
+        'root',
+        winner
+      )
+    );
+    assert.equal(resolved.plan.changes.length, winner === 'local' ? 1 : 0);
+    assert.deepEqual(resolved.plan.incoming, winner === 'remote' ? ['root'] : []);
+  }
   assert.deepEqual(
     reconcile(context, localPlan, new Map([['root', { ...root, text: ['Local edit'] }]])).plan
       .converged,
@@ -1021,7 +1184,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     'remote-structure'
   );
   console.log(
-    'Offline driver self-test passed: codec, stable blocks, parent identity, receipt bounds, retained IDs and three-way conflicts; no live calls or filesystem writes.'
+    'Offline driver self-test passed: codec, stable blocks, parent identity, receipt bounds, retained IDs, three-way conflicts and version-time winners; no live calls or filesystem writes.'
   );
 } else {
   await main(argv).catch(() => {

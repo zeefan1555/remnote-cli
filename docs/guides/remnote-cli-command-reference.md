@@ -9,7 +9,7 @@ remnote-cli [global-options] <command> [command-options]
 ```
 
 Live commands require RemNote open with the authenticated RemNote CLI Bridge enabled.
-`sync status`, `sync lint` and `sync diff` operate offline. A live command owns a
+`sync read`, `sync save`, `sync status`, `sync lint` and `sync diff` operate offline. A live command owns a
 short-lived loopback connection; no daemon or MCP endpoint is used.
 Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
 See [configuration](configuration.md) for permissions and private pairing-file handling.
@@ -70,6 +70,8 @@ aliases are removed.
 ```bash
 remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
 remnote-cli --kb-id KB_ID sync import /PRIVATE/library --export /PRIVATE/export.rem
+remnote-cli sync read /PRIVATE/vault 'Folder/Note.md'
+remnote-cli sync save /PRIVATE/vault 'Folder/Note.md' --content-file /PRIVATE/edited.md --expected-file-hash READ_FILE_HASH
 remnote-cli sync status /PRIVATE/vault
 remnote-cli sync lint /PRIVATE/vault
 remnote-cli sync diff /PRIVATE/vault
@@ -135,6 +137,30 @@ of every payload, the state mirror and the complete publication ledger before
 writing any staging content. Staged/displaced files inherit their destination's
 bound; reading, freezing, integrity checks and recovery enforce the same limits.
 Oversized metadata is rejected without truncation or relaxing individual-file limits.
+
+### Guarded local editing
+
+Agents use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
+and its `fileHash` from the same read, then edit that source and call `sync save`
+with the returned hash and complete `--content-file` (or `-` for stdin). `PATH` is
+the exact workspace-relative Markdown path, not a native Rem ID. Both commands
+are offline and report `remoteWrites: 0`; read returns `status: "read"`, and save
+returns `status: "saved"` or `"unchanged"`, the resulting `fileHash` and changed
+Rem keys. Copy the returned hash verbatim rather than substituting a file mtime.
+
+Save validates the entire workspace and rejects a stale hash before publication.
+Only Rems whose semantic front/back content changed receive a millisecond local
+version timestamp bound to their content hash. New `new:key` Rems use the same
+path and lose those temporary clocks after verified native-ID assignment. No-op
+or formatting-only saves do not retime content. The source and clock metadata use
+the existing staged publication/recovery mechanism, without advancing the native
+baseline; `sync recover` finishes an interrupted save with its original timestamp.
+
+Obsidian or direct file edits remain valid one-sided sync input, but do not gain
+a trusted per-Rem clock. Saving an already-edited file unchanged cannot add one
+retroactively. Use guarded save for Agent edits when automatic same-Rem resolution
+is needed. Uncertain mutation journals still block save and sync; a prior preview
+with no write steps can be replaced by a fresh preview.
 
 ### Markdown, native YAML and stable identities
 
@@ -287,18 +313,29 @@ live/UI verification are separate coverage claims.
 Compare semantic content for each stable Rem across baseline, local and remote.
 One-sided edits propagate to the other endpoint; identical results converge;
 edits to different Rems merge, including a local question edit and a remote
-answer edit in the same file. The merge unit is a whole Rem: a local front edit
-and a remote back edit on one basic card currently conflict rather than merge
-field-by-field. For two edits to the same Rem, select
-the newer result only with trustworthy, comparable content-version evidence.
-Unknown, missing or equal times preserve both versions and report a conflict.
-Markdown file mtime, download/capture time and card-review time are not a reliable
-per-Rem content version. Do not apply whole-file last-write-wins.
+answer edit in the same file. The merge unit is a whole Rem: for a basic card,
+the selected version supplies both front and back, never a field-wise hybrid.
+For divergent versions, `version-time-lww` compares the local `cli-save` timestamp
+with the observed native `rem-updated-at` timestamp only when each is bound to the
+matching semantic content hash. The greater timestamp wins. Missing, equal,
+invalid, decreasing or more-than-five-minutes-future timestamps preserve both
+versions as `untrusted-edit-order`. Markdown file mtime and sync capture time
+are not version evidence.
 
-The current implementation has no trustworthy local per-Rem edit clock. It
-therefore reports divergent edits to the same content as `untrusted-edit-order`;
-it does not implement automatic timestamp-based resolution. Remote `updatedAt`
-is retained as evidence, not compared to a local file mtime.
+Remote `updatedAt` is epoch milliseconds and describes a native Rem version,
+not a text-only edit log. Once observed, unchanged content retains its version
+timestamp across later metadata/review changes. A controlled local or observed
+remote A→B→A revert is a new version; A→A is not. Publication consumes those
+change markers, so a resolved revert does not trigger repeated writes. This is
+version-time ordering, not guaranteed physical edit chronology across devices:
+an unobserved review or metadata update can affect the native timestamp before
+the changed content is first observed.
+
+Before any automatic winner overwrites either endpoint, the preview stores an
+immutable `.sync/conflicts/` record containing both semantic versions, their
+hashes/timestamps and the decision. Archive failure or mismatched existing history
+blocks writes. The preview's `resolutions` include exact `historyPath` and
+`historyHash`; apply verifies and reuses the same evidence.
 
 The target sync plan can contain incoming and outgoing changes together. Recheck
 both endpoints before apply; publish only the planned semantic result and advance
@@ -337,18 +374,20 @@ Current receipt fields (arrays contain exact Rem IDs unless noted):
 
 | Status | Fields and meaning |
 | --- | --- |
-| `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `incoming`, `converged`, `outgoing`, `metadataRefresh`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
-| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
+| `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `incoming`, `converged`, `outgoing`, `metadataRefresh`, `resolutions`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
+| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `resolutions`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
 | `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
-| planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, `remoteWrites: 0`; no apply is authorized by this receipt |
+| planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `resolutions`, `remoteWrites: 0`; no apply is authorized by this receipt |
 
 Each of these carries `remoteChecked: true`, `discoveryScope: "bound-ids"`,
 `globalDiscoveryComplete: false`. `diff` is local-only and reports
 `remoteChecked: false`; it cannot establish remote freshness or convergence.
 Each planning conflict records `id`, `path`, `reason` (`untrusted-edit-order`,
 `remote-structure` or `remote-missing`), `baseHash`, `localHash`, nullable
-`remoteHash` / `remoteUpdatedAt`, and a private `remoteSnapshot` path or `null`.
-The local version remains in place. A mutation-stage failure may also use status
+`remoteHash` / `remoteUpdatedAt`, a private `localSnapshot` path and a
+`remoteSnapshot` path or `null`. The local version remains in place; opaque local
+snapshots preserve the real baseline content rather than their display placeholder.
+A mutation-stage failure may also use status
 `conflict`, but carries `journalKey`, known `ids` and `steps` instead of the
 planning `remoteWrites: 0` guarantee: inspect that evidence before any next action.
 
@@ -386,8 +425,9 @@ original operation had zero remote writes.
 
 Development acceptance needs a frozen candidate, exclusive live ownership and
 the guarded integration wrapper. The draft `scripts/sync-agent-acceptance.mjs`
-uses a new synthetic subtree with native-YAML fixtures, stable-block checks,
-incoming-only, mixed-direction, same-result convergence and same-Rem conflict
+uses a new synthetic subtree with guarded local new-card saves, native-YAML fixtures,
+stable-block checks, incoming-only, mixed-direction, same-result convergence,
+both version-time winners with pre-apply archives and same-Rem conflict
 cases. The deliberate conflict must prove zero remote writes and preserve both
 versions before resolving only local synthetic text to the observed remote value.
 Cleanup requires fresh exact root text/parent/children plus a recorded intent.

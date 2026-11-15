@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import * as sync from '../../../src/business/workspace/workspace.js';
+import * as contentInput from '../../../src/remnote-cli/commands/content-input.js';
 
 vi.mock('../../../src/business/workspace/workspace.js', () => ({
   importWorkspace: vi.fn(async () => ({ complete: true })),
@@ -10,12 +11,56 @@ vi.mock('../../../src/business/workspace/workspace.js', () => ({
   diffWorkspace: vi.fn(async () => ({ changes: [] })),
   pushWorkspace: vi.fn(async () => ({ status: 'unchanged' })),
   recoverWorkspace: vi.fn(async () => ({ complete: true, remoteWrites: 0 })),
+  readWorkspace: vi.fn(async () => ({
+    content: 'source',
+    fileHash: 'a'.repeat(64),
+    remoteWrites: 0,
+  })),
+  saveWorkspace: vi.fn(async () => ({ status: 'saved', remoteWrites: 0 })),
 }));
 afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 describe('sync command interface', () => {
+  it('routes guarded local read/save without opening a native connection', async () => {
+    const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(contentInput, 'readContentFileOrStdin').mockResolvedValue('edited source');
+    await createProgram('test').parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'read',
+      '/private/tmp/sync',
+      'Note.md',
+    ]);
+    expect(sync.readWorkspace).toHaveBeenCalledWith('/private/tmp/sync', 'Note.md');
+    await createProgram('test').parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'save',
+      '/private/tmp/sync',
+      'Note.md',
+      '--content-file',
+      'edited.md',
+      '--expected-file-hash',
+      'a'.repeat(64),
+    ]);
+    expect(sync.saveWorkspace).toHaveBeenCalledWith(
+      '/private/tmp/sync',
+      'Note.md',
+      'edited source',
+      'a'.repeat(64)
+    );
+    expect(contentInput.readContentFileOrStdin).toHaveBeenCalledWith(
+      'edited.md',
+      process.stdin,
+      4 * 1024 * 1024
+    );
+    expect(backend).not.toHaveBeenCalled();
+  });
   it('exposes only sync, with no abandoned workspace alias', () => {
     const names = createProgram('test').commands.map((command) => command.name());
     expect(names).toContain('sync');
@@ -83,6 +128,8 @@ describe('sync command interface', () => {
     expect(backend).not.toHaveBeenCalled();
     const command = createProgram('test').commands.find((item) => item.name() === 'sync')!;
     expect(command.commands.map((item) => item.name())).toEqual([
+      'read',
+      'save',
       'import',
       'status',
       'lint',

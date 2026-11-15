@@ -6,7 +6,11 @@ import {
   pushWorkspace,
   statusWorkspace,
   recoverWorkspace,
+  readWorkspace,
+  saveWorkspace,
 } from '../../business/workspace/workspace.js';
+import { fileByteLimit } from '../../business/workspace/files.js';
+import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatError, formatResult } from '../output/formatter.js';
 
@@ -19,6 +23,8 @@ interface SyncOptions {
   export?: string;
   snapshot?: string;
   editableRootId?: string;
+  contentFile?: string;
+  expectedFileHash?: string;
 }
 
 function deletionOptions(command: Command): Command {
@@ -37,15 +43,24 @@ export function registerSyncCommands(program: Command): void {
   );
 
   async function execute(
-    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover',
+    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover' | 'read' | 'save',
     directory: string,
-    options: SyncOptions
+    options: SyncOptions,
+    path?: string
   ): Promise<void> {
     const format = program.opts().text ? 'text' : 'json';
     const client = createCommandClient(program);
     try {
       let result: unknown;
-      if (name === 'import') {
+      if (name === 'read') result = await readWorkspace(directory, path!);
+      else if (name === 'save')
+        result = await saveWorkspace(
+          directory,
+          path!,
+          await readContentFileOrStdin(options.contentFile!, process.stdin, fileByteLimit(path!)),
+          options.expectedFileHash!
+        );
+      else if (name === 'import') {
         const kbId = program.opts().kbId;
         if (!kbId) throw new Error('sync import requires explicit --kb-id');
         result = await importWorkspace(directory, kbId, () => client.workspaceBackend(), options);
@@ -87,6 +102,18 @@ export function registerSyncCommands(program: Command): void {
     }
     await execute('sync', directory, options);
   });
+  workspace
+    .command('read <directory> <path>')
+    .description('Read local Markdown and its exact fileHash offline')
+    .action(async (directory: string, path: string) => execute('read', directory, {}, path));
+  workspace
+    .command('save <directory> <path>')
+    .description('Save local Markdown offline and bind changed Rem content to this save time')
+    .requiredOption('--content-file <path|->', 'Complete edited Markdown file, or - for stdin')
+    .requiredOption('--expected-file-hash <sha256>', 'Exact fileHash returned by sync read')
+    .action(async (directory: string, path: string, options: SyncOptions) =>
+      execute('save', directory, options, path)
+    );
   for (const name of ['import', 'status', 'lint', 'diff', 'recover'] as const) {
     const command = workspace.command(name + ' <directory>').description(
       {

@@ -14,7 +14,9 @@ import {
   type WorkspaceBackend,
   type WorkspacePlan,
   type WorkspaceRem,
+  type ContentVersion,
 } from './types.js';
+import { remoteVersion, usableVersion } from './versions.js';
 
 /** Exact-ID public reads are bounded; this does not claim to discover new roots in the KB. */
 export async function readRemote(
@@ -79,7 +81,7 @@ export function reconcile(
   context: LocalContext,
   local: WorkspacePlan,
   remote: Map<string, WorkspaceRem>
-): { plan: SyncPlan; metadataChanged: string[] } {
+): { plan: SyncPlan; metadataChanged: string[]; remoteVersions: Record<string, ContentVersion> } {
   const plan: SyncPlan = {
     ...local,
     changes: [...local.changes],
@@ -87,7 +89,9 @@ export function reconcile(
     incoming: [],
     converged: [],
     conflicts: [],
+    resolutions: [],
   };
+  const remoteVersions: Record<string, ContentVersion> = {};
   const nodes = new Map(
     [...context.parsed].flatMap(([path, doc]) =>
       doc.nodes
@@ -125,6 +129,11 @@ export function reconcile(
       continue;
     }
     plan.remoteHashes[id] = publicationRevisionHash(current);
+    const localVersion = context.state.localVersions?.[id],
+      nativeVersion = remoteVersion(current, context.state.remoteVersions?.[id], baseHash);
+    remoteVersions[id] = nativeVersion;
+    const localEdited = localHash !== baseHash || localVersion?.contentHash === localHash,
+      remoteEdited = remoteHash !== baseHash || nativeVersion.sinceBaseline === true;
     if (hash(base) !== hash(current)) metadataChanged.push(id);
     // Structural moves/additions/removals are visible conflicts, never a silent subset refresh or delete.
     if (
@@ -143,24 +152,59 @@ export function reconcile(
       conflict('remote-structure');
       continue;
     }
-    if (localHash !== baseHash && nodeKind(current, remote) !== node.kind) {
+    if (localEdited && nodeKind(current, remote) !== node.kind) {
       conflict('remote-structure');
       continue;
     }
-    if (remoteHash === baseHash) continue;
-    if (localHash === baseHash) {
+    if (!localEdited && !remoteEdited) continue;
+    if (localHash === remoteHash) {
+      plan.changes = plan.changes.filter((change) => change.key !== id);
+      plan.converged.push(id);
+      continue;
+    }
+    if (!remoteEdited) continue;
+    if (!localEdited) {
       plan.incoming.push(id);
       continue;
     }
+    const localChange = plan.changes.find((change) => change.key === id);
     plan.changes = plan.changes.filter((change) => change.key !== id);
-    if (localHash === remoteHash) plan.converged.push(id);
-    else {
-      // No local editor supplies a trustworthy per-Rem edit timestamp. mtime/first observation cannot establish LWW.
+    if (
+      !usableVersion(localVersion, localHash, 'cli-save') ||
+      !usableVersion(nativeVersion, remoteHash!, 'rem-updated-at') ||
+      localVersion.timestamp === nativeVersion.timestamp
+    ) {
       conflict('untrusted-edit-order');
+      continue;
+    }
+    const winner = localVersion.timestamp > nativeVersion.timestamp ? 'local' : 'remote';
+    plan.resolutions.push({
+      id,
+      path,
+      baseHash,
+      local: localVersion,
+      remote: nativeVersion,
+      policy: 'version-time-lww',
+      winner,
+    });
+    if (winner === 'remote') plan.incoming.push(id);
+    else {
+      if (!localChange) throw new Error('Missing local content change for LWW');
+      // The entire Rem wins. A base-relative delta could otherwise fabricate a third version.
+      const fields: typeof localChange.fields = {};
+      if (hash(contentProjection(localRem).text) !== hash(contentProjection(current).text))
+        fields.text = node.text;
+      if (
+        node.kind === 'basic' &&
+        hash(contentProjection(localRem).backText) !== hash(contentProjection(current).backText)
+      )
+        fields.backText = node.backText;
+      plan.changes.push({ ...localChange, fields });
     }
   }
+  plan.resolutions.sort((a, b) => a.id.localeCompare(b.id));
   for (const list of [plan.incoming, plan.converged, metadataChanged]) list.sort();
-  return { plan, metadataChanged };
+  return { plan, metadataChanged, remoteVersions };
 }
 
 /** Client-side optimistic readback over the bound content set. SDK setters have no conditional version argument. */

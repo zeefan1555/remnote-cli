@@ -23,7 +23,15 @@ import {
   renderDocument,
   titleOf,
 } from './markdown.js';
-import { blockSchema, idSchema, nativeBlockId, originalPath, recordPath } from './identity.js';
+import {
+  blockSchema,
+  idSchema,
+  keySchema,
+  nativeBlockId,
+  originalPath,
+  recordPath,
+} from './identity.js';
+import { remoteVersion } from './versions.js';
 import {
   cardMetadataSchema,
   nativeDetailsSchema,
@@ -40,6 +48,13 @@ import {
 } from './types.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const contentVersionSchema = z
+  .object({
+    contentHash: digest,
+    timestamp: z.number().nullable(),
+    source: z.enum(['cli-save', 'rem-updated-at']),
+  })
+  .strict();
 const remSchema = z
   .object({
     id: idSchema,
@@ -110,6 +125,18 @@ const stateSchema = z
       z.string(),
       z.object({ rootId: idSchema, fileHash: digest, nodeIds: z.array(idSchema) }).strict()
     ),
+    localVersions: z
+      .record(keySchema, contentVersionSchema.extend({ source: z.literal('cli-save') }))
+      .optional(),
+    remoteVersions: z
+      .record(
+        idSchema,
+        contentVersionSchema.extend({
+          source: z.literal('rem-updated-at'),
+          sinceBaseline: z.literal(true).optional(),
+        })
+      )
+      .optional(),
     pending: z.object({ planHash: digest, journalKey: z.string() }).strict().optional(),
   })
   .strict();
@@ -328,6 +355,10 @@ export async function writeSnapshot(
     errors: ['Snapshot write in progress'],
     entries: {},
     documents: {},
+    localVersions: {},
+    remoteVersions: Object.fromEntries(
+      rems.map((rem) => [rem.id, remoteVersion(rem, previous?.remoteVersions?.[rem.id])])
+    ),
   };
   const writes = new Map<string, string | null>(originals);
   for (const [id, path] of paths) {
@@ -417,7 +448,8 @@ export interface LocalContext {
 
 export async function inspectLocal(
   root: string,
-  suppliedState?: WorkspaceState
+  suppliedState?: WorkspaceState,
+  sources: ReadonlyMap<string, string> = new Map()
 ): Promise<LocalContext> {
   const state = suppliedState ?? (await loadState(root));
   const files = await allFiles(root),
@@ -498,7 +530,7 @@ export async function inspectLocal(
     if (foldedPaths.has(pathKey(path)))
       fail(path, 1, 'AMBIGUOUS_PATH', 'Case/Unicode-colliding Markdown paths are unsupported');
     foldedPaths.add(pathKey(path));
-    const source = await readPrivate(root, path),
+    const source = sources.get(path) ?? (await readPrivate(root, path)),
       frontmatter = parseFrontmatter(path, source);
     currentFiles.set(path, { source, frontmatter });
     diagnostics.push(...frontmatter.diagnostics);

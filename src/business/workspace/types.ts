@@ -55,6 +55,14 @@ export interface WorkspaceDocument {
   fileHash: string;
   nodeIds: string[];
 }
+/** Millisecond version evidence, not a claim about cross-device physical edit order. */
+export interface ContentVersion {
+  contentHash: string;
+  timestamp: number | null;
+  source: 'cli-save' | 'rem-updated-at';
+  /** Native content changed since publication, including an observed return to baseline. */
+  sinceBaseline?: true;
+}
 export interface WorkspaceState {
   version: 1;
   directory: string;
@@ -75,6 +83,8 @@ export interface WorkspaceState {
   errors: string[];
   entries: Record<string, WorkspaceEntry>;
   documents: Record<string, WorkspaceDocument>;
+  localVersions?: Record<string, ContentVersion>;
+  remoteVersions?: Record<string, ContentVersion>;
   pending?: { planHash: string; journalKey: string };
 }
 export interface Diagnostic {
@@ -130,11 +140,21 @@ export interface SyncConflict {
   remoteHash: string | null;
   remoteUpdatedAt: number | null;
 }
+export interface SyncResolution {
+  id: string;
+  path: string;
+  baseHash: string;
+  local: ContentVersion;
+  remote: ContentVersion;
+  policy: 'version-time-lww';
+  winner: 'local' | 'remote';
+}
 export interface SyncPlan extends WorkspacePlan {
   remoteHashes: Record<string, string>;
   incoming: string[];
   converged: string[];
   conflicts: SyncConflict[];
+  resolutions: SyncResolution[];
 }
 export interface MetadataStore {
   getLocal<T>(key: string): Promise<T | undefined>;

@@ -17,6 +17,9 @@ IDs from an unconfigured template.
 
 ## Preconditions
 
+Offline `sync read|save|status|lint|diff` needs only the bound private workspace.
+Apply the connection prerequisites below to commands that contact RemNote.
+
 - RemNote desktop is open with RemNote CLI Bridge (`remnote-cli-bridge`) enabled. A plugin that still reports `zeefan-remnote-sdk-bridge` is accepted during the rename.
 - CLI and plugin are paired with a private token for the exact intended KB.
 - Official content and `KnowledgeBaseInfo: Read` permissions are granted.
@@ -51,7 +54,8 @@ still run. Put `--allow-destructive` on `batch` when an inner `sdk` call needs i
 the previous JSON object; several IDs return `results` keyed by ID.
 Prefer file payloads (`--content-file`, `--plan`, `--request`,
 `--expect`, `--file`) over shell interpolation. Write payloads are bounded to
-100 KiB; a batch file is bounded to 1 MB and 100 commands. Inner batch commands
+100 KiB for native content commands; workspace Markdown uses the sync reference's
+file bound. A batch file is bounded to 1 MB and 100 commands. Inner batch commands
 must not read stdin.
 Use exact Rem IDs, not ambiguous tag names. Respect repository policy: live
 development/acceptance tests run only through the guarded integration wrapper
@@ -181,12 +185,19 @@ Use `sync import DIR` with an explicit KB and declared subtree or official archi
 only for a new empty vault. Verify reported scope and completeness; repeated
 import is not a merge. Keep the `sync DIR` preview/apply entrypoint rather than
 restoring `pull`/`push` aliases. Preview/apply reports `incoming`, `outgoing`,
-`converged` and `metadataRefresh`. Continuous reads cover bound IDs only (batches
+`converged`, `metadataRefresh` and archived `resolutions`. Continuous reads cover bound IDs only (batches
 of at most 50), with `globalDiscoveryComplete: false`; new top-level roots are
 outside scope. Missing objects, unknown children and reparenting must fail or
-conflict. Without a trustworthy local per-Rem edit clock, divergent same-content
-edits preserve both versions as `untrusted-edit-order`. Edit supported list nodes
-only within the supported surface; same-Rem front/back divergence also conflicts.
+conflict. Agent edits start with `sync read DIR PATH`: edit that returned source,
+then `sync save DIR PATH --content-file FILE --expected-file-hash HASH` using the
+same read's hash. Save binds clocks only to changed semantic Rem versions, including
+new `new:key` cards, and stays offline. Same-Rem divergence uses whole-Rem
+`version-time-lww` only with comparable, hash-bound clocks; otherwise it preserves
+both versions as `untrusted-edit-order`. Direct file edits have no trusted clock,
+and a no-op save cannot stamp them retroactively. Read the reference's version-time
+limits: RemNote `updatedAt` is not a text-only clock. Inspect both archived versions
+and the selected winner in `resolutions` before applying within the user's scope.
+Edit supported list nodes only within the supported surface.
 Use stable Obsidian block IDs and their explicit native YAML mapping; edit nested
 YAML in Source mode. Full-path wikilinks resolve through exact file/block mappings.
 Keep display aliases/tags distinct from native relationships; existing Portals are

@@ -118,6 +118,27 @@ export async function writePrivate(
   }
 }
 
+/** Publish a durable immutable record; retries must contain exactly the same bytes. */
+export async function writePrivateOnce(root: string, name: string, content: string): Promise<void> {
+  const temporary = `${name}.${randomUUID()}.tmp`;
+  try {
+    await writePrivate(root, temporary, content);
+    try {
+      await linkPrivate(root, temporary, name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if ((await readPrivate(root, name)) !== content)
+        throw new Error(`Immutable history record differs: ${name}`, { cause: error });
+    }
+    if ((await readPrivate(root, name)) !== content)
+      throw new Error(`History record readback failed: ${name}`);
+  } finally {
+    await safePath(root, temporary)
+      .then((path) => unlink(path))
+      .catch(() => {});
+  }
+}
+
 /** Only explicit, verified sync deletions call this; missing files never request native deletion. */
 export async function removePrivate(root: string, name: string): Promise<void> {
   const path = await safePath(root, name);
