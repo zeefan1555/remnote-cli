@@ -72,6 +72,17 @@ function fixture(count = 2) {
   );
   return { backend, plugin, findMany, objects, flags, status };
 }
+
+async function readCardHistory(repetitionHistory: unknown) {
+  const f = fixture();
+  f.flags
+    .get('r1')!
+    .getCards!.mockResolvedValue([
+      { _id: 'synthetic-card', remId: 'r1', type: 'forward', createdAt: 1, repetitionHistory },
+    ]);
+  return (await f.backend.read(['r1']))[0]!.cards![0]!.repetitionHistory;
+}
+
 describe('public SDK sync adapter', () => {
   it('discovers an exact subtree through bounded public snapshots without getAll', async () => {
     const f = fixture(52),
@@ -131,11 +142,13 @@ describe('public SDK sync adapter', () => {
     ).rejects.toThrow('50');
   });
   it('does not interpret compressed private fields or arrival timestamps as edit timestamps', () => {
-    expect(remoteEditedAt({ public: { u: 100, localUpdatedAt: 200 } } as WorkspaceRem)).toBeNull();
+    expect(
+      remoteEditedAt({ public: { u: 100, localUpdatedAt: 200 } } as unknown as WorkspaceRem)
+    ).toBeNull();
     expect(
       remoteEditedAt({ public: { updatedAt: { $type: 'undefined' } } } as unknown as WorkspaceRem)
     ).toBeNull();
-    expect(remoteEditedAt({ public: { updatedAt: 100 } } as WorkspaceRem)).toBe(100);
+    expect(remoteEditedAt({ public: { updatedAt: 100 } } as unknown as WorkspaceRem)).toBe(100);
   });
   it('preserves empty-array question backText and string future types instead of normalizing them away', async () => {
     const f = fixture();
@@ -144,6 +157,103 @@ describe('public SDK sync adapter', () => {
     const rems = await f.backend.read(['r0', 'r1']);
     expect(rems[0]).toMatchObject({ backText: [], cardItem: false });
     expect(rems[1]!.type).toBe('future');
+  });
+  it('omits undefined object properties in Card history without changing defined values or review order', async () => {
+    const nested = Object.freeze({ omitted: undefined, kept: 'future-value' }),
+      latest = Object.freeze({
+        date: 20,
+        score: 1,
+        responseTime: 0,
+        isCram: false,
+        explanation: '',
+        schedulerMetadata: { interval: 0, optional: undefined },
+        forceNextRevealDate: null,
+        forceEase: 0,
+        pluginData: { future: ['', false, 0, null, nested], optional: undefined },
+        futureField: { retained: true },
+      }),
+      earlier = Object.freeze({
+        date: 10,
+        score: 2,
+        responseTime: undefined,
+        explanation: undefined,
+        schedulerMetadata: undefined,
+        forceNextRevealDate: undefined,
+        forceEase: undefined,
+      }),
+      history = Object.freeze([latest, earlier]);
+
+    expect(await readCardHistory(history)).toStrictEqual([
+      {
+        date: 20,
+        score: 1,
+        responseTime: 0,
+        isCram: false,
+        explanation: '',
+        schedulerMetadata: { interval: 0 },
+        forceNextRevealDate: null,
+        forceEase: 0,
+        pluginData: { future: ['', false, 0, null, { kept: 'future-value' }] },
+        futureField: { retained: true },
+      },
+      { date: 10, score: 2 },
+    ]);
+    expect(earlier).toHaveProperty('explanation', undefined);
+    expect(latest.schedulerMetadata).toHaveProperty('optional', undefined);
+    expect(nested).toHaveProperty('omitted', undefined);
+    expect(history).toStrictEqual([latest, earlier]);
+  });
+  it('keeps special JSON keys as data without prototype pollution', async () => {
+    const data = Object.fromEntries([
+        ['__proto__', { polluted: 'data-only', optional: undefined }],
+        ['constructor', { prototype: { polluted: 'data-only' } }],
+        ['prototype', { kept: true }],
+      ]),
+      history = await readCardHistory([{ date: 1, score: 1, pluginData: data }]),
+      result = (history![0] as { pluginData: Record<string, unknown> }).pluginData;
+
+    expect(Object.hasOwn(result, '__proto__')).toBe(true);
+    expect(result.__proto__).toStrictEqual({ polluted: 'data-only' });
+    expect(result.constructor).toStrictEqual({ prototype: { polluted: 'data-only' } });
+    expect(result.prototype).toStrictEqual({ kept: true });
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
+  });
+  it('normalizes null-prototype history objects without dropping their defined fields', async () => {
+    const data: Record<string, unknown> = Object.create(null);
+    data.kept = { value: false, optional: undefined };
+    data.optional = undefined;
+    expect(await readCardHistory([{ date: 1, score: 1, pluginData: data }])).toStrictEqual([
+      { date: 1, score: 1, pluginData: { kept: { value: false } } },
+    ]);
+    expect(Object.hasOwn(data, 'optional')).toBe(true);
+    expect(Object.getPrototypeOf(data)).toBeNull();
+  });
+  it.each([
+    { label: 'absent', history: undefined, expected: null },
+    { label: 'null', history: null, expected: null },
+    { label: 'empty', history: [], expected: [] },
+  ])('preserves $label Card history', async ({ history, expected }) => {
+    expect(await readCardHistory(history)).toStrictEqual(expected);
+  });
+  it.each([
+    { label: 'undefined history entry', history: [undefined] },
+    { label: 'sparse history', history: new Array(1) },
+    { label: 'nested undefined array entry', history: [{ future: [undefined] }] },
+    { label: 'nested sparse array', history: [{ future: new Array(1) }] },
+    { label: 'function', history: [{ future: () => 1 }] },
+    { label: 'symbol', history: [{ future: Symbol('invalid') }] },
+    { label: 'bigint', history: [{ future: 1n }] },
+    { label: 'NaN', history: [{ future: Number.NaN }] },
+    { label: 'infinity', history: [{ future: Number.POSITIVE_INFINITY }] },
+    { label: 'Date', history: [{ future: new Date(0) }] },
+    { label: 'class instance', history: [{ future: new (class Future {})() }] },
+    {
+      label: 'non-JSON special key value',
+      history: [{ future: Object.fromEntries([['__proto__', 1n]]) }],
+    },
+  ])('rejects $label instead of silently rewriting Card history', async ({ history }) => {
+    await expect(readCardHistory(history)).rejects.toMatchObject({ name: 'ZodError' });
   });
   it('fails closed on missing/duplicate IDs or missing public child arrays', async () => {
     const f = fixture();

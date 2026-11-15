@@ -29,6 +29,26 @@ function publicSnapshot(rem: PluginRem): Record<string, unknown> {
   );
 }
 
+function cardHistoryJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cardHistoryJson);
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+  ) {
+    const result = Object.fromEntries(
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, cardHistoryJson(item)])
+    );
+    // z.json() skips __proto__; validate its value explicitly and retain it as a data key.
+    if (Object.hasOwn(result, '__proto__'))
+      cardMetadataSchema.shape.repetitionHistory.parse([result.__proto__]);
+    return result;
+  }
+  return value;
+}
+
 function cardsSnapshot(
   cards: Awaited<ReturnType<PluginRem['getCards']>>,
   remId: string
@@ -37,16 +57,22 @@ function cardsSnapshot(
   return cards
     .map((card) => {
       if (!card || card.remId !== remId) throw new Error('Native card owner mismatch');
-      return cardMetadataSchema.parse({
+      const repetitionHistory = cardHistoryJson(card.repetitionHistory ?? null);
+      const metadata = cardMetadataSchema.parse({
         id: card._id,
         remId: card.remId,
         type: card.type,
         createdAt: card.createdAt,
-        repetitionHistory: card.repetitionHistory ?? null,
+        repetitionHistory,
         nextRepetitionTime: card.nextRepetitionTime ?? null,
         lastRepetitionTime: card.lastRepetitionTime ?? null,
         timesWrongInRow: card.timesWrongInRow ?? null,
       });
+      // Keep the validated input: Zod's record output deliberately omits __proto__ keys.
+      return {
+        ...metadata,
+        repetitionHistory: repetitionHistory as typeof metadata.repetitionHistory,
+      };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
 }
