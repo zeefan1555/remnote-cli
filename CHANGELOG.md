@@ -19,20 +19,36 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   to the human protocol with no native/backend calls. It preserves original/raw
   bytes and retains displaced source files; edited sources, pending outcomes and
   forged identities are refused. Daily sync has no legacy-format fallback.
+- Clean already-human `sync format DIR` may canonically re-render source while
+  preserving stable identities, attributes, native/original bytes and clocks.
+  Empty plain Rems render as hidden block anchors without an HTML space entity
+  or visible placeholder. `already-formatted` now requires an actual no-op.
 - Verified multiline answer items stay editable beside read-only reference portals.
   Fresh public SDK portal subtype/membership facts retain unknown/null values;
   compact reference projections preserve all native identities and structural order.
   Proven empty wrappers may be folded, but native reference targets retain visible
   anchors. Search portals are not labeled as automatic backlinks or dynamic queries.
-- `sync DIR --apply` plans, validates, applies and verifies in one invocation;
-  an explicit `--plan-hash` still binds an exact previous preview. Neither mode
-  retries unknown writes or relaxes explicit deletion and native permission gates.
+- `sync` is a pure command group. `sync plan DIR` previews and `sync apply DIR`
+  plans, validates, applies and verifies in one invocation, with optional exact
+  `--plan-hash`. Both select `--scope changed|all` (default `changed`) and repeatable
+  exact file/directory `--path` selectors. Root actions and misplaced write flags
+  are rejected, not retained as aliases. Explicit deletion is isolated in
+  `sync delete DIR --id ID --scope-root ID`, requiring `--apply --plan-hash` and
+  existing destructive/live gates for execution.
+- Incremental synchronization separates selected outgoing changes, reconciliation
+  candidates and verification-only dependencies. Only candidates and actual
+  parent-child mutations advance the native baseline; unselected source bytes,
+  new unanchored bullets, identity and clocks remain untouched. Whole-vault lint
+  and byte freezes still apply. Clean changed/empty selections perform no native
+  reads; selected layout-only changes publish offline without consuming another
+  pending native plan. Receipts report exact checked IDs/count and mutation steps,
+  not an inferred SDK call count. Unknown journals never replay.
 - Operation-local source/AST reuse and bounded, ordered read pools remove repeated
   baseline YAML roundtrips and serial file/batch reads. Write and publication
   boundaries still read fresh content hashes, with state checks before replacing
   the authoritative manifest or its mirror. Native writes remain serial.
 
-- `sync DIR` preview/apply and `sync import|status|lint|diff|recover` for a private,
+- `sync plan|apply` and `sync import|status|lint|diff|recover` for a private,
   exact-KB-bound Obsidian vault. The updated design permits edits in both RemNote
   and the shared Markdown files, using a common baseline and per-Rem
   semantic three-way merge. Preview/apply reports incoming, outgoing, converged

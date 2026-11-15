@@ -206,6 +206,12 @@ function assertCoverage(value) {
   assert.equal(value.discoveryScope, 'bound-ids');
   assert.equal(value.globalDiscoveryComplete, false);
   assert.equal(value.remoteChecked, true);
+  assert.ok(Array.isArray(value.checkedIds));
+  assert.equal(value.checkedCount, value.checkedIds.length);
+  assert.deepEqual(value.checkedIds, [...new Set(value.checkedIds)].sort());
+  assert.ok(['changed', 'all', 'delete'].includes(value.selection.scope));
+  const { reconcileIds, verificationIds } = value.selection;
+  assert.deepEqual([...reconcileIds, ...verificationIds].sort(), value.checkedIds);
 }
 
 function assertMissing(snapshot, ids) {
@@ -374,6 +380,15 @@ async function main(argv) {
     if (value) {
       // Persist known writes before an exit-code or semantic assertion can stop the run.
       rememberKnownIds(receipt, value, label);
+      if (typeof value.remoteChecked === 'boolean')
+        entry.syncEvidence = {
+          remoteChecked: value.remoteChecked,
+          checkedIds: value.checkedIds ?? [],
+          checkedCount: value.checkedCount ?? 0,
+          selection: value.selection,
+          nativeMutationSteps: value.remoteWrites ?? null,
+          sdkTransportCalls: 'not-instrumented',
+        };
       if (value.ids || value.steps || value.journalKey)
         entry.writeEvidence = {
           status: value.status,
@@ -412,8 +427,8 @@ async function main(argv) {
     assertMissing(result, ids);
     return result;
   };
-  const sync = (label, verb = '', args = [], expectedExit = 0) =>
-    run(label, ['sync', ...(verb ? [verb] : []), workspace, ...args], expectedExit);
+  const sync = (label, verb = 'plan', args = [], expectedExit = 0) =>
+    run(label, ['sync', verb, workspace, ...args], expectedExit);
   const remoteText = (label, id, text) =>
     run(label, [
       'sdk',
@@ -463,7 +478,9 @@ async function main(argv) {
     return result;
   }
   async function apply(label, expected, extra = [], expectedResolution) {
-    const preview = await sync(`${label}-preview`, '', extra);
+    const deleting = extra.includes('--id');
+    const selection = deleting ? extra : ['--scope', 'all', ...extra];
+    const preview = await sync(`${label}-preview`, deleting ? 'delete' : 'plan', selection);
     assert.equal(preview.status, 'preview');
     assert.equal(preview.complete, true);
     assert.match(preview.planHash, /^[a-f0-9]{64}$/);
@@ -485,17 +502,16 @@ async function main(argv) {
       assert.equal(hash(record.remote), decision.remote.contentHash);
       histories.set(historyPath, source);
     }
-    if (extra.length)
+    if (deleting)
       assert.deepEqual(
         [...preview.deletion.ids].sort(),
         [receipt.testIds.question, receipt.testIds.answer].sort()
       );
-    const applied = await sync(`${label}-apply`, '', [
-      ...extra,
-      '--apply',
+    const applied = await sync(`${label}-apply`, deleting ? 'delete' : 'apply', [
+      ...selection,
       '--plan-hash',
       preview.planHash,
-      ...(extra.length ? ['--allow-destructive'] : []),
+      ...(deleting ? ['--apply', '--allow-destructive'] : []),
     ]);
     assert.equal(applied.status, 'verified');
     assert.equal(applied.complete, true);
@@ -517,7 +533,7 @@ async function main(argv) {
   }
 
   async function unchanged(label) {
-    const result = await sync(label);
+    const result = await sync(label, 'plan', ['--scope', 'all']);
     assert.equal(result.status, 'unchanged');
     assert.equal(result.complete, true);
     assert.equal(result.changes, 0);
@@ -642,7 +658,7 @@ async function main(argv) {
     assert.ok(
       lint.diagnostics.some((item) => item.code === 'MISSING_ID' && item.line > 0 && item.path)
     );
-    const rejected = await sync('invalid-sync', '', [], 1);
+    const rejected = await sync('invalid-sync', 'plan', [], 1);
     assert.match(rejected.error, /MISSING_ID/);
     const afterInvalid = await inspect('invalid-readback', ids);
     assert.deepEqual(afterInvalid, before, 'Lint-rejected sync changed native test state');
@@ -730,7 +746,7 @@ async function main(argv) {
       await readFile(join(workspace, '.sync/state.json'), 'utf8')
     );
     const conflictBefore = await inspect('conflict-native-before', ids);
-    const conflictReceipt = await sync('same-rem-conflict', '', [], 1);
+    const conflictReceipt = await sync('same-rem-conflict', 'plan', ['--scope', 'all'], 1);
     const conflict = assertPlanningConflict(conflictReceipt, question.id);
     assert.equal(await markdown(), conflictSource, 'Conflict overwrote the local version');
     const afterConflict = JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8'));
@@ -803,7 +819,7 @@ async function main(argv) {
       await unchanged(`${winner}-winner-noop`);
     }
 
-    const deletion = ['--delete-id', question.id, '--scope-root', receipt.testIds.root];
+    const deletion = ['--id', question.id, '--scope-root', receipt.testIds.root];
     await apply('delete-card', { incoming: [], outgoing: [], converged: [] }, deletion);
     const remaining = remById(
       await inspect('delete-readback', [receipt.testIds.root]),
@@ -1036,6 +1052,9 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     discoveryScope: 'bound-ids',
     globalDiscoveryComplete: false,
     remoteChecked: true,
+    checkedIds: ['existing', 'root'],
+    checkedCount: 2,
+    selection: { scope: 'all', reconcileIds: ['existing'], verificationIds: ['root'] },
   };
   const directions = { incoming: ['existing'], outgoing: ['new:question'], converged: [] };
   assertDirections({ ...coverage, atomic: false, ...directions }, directions);
@@ -1045,6 +1064,8 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     { 'new:question': 'nativeQuestion' }
   );
   assert.throws(() => assertCoverage({ ...coverage, globalDiscoveryComplete: true }));
+  assert.throws(() => assertCoverage({ ...coverage, checkedCount: 3 }));
+  assert.throws(() => assertCoverage({ ...coverage, checkedIds: ['existing', 'existing'] }));
   const absentIds = ['question', 'answer'];
   const absentSnapshot = await inspectState(
     { rem: { findMany: async () => [] } },

@@ -14,7 +14,7 @@ export function planDeletion(
 ): WorkspacePlan['deletion'] {
   if (!options.deleteId && !options.scopeRoot) return undefined;
   if (!options.deleteId || !options.scopeRoot)
-    throw new Error('Explicit deletion requires both --delete-id and --scope-root');
+    throw new Error('Explicit deletion requires both --id and --scope-root');
   const target = context.native.get(options.deleteId),
     scope = context.native.get(options.scopeRoot);
   if (!target || !scope || target.id === scope.id)

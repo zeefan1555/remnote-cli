@@ -2,6 +2,7 @@ import type { LocalContext } from './local.js';
 import { nodeKind } from './markdown.js';
 import {
   contentProjection,
+  immutableProjection,
   publicRevision,
   publicationRevisionHash,
   remoteEditedAt,
@@ -32,7 +33,9 @@ export async function readRemote(
   backend: WorkspaceBackend
 ): Promise<Map<string, WorkspaceRem>> {
   const result = new Map<string, WorkspaceRem>(),
-    ids = [...context.native.keys()].sort();
+    ids = local.selection
+      ? [...local.selection.reconcileIds, ...local.selection.verificationIds].sort()
+      : [...context.native.keys()].sort();
   const publicReads = await mapReads(batches(ids), 4, async (batch) => {
     const seen = new Map<string, WorkspaceRem>();
     for (const snapshot of await backend.readPublic(batch)) {
@@ -45,7 +48,8 @@ export async function readRemote(
   });
   for (const rem of publicReads.flat()) result.set(rem.id, rem);
   const full = new Set<string>();
-  for (const [id, before] of context.native) {
+  for (const id of ids) {
+    const before = context.native.get(id)!;
     const current = result.get(id);
     if (
       current &&
@@ -65,6 +69,9 @@ export async function readRemote(
       }
     }
   for (const id of local.deletion?.ids ?? []) if (result.has(id)) full.add(id);
+  for (const id of local.selection?.verificationIds ?? [])
+    if (result.has(id) && context.native.get(id)!.unsupported !== 'unverified-native-flags')
+      full.add(id);
   const fullIds = [...full].sort();
   const nativeReads = await mapReads(batches(fullIds), 4, async (batch) => {
     const rems = await backend.read(batch);
@@ -99,7 +106,7 @@ export function reconcile(
     conflicts: [],
     resolutions: [],
   };
-  const remoteVersions: Record<string, ContentVersion> = {};
+  const remoteVersions: Record<string, ContentVersion> = { ...context.state.remoteVersions };
   const nodes = new Map(
     [...context.parsed].flatMap(([path, doc]) =>
       doc.nodes
@@ -108,7 +115,22 @@ export function reconcile(
     )
   );
   const metadataChanged: string[] = [];
-  for (const [id, base] of context.native) {
+  // Dependency reads are validation only: they do not become incoming changes or advance clocks.
+  for (const id of local.selection?.verificationIds ?? []) {
+    const base = context.native.get(id)!,
+      current = remote.get(id);
+    if (!current) throw new Error(`Missing verification dependency ${id}`);
+    if (
+      hash([base.parent, base.children, base.type]) !==
+        hash([current.parent, current.children, current.type]) ||
+      (base.unsupported !== 'unverified-native-flags' &&
+        hash(immutableProjection(base)) !== hash(immutableProjection(current)))
+    )
+      throw new Error(`Verification dependency structure changed: ${id}`);
+  }
+  const graph = new Map([...context.native, ...remote]);
+  for (const id of local.selection?.reconcileIds ?? context.native.keys()) {
+    const base = context.native.get(id)!;
     const { path, node } = nodes.get(id)!,
       current = remote.get(id);
     const localRem =
@@ -160,7 +182,7 @@ export function reconcile(
       conflict('remote-structure');
       continue;
     }
-    if (localEdited && nodeKind(current, remote) !== node.kind) {
+    if (localEdited && nodeKind(current, graph) !== node.kind) {
       conflict('remote-structure');
       continue;
     }
@@ -210,6 +232,12 @@ export function reconcile(
       plan.changes.push({ ...localChange, fields });
     }
   }
+  for (const [id, rem] of remote) plan.remoteHashes[id] = publicationRevisionHash(rem);
+  if (plan.selection)
+    plan.selection = {
+      ...plan.selection,
+      outgoingKeys: plan.changes.map((change) => change.key).sort(),
+    };
   plan.resolutions.sort((a, b) => a.id.localeCompare(b.id));
   for (const list of [plan.incoming, plan.converged, metadataChanged]) list.sort();
   return { plan, metadataChanged, remoteVersions };

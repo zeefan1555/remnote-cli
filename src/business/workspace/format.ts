@@ -16,9 +16,9 @@ import {
   type WorkspaceMetadata,
 } from './metadata.js';
 import { requireNoPublication, stageSnapshot } from './publication.js';
-import { hash, type WorkspaceState } from './types.js';
+import { hash, type ParsedDocument, type ParsedOutline, type WorkspaceState } from './types.js';
 
-/** Explicit offline conversion of a sealed legacy publication. Daily sync has no legacy source fallback. */
+/** Explicit offline canonical rendering of a sealed publication. Daily sync has no legacy fallback. */
 export async function formatWorkspace(directory: string) {
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
@@ -30,57 +30,62 @@ export async function formatWorkspace(directory: string) {
       );
     const input = await inspectNativeRecords(root, previous);
     if (input.diagnostics.length) throw new Error(`Format refused: ${input.diagnostics[0]!.code}`);
-    if (input.inputs.paths.includes(IDENTITY)) {
+    const human = input.inputs.paths.includes(IDENTITY);
+    const expected = new Map(Object.values(previous.documents).map((doc) => [doc.rootId, doc]));
+    const paths = new Map<string, string>(),
+      attributes = new Map<string, DocumentAttributes>(),
+      blocks = new Map<string, string>();
+    let sources: Map<string, ParsedDocument> | undefined;
+    if (human) {
       const local = await inspectLocal(root, previous, new Map(), input.inputs);
       if (local.diagnostics.length)
         throw new Error(`Format refused: ${local.diagnostics[0]!.code}`);
-      return {
-        status: 'already-formatted',
-        complete: true,
-        remoteWrites: 0,
-        documents: local.parsed.size,
-      };
+      if (local.dirty.length)
+        throw new Error('Format refuses locally edited source; preserve and reconcile edits first');
+      sources = local.parsed;
+      for (const [path, document] of local.parsed) {
+        paths.set(document.metadata!.root, path);
+        attributes.set(document.metadata!.root, document.attributes ?? {});
+      }
+      for (const [id, entry] of Object.entries(previous.entries)) blocks.set(id, entry.blockId);
+    } else {
+      const folded = new Set<string>();
+      for (const path of input.inputs.paths.filter(isContentMarkdown)) {
+        if (folded.has(pathKey(path)))
+          throw new Error('Format refuses ambiguous case/Unicode document paths');
+        folded.add(pathKey(path));
+        const source = await input.inputs.read(path);
+        const yaml = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
+        if (!yaml) throw new Error(`Format requires a sealed legacy YAML document: ${path}`);
+        const metadata = metadataSchema.parse(readMetadataYaml(yaml[1]!));
+        const old = expected.get(metadata.root);
+        if (!old || paths.has(metadata.root) || old.fileHash !== hash(source))
+          throw new Error(
+            `Format refuses untracked, duplicated or locally edited source: ${path}; preserve and reconcile edits first`
+          );
+        if (
+          hash(Object.keys(metadata.rems).sort()) !== hash([...old.nodeIds].sort()) ||
+          Object.entries(metadata.rems).some(
+            ([id, entry]) => entry.id !== id || entry.block !== previous.entries[id]?.blockId
+          )
+        )
+          throw new Error(`Format refuses an inconsistent legacy identity: ${path}`);
+        paths.set(metadata.root, path);
+        attributes.set(metadata.root, {
+          ...(metadata.title === undefined ? {} : { title: metadata.title }),
+          ...(metadata.aliases.length ? { aliases: metadata.aliases } : {}),
+          ...(metadata.tags.length ? { tags: metadata.tags } : {}),
+        });
+      }
+      if (paths.size !== expected.size) throw new Error('Format refuses missing legacy documents');
+      const used = new Set<string>();
+      for (const id of Object.keys(previous.entries).sort()) {
+        const block = shortBlockId(id, used);
+        blocks.set(id, block);
+        used.add(block);
+      }
     }
     const frozen = await input.inputs.freeze();
-    const expected = new Map(Object.values(previous.documents).map((doc) => [doc.rootId, doc]));
-    const paths = new Map<string, string>(),
-      attributes = new Map<string, DocumentAttributes>();
-    const folded = new Set<string>();
-    for (const path of input.inputs.paths.filter(isContentMarkdown)) {
-      if (folded.has(pathKey(path)))
-        throw new Error('Format refuses ambiguous case/Unicode document paths');
-      folded.add(pathKey(path));
-      const source = await input.inputs.read(path);
-      const yaml = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
-      if (!yaml) throw new Error(`Format requires a sealed legacy YAML document: ${path}`);
-      const metadata = metadataSchema.parse(readMetadataYaml(yaml[1]!));
-      const old = expected.get(metadata.root);
-      if (!old || paths.has(metadata.root) || old.fileHash !== hash(source))
-        throw new Error(
-          `Format refuses untracked, duplicated or locally edited source: ${path}; preserve and reconcile edits first`
-        );
-      if (
-        hash(Object.keys(metadata.rems).sort()) !== hash([...old.nodeIds].sort()) ||
-        Object.entries(metadata.rems).some(
-          ([id, entry]) => entry.id !== id || entry.block !== previous.entries[id]?.blockId
-        )
-      )
-        throw new Error(`Format refuses an inconsistent legacy identity: ${path}`);
-      paths.set(metadata.root, path);
-      attributes.set(metadata.root, {
-        ...(metadata.title === undefined ? {} : { title: metadata.title }),
-        ...(metadata.aliases.length ? { aliases: metadata.aliases } : {}),
-        ...(metadata.tags.length ? { tags: metadata.tags } : {}),
-      });
-    }
-    if (paths.size !== expected.size) throw new Error('Format refuses missing legacy documents');
-    const blocks = new Map<string, string>(),
-      used = new Set<string>();
-    for (const id of Object.keys(previous.entries).sort()) {
-      const block = shortBlockId(id, used);
-      blocks.set(id, block);
-      used.add(block);
-    }
     const originalIds = new Set(
       Object.entries(previous.entries)
         .filter(([, entry]) => entry.originalHash)
@@ -115,6 +120,27 @@ export async function formatWorkspace(directory: string) {
       const result = renderParsedDocument(id, path, input.native, paths, options);
       if (result.diagnostics.length)
         throw new Error(`Converted outline failed lint: ${result.diagnostics[0]!.code}`);
+      if (sources) {
+        const semantic = (document: ParsedOutline) =>
+          hash(
+            document.nodes.map(
+              ({ key, blockId, parent, kind, children, text, backText, contentHash }) => ({
+                key,
+                blockId,
+                parent,
+                kind,
+                children,
+                text,
+                backText,
+                ...(['opaque', 'mount'].includes(kind) ? { contentHash } : {}),
+              })
+            )
+          );
+        if (semantic(sources.get(path)!) !== semantic(result.document))
+          throw new Error(
+            `Format refuses source that differs from the sealed native baseline: ${path}`
+          );
+      }
       const source = renderDocument(id, path, input.native, paths, options);
       next.documents[path] = {
         rootId: id,
@@ -133,6 +159,20 @@ export async function formatWorkspace(directory: string) {
       writes.set(path, source);
     }
     writes.set(IDENTITY, JSON.stringify(workspaceIdentity(next), null, 2) + '\n');
+    const frozenHashes = frozen.hashes();
+    for (const [path, source] of writes)
+      if (source !== null && frozenHashes[path] === hash(source)) writes.delete(path);
+    if (!writes.size && hash(next) === hash(previous)) {
+      await frozen.check();
+      if (hash(await loadState(root)) !== hash(previous))
+        throw new Error('Local sync metadata changed while formatting');
+      return {
+        status: 'already-formatted',
+        complete: true,
+        remoteWrites: 0,
+        documents: paths.size,
+      };
+    }
     await stageSnapshot(root, next, previous, writes, frozen);
     const verified = await inspectLocal(root);
     if (verified.diagnostics.length)

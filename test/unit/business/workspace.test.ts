@@ -18,7 +18,7 @@ import {
   diffWorkspace,
   lintWorkspace,
   importWorkspace,
-  pushWorkspace,
+  pushWorkspace as syncWorkspace,
   statusWorkspace,
   recoverWorkspace,
   planLocal,
@@ -246,6 +246,552 @@ async function prepare() {
 async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
 }
+
+// The pre-existing reconciliation fixtures explicitly exercise the whole bound graph.
+const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =>
+  syncWorkspace(directory, backend, {
+    ...(options.deleteId || options.scopeRoot ? {} : { scope: 'all' }),
+    ...options,
+  });
+
+describe('selected incremental sync', () => {
+  it('does not open a backend for a clean changed selection or an existing empty directory', async () => {
+    const f = await prepare(),
+      factory = vi.fn(async () => f.backend);
+    await mkdir(join(directory, 'Empty'));
+    for (const options of [{}, { scope: 'all' as const, paths: ['Empty'] }])
+      expect(await syncWorkspace(directory, factory, options)).toMatchObject({
+        status: 'unchanged',
+        remoteChecked: false,
+        checkedCount: 0,
+        checkedIds: [],
+        remoteWrites: 0,
+      });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('publishes A without absorbing dirty unselected B, its unanchored new note, or remote-only C', async () => {
+    const f = await prepare(),
+      bPath = f.state.entries.subdoc!.path;
+    const b = await workspace.readWorkspace(directory, bPath);
+    await workspace.saveWorkspace(
+      directory,
+      bPath,
+      b.content.replace('Child doc', 'Dirty B') + '\n- New ordinary B\n',
+      b.fileHash
+    );
+    await edit(f.path, (s) => s.replace('Because', 'Edited A'));
+    f.rems.get('basic')!.text = ['Remote C'];
+    const before = await loadState(directory),
+      bBytes = await readPrivate(directory, bPath),
+      bRaw = await readPrivate(directory, before.entries.subdoc!.rawPath),
+      cRaw = await readPrivate(directory, before.entries.basic!.rawPath);
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      paths: [f.path],
+      apply: true,
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      outgoing: ['answer'],
+      incoming: [],
+      selection: { reconcileIds: ['answer'] },
+    });
+    const after = await loadState(directory);
+    expect(await readPrivate(directory, bPath)).toBe(bBytes);
+    expect(await readPrivate(directory, before.entries.subdoc!.rawPath)).toBe(bRaw);
+    expect(await readPrivate(directory, before.entries.basic!.rawPath)).toBe(cRaw);
+    expect(after.entries.subdoc).toEqual(before.entries.subdoc);
+    expect(after.documents[bPath]).toEqual(before.documents[bPath]);
+    expect(after.localVersions).toEqual(before.localVersions);
+    expect(after.remoteVersions!.subdoc).toEqual(before.remoteVersions!.subdoc);
+    expect(after.remoteVersions!.basic).toEqual(before.remoteVersions!.basic);
+    expect(Object.keys(after.entries)).not.toContain('created_1');
+    expect(vi.mocked(f.backend.readPublic).mock.calls.flatMap(([ids]) => ids)).not.toContain(
+      'basic'
+    );
+    const later = await syncWorkspace(directory, async () => f.backend, {
+      scope: 'all',
+      apply: true,
+    });
+    expect(later).toMatchObject({
+      status: 'verified',
+      incoming: ['basic'],
+      outgoing: ['subdoc', 'created_1'],
+    });
+    expect(f.calls.filter((call) => call === 'create')).toHaveLength(1);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
+  });
+
+  it.each(['question', 'home', 'basic'] as const)(
+    'does not publish the remote-only content or clock of verification dependency %s',
+    async (id) => {
+      const f = await prepare();
+      await edit(f.path, (s) =>
+        s.replace('Because', id === 'basic' ? '[Target](remnote:basic)' : 'Edited A')
+      );
+      f.rems.get(id)!.text = ['Remote dependency'];
+      f.rems.get(id)!.public = { updatedAt: Date.now() - 1000 };
+      const before = await loadState(directory),
+        raw = await readPrivate(directory, before.entries[id]!.rawPath);
+      const preview = await syncWorkspace(directory, async () => f.backend, { paths: [f.path] });
+      expect(preview).toMatchObject({
+        status: 'preview',
+        incoming: [],
+        selection: { verificationIds: expect.arrayContaining([id]) },
+      });
+      expect((await loadState(directory)).remoteVersions![id]).toEqual(before.remoteVersions![id]);
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+      ).toMatchObject({ status: 'verified', incoming: [], outgoing: ['answer'] });
+      const after = await loadState(directory);
+      expect(await readPrivate(directory, before.entries[id]!.rawPath)).toBe(raw);
+      expect(after.entries[id]).toEqual(before.entries[id]);
+      expect(after.remoteVersions![id]).toEqual(before.remoteVersions![id]);
+      expect(await readPrivate(directory, f.path)).not.toContain('Remote dependency');
+      expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject(
+        { status: 'preview', incoming: [id] }
+      );
+    }
+  );
+
+  it('publishes only the actual parent.children mutation for a new ordinary note', async () => {
+    const f = await prepare();
+    await edit(f.path, (s) => s + '\n- New ordinary note\n');
+    f.rems.get('daily')!.text = ['Remote parent title'];
+    f.rems.get('daily')!.public = { updatedAt: Date.now() - 1000 };
+    const before = await loadState(directory);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+    ).toMatchObject({ status: 'verified', incoming: [], outgoing: ['created_1'] });
+    const after = await loadState(directory),
+      parent = JSON.parse(await readPrivate(directory, after.entries.daily!.rawPath));
+    expect(parent.children).toContain('created_1');
+    expect(parent.public.children).toContain('created_1');
+    expect(parent.text).toEqual(['Today']);
+    expect(parent.public.text).toEqual(['Today']);
+    expect(after.remoteVersions!.daily).toEqual(before.remoteVersions!.daily);
+    expect(await readPrivate(directory, f.path)).toContain('# Today');
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
+      status: 'preview',
+      incoming: ['daily'],
+    });
+  });
+
+  it('checks all bound IDs only in selected files when scope is all', async () => {
+    const f = await prepare(),
+      path = f.state.entries.subdoc!.path;
+    f.rems.get('subdoc')!.text = ['Incoming selected'];
+    f.rems.get('basic')!.text = ['Unselected remote'];
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [path],
+        apply: true,
+      })
+    ).toMatchObject({
+      status: 'verified',
+      incoming: ['subdoc'],
+      selection: { reconcileIds: ['subdoc'] },
+    });
+    expect(await readPrivate(directory, f.path)).not.toContain('Unselected remote');
+    expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
+      incoming: ['basic'],
+    });
+  });
+
+  it('binds canonical path selection and the whole vault bytes to the exact preview', async () => {
+    const f = await prepare(),
+      bPath = f.state.entries.subdoc!.path;
+    await edit(f.path, (s) => s.replace('Because', 'Edited A'));
+    await edit(bPath, (s) => s + '\n- Still unassigned\n');
+    const first = (await syncWorkspace(directory, async () => f.backend, {
+      paths: [`./${f.path}`, f.path],
+    })) as { planHash: string };
+    const second = (await syncWorkspace(directory, async () => f.backend, { paths: [f.path] })) as {
+      planHash: string;
+    };
+    expect(first.planHash).toBe(second.planHash);
+    for (const options of [{ scope: 'all' as const, paths: [f.path] }, { paths: ['HOME'] }])
+      await expect(
+        syncWorkspace(directory, async () => f.backend, {
+          ...options,
+          apply: true,
+          planHash: first.planHash,
+        })
+      ).rejects.toThrow('exact frozen');
+    await edit(bPath, (s) => s + '\n');
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        paths: [f.path],
+        apply: true,
+        planHash: first.planHash,
+      })
+    ).rejects.toThrow('exact frozen');
+    expect(f.calls).toEqual([]);
+  });
+
+  it('also binds exact frozen guide and identity bytes, not just Markdown semantics', async () => {
+    const f = await prepare();
+    await edit(f.path, (s) => s.replace('Because', 'Edited A'));
+    await writePrivate(directory, 'AGENTS.md', '# Local instructions\n');
+    const preview = (await syncWorkspace(directory, async () => f.backend, {
+      paths: [f.path],
+    })) as { planHash: string };
+    await writePrivate(directory, 'AGENTS.md', '# Updated local instructions\n');
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        paths: [f.path],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).rejects.toThrow('exact frozen');
+    await writePrivate(directory, 'AGENTS.md', '# Local instructions\n');
+    await edit(IDENTITY, (source) => JSON.stringify(JSON.parse(source)) + '\n');
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        paths: [f.path],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).rejects.toThrow('exact frozen');
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['../escape', '/tmp', 'HOME/*.md', 'missing', '.remnote', 'AGENTS.md'])(
+    'rejects unsafe or noncontent selector %s before backend creation',
+    async (path) => {
+      const f = await prepare(),
+        factory = vi.fn(async () => f.backend);
+      if (path === 'AGENTS.md') await writePrivate(directory, path, '# Tool instructions\n');
+      await expect(syncWorkspace(directory, factory, { paths: [path] })).rejects.toThrow();
+      expect(factory).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects a symlink selector and an old identity lost outside selected paths before remote reads', async () => {
+    const f = await prepare(),
+      factory = vi.fn(async () => f.backend),
+      bPath = f.state.entries.subdoc!.path;
+    await edit(f.path, (s) => s.replace('Because', 'Edited A'));
+    await edit(bPath, (s) => s.replace(/<!-- remnote:[^>]+ -->/, ''));
+    await expect(syncWorkspace(directory, factory, { paths: [f.path] })).rejects.toThrow();
+    expect(factory).not.toHaveBeenCalled();
+    await symlink(join(directory, f.path), join(directory, 'Alias.md'));
+    await expect(syncWorkspace(directory, factory, { paths: ['Alias.md'] })).rejects.toThrow();
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing', 'batch-failed'] as const)(
+    'fails closed when a creation dependency is %s',
+    async (failure) => {
+      const f = await prepare();
+      await edit(f.path, (s) => s + '\n- New ordinary note\n');
+      if (failure === 'missing') f.rems.delete('daily');
+      else
+        f.backend.read = vi.fn(async () => {
+          throw new Error('Dependency batch failed');
+        });
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+      ).rejects.toThrow();
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('previews and publishes selected layout only, preserving an unrelated pending native plan and all clocks', async () => {
+    const f = await prepare(),
+      bPath = f.state.entries.subdoc!.path;
+    await edit(f.path, (s) => s.replace('Because', 'Unselected A'));
+    await syncWorkspace(directory, async () => f.backend, { paths: [f.path] });
+    const before = await loadState(directory),
+      raw = await readPrivate(directory, before.entries.subdoc!.rawPath);
+    const renamed = 'HOME/Personal.md';
+    await rename(join(directory, bPath), join(directory, renamed));
+    await edit(
+      renamed,
+      (s) => '---\naliases: [Personal] # Reading note\ntags: [local]\n---\n' + s + '\n'
+    );
+    await edit(f.path, (s) => s.replaceAll('HOME/Today/Child doc|', 'HOME/Personal|'));
+    const source = await readPrivate(directory, renamed),
+      aBytes = await readPrivate(directory, f.path),
+      factory = vi.fn(async () => f.backend);
+    const preview = (await syncWorkspace(directory, factory, { paths: [renamed] })) as {
+      planHash: string;
+    };
+    expect(preview).toMatchObject({
+      status: 'preview',
+      remoteChecked: false,
+      localPublished: false,
+      remoteWrites: 0,
+    });
+    expect(await loadState(directory)).toEqual(before);
+    expect(
+      await syncWorkspace(directory, factory, {
+        paths: [renamed],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).toMatchObject({
+      status: 'verified',
+      remoteChecked: false,
+      localPublished: true,
+      remoteWrites: 0,
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await readPrivate(directory, renamed)).toBe(source);
+    expect(await readPrivate(directory, f.path)).toBe(aBytes);
+    expect(await readPrivate(directory, before.entries.subdoc!.rawPath)).toBe(raw);
+    const after = await loadState(directory);
+    expect(after.pending).toEqual(before.pending);
+    expect(after.localVersions).toEqual(before.localVersions);
+    expect(after.remoteVersions).toEqual(before.remoteVersions);
+    expect(after.documents[f.path]).toEqual(before.documents[f.path]);
+    expect(after.documents[renamed]).toMatchObject({ rootId: 'subdoc', fileHash: hash(source) });
+    expect(after.documents).not.toHaveProperty(bPath);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+  });
+
+  it('keeps unselected renamed/dirty documents and their shared paths untouched', async () => {
+    const f = await prepare(),
+      path = f.state.entries.subdoc!.path,
+      renamed = 'HOME/Later.md';
+    await rename(join(directory, path), join(directory, renamed));
+    await edit(renamed, (s) => s.replace('Child doc', 'Pending rename') + '\n- Pending new note\n');
+    await edit(f.path, (s) =>
+      s.replace('Because', 'Selected A').replaceAll('HOME/Today/Child doc|', 'HOME/Later|')
+    );
+    const bytes = await readPrivate(directory, renamed);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+    ).toMatchObject({ status: 'verified' });
+    expect(await readPrivate(directory, renamed)).toBe(bytes);
+    const after = await loadState(directory);
+    expect(after.documents[path]).toEqual(f.state.documents[path]);
+    expect(after.entries.subdoc).toEqual(f.state.entries.subdoc);
+    expect(after.documents).not.toHaveProperty(renamed);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+  });
+
+  it('requires both swapped paths and publishes their identities without native reads', async () => {
+    const f = await prepare(),
+      other = f.state.entries.subdoc!.path,
+      temporaryPath = join(directory, 'Swap.md');
+    await rename(join(directory, f.path), temporaryPath);
+    await rename(join(directory, other), join(directory, f.path));
+    await rename(temporaryPath, join(directory, other));
+    await edit(f.state.entries.home!.path, (s) =>
+      s.replaceAll('HOME/Today|', 'HOME/Today/Child doc|')
+    );
+    await edit(other, (s) => s.replaceAll('HOME/Today/Child doc|', 'HOME/Today|'));
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { paths: [f.path], apply: true })
+    ).rejects.toThrow('path swap');
+    expect(
+      await syncWorkspace(directory, factory, { paths: [f.path, other], apply: true })
+    ).toMatchObject({ status: 'verified', localPublished: true, remoteChecked: false });
+    const after = await loadState(directory);
+    expect(after.entries.daily!.path).toBe(other);
+    expect(after.entries.subdoc!.path).toBe(f.path);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('binds layout-only previews to scope, paths, and unselected file bytes', async () => {
+    const f = await prepare(),
+      path = f.state.entries.subdoc!.path,
+      factory = vi.fn(async () => f.backend);
+    await edit(path, (s) => s + '\n');
+    const preview = (await syncWorkspace(directory, factory, { paths: [path] })) as {
+      planHash: string;
+    };
+    await expect(
+      syncWorkspace(directory, factory, {
+        paths: ['HOME'],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).rejects.toThrow('exact frozen');
+    await edit(f.path, (s) => s + '\n');
+    await expect(
+      syncWorkspace(directory, factory, { paths: [path], apply: true, planHash: preview.planHash })
+    ).rejects.toThrow('exact frozen');
+    expect(factory).not.toHaveBeenCalled();
+    expect((await loadState(directory)).documents).toEqual(f.state.documents);
+  });
+
+  it.each(['publication', 'staging'] as const)(
+    'recovers partial %s without native replay or dependency absorption',
+    async (point) => {
+      const f = await prepare(),
+        bPath = f.state.entries.subdoc!.path;
+      await edit(f.path, (s) => s.replace('Because', 'Selected A') + '\n- New selected note\n');
+      await edit(bPath, (s) => s + '\n- Pending B\n');
+      f.rems.get('question')!.text = ['Remote dependency'];
+      const before = await loadState(directory),
+        bytes = await readPrivate(directory, bPath),
+        raw = await readPrivate(directory, before.entries.question!.rawPath);
+      const original = LocalState.prototype.setLocal,
+        link = fileOps.linkPrivate;
+      const stateSpy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (point === 'publication' && key.startsWith('publication:') && value !== null)
+            throw new Error('Injected publication failure');
+          return original.call(this, key, value);
+        });
+      const fileSpy = vi
+        .spyOn(fileOps, 'linkPrivate')
+        .mockImplementation(async (root, from, to) => {
+          if (point === 'staging' && to === f.path) throw new Error('Injected staging failure');
+          return link(root, from, to);
+        });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+      ).toMatchObject({ status: 'publication-incomplete' });
+      stateSpy.mockRestore();
+      fileSpy.mockRestore();
+      const calls = [...f.calls];
+      expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+        status: 'recovered',
+        remoteWrites: 0,
+      });
+      expect(f.calls).toEqual(calls);
+      expect(await readPrivate(directory, bPath)).toBe(bytes);
+      expect(await readPrivate(directory, before.entries.question!.rawPath)).toBe(raw);
+      expect((await loadState(directory)).remoteVersions!.question).toEqual(
+        before.remoteVersions!.question
+      );
+      expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject(
+        { incoming: ['question'], creates: 1 }
+      );
+    }
+  );
+
+  it('rejects unknown selected journals for both replay and layout-only publication', async () => {
+    const f = await prepare(),
+      path = f.state.entries.subdoc!.path;
+    await edit(f.path, (s) => s.replace('Because', 'Selected A'));
+    const original = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await original(id, field, value);
+      throw new Error('Lost acknowledgement');
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+    ).toMatchObject({ status: 'unknown' });
+    const calls = [...f.calls],
+      before = await loadState(directory);
+    await edit(path, (s) => s + '\n');
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { paths: [path], apply: true })
+    ).rejects.toThrow('Prior write outcome');
+    await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(
+      'not verified'
+    );
+    expect(await loadState(directory)).toEqual(before);
+    expect(f.calls).toEqual(calls);
+  });
+
+  it.each(['missing', 'batch-failed'] as const)(
+    'rejects a %s deletion dependency before any mutation',
+    async (failure) => {
+      const f = await prepare(),
+        options = { deleteId: 'question', scopeRoot: 'daily' };
+      const preview = (await syncWorkspace(directory, async () => f.backend, options)) as {
+        planHash: string;
+      };
+      if (failure === 'missing') f.rems.delete('chapter');
+      else
+        f.backend.read = vi.fn(async () => {
+          throw new Error('Dependency read failed');
+        });
+      await expect(
+        syncWorkspace(directory, async () => f.backend, {
+          ...options,
+          apply: true,
+          planHash: preview.planHash,
+        })
+      ).rejects.toThrow();
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('publishes bounded deletion through the current layout without absorbing dependency content', async () => {
+    const f = await prepare(),
+      renamed = 'HOME/Renamed.md',
+      options = { deleteId: 'question', scopeRoot: 'daily' };
+    await rename(join(directory, f.path), join(directory, renamed));
+    await edit(f.state.entries.home!.path, (s) => s.replaceAll('HOME/Today|', 'HOME/Renamed|'));
+    f.rems.get('chapter')!.text = ['Remote parent content'];
+    const before = await loadState(directory);
+    const preview = (await syncWorkspace(directory, async () => f.backend, options)) as {
+      planHash: string;
+    };
+    expect(preview).toMatchObject({
+      status: 'preview',
+      selection: { scope: 'delete', files: [renamed], outgoingKeys: [] },
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        ...options,
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).toMatchObject({ status: 'verified', deleted: ['answer', 'question'] });
+    const after = await loadState(directory),
+      parent = JSON.parse(await readPrivate(directory, after.entries.chapter!.rawPath));
+    expect(parent.text).toEqual(['Chapter']);
+    expect(parent.children).toEqual([]);
+    expect(after.remoteVersions!.chapter).toEqual(before.remoteVersions!.chapter);
+    expect(after.documents[renamed]).toBeDefined();
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
+      status: 'preview',
+      incoming: ['chapter'],
+    });
+  });
+
+  it('recovers verified deletion without absorbing its parent dependency or replaying remove', async () => {
+    const f = await prepare(),
+      options = { deleteId: 'question', scopeRoot: 'daily' };
+    f.rems.get('chapter')!.text = ['Remote parent content'];
+    const preview = (await syncWorkspace(directory, async () => f.backend, options)) as {
+      planHash: string;
+    };
+    const original = LocalState.prototype.setLocal;
+    const spy = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+      this: LocalState,
+      key,
+      value
+    ) {
+      if (key.startsWith('publication:') && value !== null)
+        throw new Error('Injected local authority failure');
+      return original.call(this, key, value);
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        ...options,
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).toMatchObject({ status: 'publication-incomplete' });
+    spy.mockRestore();
+    const calls = [...f.calls];
+    expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+      status: 'recovered',
+      remoteWrites: 0,
+    });
+    expect(f.calls).toEqual(calls);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
+      status: 'preview',
+      incoming: ['chapter'],
+    });
+  });
+});
 
 describe('human Markdown workspace', () => {
   it('extends colliding short identities without changing an already allocated identity', () => {
@@ -1301,7 +1847,7 @@ describe('versioned sync', () => {
   );
 
   it.each(['preview', 'unknown'] as const)(
-    'reads a version-less manifest without changing its seal and respects its %s journal',
+    'reads a version-less manifest without changing its seal but refuses its retired %s journal',
     async (journalState) => {
       const f = await prepare();
       f.rems.get('answer')!.public = { updatedAt: Date.now() - 1_000 };
@@ -1337,22 +1883,13 @@ describe('versioned sync', () => {
       expect(planLocal(await inspectLocal(directory)).baseHash).toBe(localPlan.baseHash);
       expect((await workspace.readWorkspace(directory, f.path)).content).toBe(source);
       expect(await readPrivate(directory, '.sync/state.json')).toBe(mirror);
-      if (journalState === 'unknown') {
-        await expect(pushWorkspace(directory, async () => f.backend)).rejects.toThrow(
-          'Prior write outcome'
-        );
-        await expect(
-          save(f.path, (source) => source.replace('Because', 'Must not overwrite'))
-        ).rejects.toThrow('Prior write outcome');
-        expect(hash(await loadState(directory))).toBe(stateHash);
-      } else {
-        const preview = (await pushWorkspace(directory, async () => f.backend)) as {
-          planHash: string;
-        };
-        expect(preview).toMatchObject({ status: 'preview', remoteWrites: 0 });
-        expect(preview.planHash).not.toBe(oldHash);
-        expect((await loadState(directory)).pending!.planHash).toBe(preview.planHash);
-      }
+      await expect(pushWorkspace(directory, async () => f.backend)).rejects.toThrow(
+        'Prior write outcome'
+      );
+      await expect(
+        save(f.path, (source) => source.replace('Because', 'Must not overwrite'))
+      ).rejects.toThrow('Prior write outcome');
+      expect(hash(await loadState(directory))).toBe(stateHash);
       expect(f.calls).toEqual([]);
     }
   );

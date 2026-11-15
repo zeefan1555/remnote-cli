@@ -67,23 +67,49 @@ three-way merging. The receipts below describe the current source contract;
 offline tests are not native acceptance or a release claim. Legacy `pull`/`push`
 aliases are removed.
 
-The commands below are separate entry points, not a required pipeline. After
-editing, daily synchronization needs only `sync DIR --apply` within the authorized scope.
+`sync` is a pure command group. The commands below are separate entry points,
+not a required pipeline. After editing, daily synchronization needs only
+`sync apply DIR` within the authorized scope; it has no `--apply` flag. `DIR`
+below is the authorized private vault's absolute path.
 
-```bash
-remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
-remnote-cli --kb-id KB_ID sync import /PRIVATE/library --export /PRIVATE/export.rem
-remnote-cli sync read /PRIVATE/vault 'Folder/Note.md'
-remnote-cli sync save /PRIVATE/vault 'Folder/Note.md' --content-file /PRIVATE/edited.md --expected-file-hash READ_FILE_HASH
-remnote-cli sync status /PRIVATE/vault
-remnote-cli sync lint /PRIVATE/vault
-remnote-cli sync diff /PRIVATE/vault
-remnote-cli sync /PRIVATE/vault
-remnote-cli sync /PRIVATE/vault --apply
-remnote-cli sync /PRIVATE/vault --apply --plan-hash PREVIEW_HASH
-remnote-cli sync format /PRIVATE/vault
-remnote-cli sync recover /PRIVATE/vault
-```
+| Scenario | Command and boundary |
+| --- | --- |
+| Initial import | `remnote-cli --kb-id KB_ID sync import DIR --root-id ROOT_ID`, or `--export /PRIVATE/export.rem`; a new empty vault only |
+| Daily local changes | `remnote-cli sync apply DIR`; defaults to `--scope changed`, plans and applies in one invocation |
+| One file or directory | `remnote-cli sync apply DIR --path 'Folder/Note.md' --path 'OtherFolder'`; repeatable path filtering, not patch selection |
+| Reconcile a selected area | `remnote-cli sync apply DIR --scope all --path 'Folder'`; all bound IDs inside that selection |
+| Reconcile all bound IDs | `remnote-cli sync apply DIR --scope all`; no path filter, no new-root discovery |
+| Preview / approved plan | `remnote-cli sync plan DIR` has zero native writes; `sync apply DIR --plan-hash HASH` requires the same frozen plan and selectors |
+| Offline inspection | `remnote-cli sync diff DIR --path 'Folder'`; `sync lint DIR` and `sync status DIR` remain whole-vault |
+| Explicit deletion | `remnote-cli sync delete DIR --id ID --scope-root ID` previews; execution additionally requires `--apply --plan-hash HASH`, destructive authorization and live gates |
+| Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
+| Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
+| Recovery / uncertain result | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs after conflict/unknown, never replay uncertain writes |
+
+### Scope and path selection
+
+Plan and apply share `--scope changed|all` (default `changed`) and repeatable
+`--path PATH`. These are independent dimensions: scope chooses changed Rems or
+all bound IDs, while path chooses the files/directories containing them. With no
+path filter, the selection is the entire vault. Changed scope reads locally dirty
+Rems plus necessary dependencies; all scope reconciles every bound ID in selected
+documents, including remote-only edits. Neither is a remote changes-since API.
+
+Paths are vault-relative Markdown files or directories, not globs or native IDs.
+Repeated/equivalent paths such as `Folder` and `./Folder` are normalized and
+deduplicated. Missing paths, paths outside the vault, symlinks and non-content
+files are rejected. An existing directory with no content Markdown is a valid
+empty selection: it returns offline `unchanged`, `remoteChecked: false`, with no
+remote reads. Path filtering is not hunk selection; existing unsynced edits in a
+selected file remain in scope. Out-of-scope changes are not absorbed into the
+baseline or overwritten by publication.
+
+Every selection still runs full-vault local lint, identity validation and frozen
+file checks. A scoped command cannot bypass invalid content elsewhere.
+`sync diff DIR` accepts the same path filter but is offline and has no scope selector.
+Status/lint inspect the whole vault. Delete has its own exact ID/root boundary,
+not scope/path filters. There are no root sync actions, push/pull aliases, force,
+since, daemon or arbitrary conflict-winner options.
 
 ### Initial import and privacy
 
@@ -119,9 +145,10 @@ update; it is not supplied by this CLI change.
 
 The vault root must be 0700. Markdown saved normally by Obsidian may be 0644;
 CLI-created Markdown is 0600. Native sidecars and runtime state remain 0600.
-Symlinks are not a content access path. Keep a separately authorized, local-only
-content Git repository with no network remote; sync does not configure Git or
-publish files. Content must stay out of code repositories and public evidence.
+Symlinks are not a content access path. Keep a separately authorized private
+content Git repository; network backup needs explicit user authorization. Sync
+does not configure Git or publish files. Content must stay out of code
+repositories and public evidence.
 
 Ignore `.sync/`, locks and credentials in content Git. Exclude `.obsidian/`,
 `.trash/` and `.DS_Store` from content scanning, candidate freeze and Git.
@@ -151,7 +178,7 @@ Oversized metadata is rejected without truncation or relaxing individual-file li
 
 ### Guarded local editing
 
-Users and agents may edit the same Markdown directly, then run `sync DIR --apply`
+Users and agents may edit the same Markdown directly, then run `sync apply DIR`
 once. Separate read/save/lint/diff/preview commands are not a required daily pipeline.
 For guarded editing and trusted local version clocks, use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
 and its `fileHash` from the same read, then edit that source and call `sync save`
@@ -312,7 +339,8 @@ RemNote semantic acceptance.
 ### Explicit format conversion
 
 `sync format DIR` is an explicit offline conversion of a clean, sealed legacy
-publication to human Markdown. It requires a complete manifest, no pending remote
+publication to human Markdown, or canonical rendering of a clean already-human
+publication. It requires a complete manifest, no pending remote
 journal or local publication, unchanged published source hashes, complete document
 coverage and intact native records. It preserves native/original record bytes,
 publishes short anchors and tracked identity through staged local publication,
@@ -321,10 +349,12 @@ remote write. There is no legacy parse fallback in daily sync.
 
 Success returns `status: "formatted"`, `complete: true`, `remoteWrites: 0`,
 document/Rem counts, `identityPath`, previous/current manifest hashes and
-`originals: "unchanged"`. Already-human input is validated and returns
-`status: "already-formatted"` without publication. Invalid or forged identity is
-refused, not silently rebuilt. Dirty legacy source is preserved and refused rather
-than reformatted from stale records; reconcile that work first.
+`originals: "unchanged"`. Already-human input preserves attributes and stable
+anchors, native/original bytes and all content clocks while canonical rendering
+can repair empty-note anchor presentation. `status: "already-formatted"` means
+validation found nothing to publish. Invalid or forged identity is refused, not
+silently rebuilt. Dirty or semantically divergent source is preserved and refused
+rather than reformatted from stale records; reconcile that work first.
 
 ### Supported write boundary
 
@@ -397,11 +427,16 @@ not silently dropped. Existing Rem/card identity, parent/order and review histor
 are protected. Missing files, nodes or remote objects do not authorize movement
 or automatic deletion.
 
-`status` and `diff` inspect local state without applying changes. `sync DIR` previews.
-`sync DIR --apply` performs whole-workspace lint, fresh bidirectional planning,
+`status` and `diff` inspect local state without applying changes. `sync plan DIR`
+previews with zero native writes. `sync apply DIR` performs whole-workspace lint, fresh bidirectional planning,
 guarded apply and verification in one invocation, without requiring a separate preview.
-Use `sync DIR --apply --plan-hash HASH` to require an exact previous preview instead;
-stale files, native content or hashes are refused, not silently replanned.
+Use `sync apply DIR --plan-hash HASH` to require an exact previous preview instead.
+The hash binds normalized scope/path selectors, selected documents,
+reconciliation/verification IDs and all frozen vault files, including files
+outside the selection. A changed scope, materially different selection, stale
+file, native content or hash is refused, not silently accepted as a new plan.
+Equivalent normalized selectors reuse the same selection, not a bypass of content
+freshness checks.
 Either apply path binds a frozen plan, unchanged candidate files, matching KB and native
 state, with live writes enabled for outgoing changes. Incoming changes are merged
 semantic results, not arbitrary remote snapshot overwrites. SDK writes are
@@ -427,10 +462,24 @@ Current receipt fields (arrays contain exact Rem IDs unless noted):
 | `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `resolutions`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
 | `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
 | planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `resolutions`, `remoteWrites: 0`; no apply is authorized by this receipt |
+| offline layout `preview` / `verified` | `remoteChecked: false`, `remoteWrites: 0`, `planHash`, empty direction arrays; `localPublished` is false for preview and true after apply |
 
-Each of these carries `remoteChecked: true`, `discoveryScope: "bound-ids"`,
-`globalDiscoveryComplete: false`. `diff` is local-only and reports
+Read `remoteChecked` as actual remote-read evidence, not a constant: an empty
+selection or changed scope with no candidates can return offline `unchanged`
+with `remoteChecked: false` and no checked IDs. Bound-ID planning reports
+`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`; even an all-scope
+success cannot establish global discovery. `diff` is local-only and reports
 `remoteChecked: false`; it cannot establish remote freshness or convergence.
+`checkedIds` / `checkedCount` describe the initial bound-ID verification set,
+not the number of SDK calls or repeated reads. Created IDs have separate `ids`
+and readback receipts. `selection` records canonical `paths`, selected `files`,
+actual local-key `outgoingKeys`, `reconcileIds` and disjoint `verificationIds`.
+Verification-only dependencies do not advance their shared native baseline or
+content clocks. Unselected bytes and unassigned bullets remain intact. Selected
+layout-only apply advances only local layout/file hashes and display attributes;
+it preserves all native records/clocks and any separate pending native plan.
+The acceptance driver records wall time and native mutation steps separately;
+SDK transport calls are explicitly `not-instrumented`.
 Each planning conflict records `id`, `path`, `reason` (`untrusted-edit-order`,
 `remote-structure` or `remote-missing`), `baseHash`, `localHash`, nullable
 `remoteHash` / `remoteUpdatedAt`, a private `localSnapshot` path and a
@@ -444,10 +493,12 @@ Deletion is explicit and separate from file absence. Keep the local outline
 intact for preview:
 
 ```bash
-remnote-cli sync /PRIVATE/vault --delete-id CARD_ID --scope-root ROOT_ID
-remnote-cli --allow-destructive sync /PRIVATE/vault --delete-id CARD_ID --scope-root ROOT_ID --apply --plan-hash PREVIEW_HASH
+remnote-cli sync delete /PRIVATE/vault --id CARD_ID --scope-root ROOT_ID
+remnote-cli --allow-destructive sync delete /PRIVATE/vault --id CARD_ID --scope-root ROOT_ID --apply --plan-hash PREVIEW_HASH
 ```
 
+Delete previews by default; unlike `sync apply`, its execution requires both
+`--apply` and `--plan-hash`. It accepts no scope/path selectors.
 The target must be a strict descendant of the exact scope root. Review the
 bounded exact descendant IDs. Native Document/Folder deletion is unsupported;
 both live plugin write gates and global `--allow-destructive` are required.

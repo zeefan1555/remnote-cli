@@ -373,6 +373,8 @@ function renderParts(
         type: 'blockquote',
         children: [{ type: 'paragraph', children: inline(rem.backText, links, byId) }],
       });
+    // Empty rich-text segments are not visible content before an Obsidian block ID.
+    front.children = front.children.filter((node) => node.type !== 'text' || node.value !== '');
     if (!heading)
       front.children.push({ type: 'text', value: `${front.children.length ? ' ' : ''}^${anchor}` });
     return [

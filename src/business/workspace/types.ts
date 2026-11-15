@@ -135,9 +135,21 @@ export interface WorkspacePlan {
   directory: string;
   kbId: string;
   baseHash: string;
+  /** Whole-vault byte seal, including verification-only records and excluded owned guides. */
+  inputHash?: string;
   files: Record<string, string>;
   changes: WorkspaceChange[];
   deletion?: { rootId: string; scopeRoot: string; ids: string[] };
+  selection?: SyncSelection;
+}
+/** Outgoing intent, reconciliation candidates and verification dependencies are distinct sets. */
+export interface SyncSelection {
+  scope: 'changed' | 'all' | 'delete';
+  paths: string[];
+  files: string[];
+  outgoingKeys: string[];
+  reconcileIds: string[];
+  verificationIds: string[];
 }
 export interface SyncConflict {
   id: string;

@@ -48,6 +48,7 @@ import {
   type Diagnostic,
   type ParsedDocument,
   type ParsedOutline,
+  type SyncSelection,
   type WorkspaceRem,
   type WorkspaceState,
 } from './types.js';
@@ -297,28 +298,32 @@ export async function writeSnapshot(
   official: WorkspaceState['official'] = previous?.official,
   removedIds: string[] = [],
   sources: Map<string, ParsedDocument> = new Map(),
-  assignedIds: Record<string, string> = {}
+  assignedIds: Record<string, string> = {},
+  selection?: SyncSelection
 ): Promise<WorkspaceState> {
   const errors = validateGraph(rems, coverage.rootIds);
   if (errors.length) throw new Error(`Incomplete native graph: ${errors.slice(0, 10).join('; ')}`);
   const byId = new Map(rems.map((rem) => [rem.id, rem]));
-  const renamed = previous ? { ...previous, documents: { ...previous.documents } } : undefined;
-  for (const [path, source] of sources) {
-    const old = Object.entries(renamed?.documents ?? {}).find(
-      ([, doc]) => doc.rootId === source.metadata?.root
-    );
-    if (old && old[0] !== path) {
-      delete renamed!.documents[old[0]];
-      renamed!.documents[path] = old[1];
-    }
-  }
+  const sourcePaths = new Map([...sources].map(([path, source]) => [source.metadata?.root, path]));
+  const renamed = previous
+    ? {
+        ...previous,
+        documents: Object.fromEntries(
+          Object.entries(previous.documents).map(([path, document]) => [
+            sourcePaths.get(document.rootId) ?? path,
+            document,
+          ])
+        ),
+      }
+    : undefined;
   const paths = documentPaths(rems, renamed, coverage.rootIds);
   const blocks = new Map(
     Object.entries(previous?.entries ?? {}).map(([id, entry]) => [id, entry.blockId])
   );
-  for (const source of sources.values())
-    for (const node of source.nodes)
-      if (node.kind !== 'mount') blocks.set(assignedIds[node.key] ?? node.key, node.blockId);
+  for (const [path, source] of sources)
+    if (!selection || selection.files.includes(path))
+      for (const node of source.nodes)
+        if (node.kind !== 'mount') blocks.set(assignedIds[node.key] ?? node.key, node.blockId);
   const usedBlocks = new Set(blocks.values());
   for (const id of byId.keys())
     if (!blocks.has(id)) {
@@ -358,6 +363,17 @@ export async function writeSnapshot(
   );
   const files = frozen ?? (await FrozenFiles.capture(root));
   await files.check();
+  const reconciled = new Set(
+    selection ? [...selection.reconcileIds, ...Object.values(assignedIds)] : byId.keys()
+  );
+  const localVersions = { ...previous?.localVersions },
+    remoteVersions = { ...previous?.remoteVersions };
+  for (const key of [...reconciled, ...Object.keys(assignedIds), ...removedIds])
+    delete localVersions[key];
+  for (const id of removedIds) delete remoteVersions[id];
+  for (const rem of rems)
+    if (reconciled.has(rem.id))
+      remoteVersions[rem.id] = remoteVersion(rem, previous?.remoteVersions?.[rem.id]);
   const state: WorkspaceState = {
     version: 1,
     directory: root,
@@ -371,13 +387,28 @@ export async function writeSnapshot(
     errors: ['Snapshot write in progress'],
     entries: {},
     documents: {},
-    localVersions: {},
-    remoteVersions: Object.fromEntries(
-      rems.map((rem) => [rem.id, remoteVersion(rem, previous?.remoteVersions?.[rem.id])])
-    ),
+    localVersions,
+    remoteVersions,
+    // A layout-only publication cannot discard a separate pending native plan.
+    ...(selection &&
+    !selection.reconcileIds.length &&
+    !selection.verificationIds.length &&
+    previous?.pending
+      ? { pending: previous.pending }
+      : {}),
   };
   const writes = new Map<string, string | null>(originals);
   for (const [id, path] of paths) {
+    if (selection && !selection.files.includes(path)) {
+      const prior = Object.entries(previous?.documents ?? {}).find(([, doc]) => doc.rootId === id);
+      if (!prior) throw new Error('Unselected document has no shared baseline');
+      const [priorPath, document] = prior;
+      if (state.documents[priorPath])
+        throw new Error('Select every document involved in a path swap');
+      state.documents[priorPath] = document;
+      for (const key of document.nodeIds) state.entries[key] = previous!.entries[key]!;
+      continue;
+    }
     const options = {
       blocks,
       display: displays.get(id),
@@ -407,6 +438,7 @@ export async function writeSnapshot(
       current && semantic(current) === semantic(parsed.document)
         ? await readPrivate(root, path)
         : renderDocument(id, path, byId, paths, options);
+    if (state.documents[path]) throw new Error('Select every document involved in a path swap');
     state.documents[path] = {
       rootId: id,
       fileHash: hash(content),

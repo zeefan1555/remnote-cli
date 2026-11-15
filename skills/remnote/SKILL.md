@@ -176,19 +176,21 @@ edits, use newer content only when trustworthy version evidence is comparable;
 otherwise preserve both versions. Never use whole-file mtime, sync capture time or
 review time to pick a winner. Review history and scheduling remain RemNote-owned;
 local snapshots are read-only and must not be sent back.
-Use an authorized private directory excluded from code Git. A separate local-only
-Git repository may track content without a network remote; ignore `.sync/`, locks
-and credentials. Exclude `.obsidian/`, `.trash/` and `.DS_Store` from content scans,
+Use an authorized private directory excluded from code Git. A separate private
+Git repository may track content; network backup needs explicit user authorization.
+Ignore `.sync/`, locks and credentials. Exclude `.obsidian/`, `.trash/` and `.DS_Store` from content scans,
 frozen plans and Git. Preserve user configuration and trash.
 
 Use `sync import DIR` with an explicit KB and declared subtree or official archive
 only for a new empty vault. Verify reported scope and completeness; repeated
-import is not a merge. Keep the `sync DIR` preview/apply entrypoint rather than
-restoring `pull`/`push` aliases. Preview/apply reports `incoming`, `outgoing`,
+import is not a merge. `sync` is a pure command group: use `sync plan DIR` for a
+zero-native-write preview and `sync apply DIR` for execution, with no `--apply`
+flag on apply. Do not restore root actions or `pull`/`push` aliases.
+Preview/apply reports `incoming`, `outgoing`,
 `converged`, `metadataRefresh` and archived `resolutions`. Continuous reads cover bound IDs only (batches
 of at most 50), with `globalDiscoveryComplete: false`; new top-level roots are
 outside scope. Missing objects, unknown children and reparenting must fail or
-conflict. Direct Markdown edits followed by one `sync DIR --apply` are the daily
+conflict. Direct Markdown edits followed by one `sync apply DIR` are the daily
 path; no manual read/save/lint/diff/preview pipeline is required. When controlled
 Agent edit clocks are needed, optionally use `sync read DIR PATH`, then
 `sync save DIR PATH --content-file FILE --expected-file-hash HASH` with the same
@@ -215,20 +217,40 @@ Obsidian dynamic queries. Unverified new embeds fail lint before remote writes.
 
 New imports publish the human format. Explicit offline `sync format DIR` converts
 only a complete, clean sealed legacy publication with no pending write journal,
-preserving native/original records and making zero backend calls. Already-human
-input is validated and reports `already-formatted`; damaged identity is refused,
-not recreated. This is not a daily-sync fallback or a way to discard local edits.
+preserving native/original records and making zero backend calls. Clean already-human
+input is validated and canonically re-rendered while preserving attributes, anchors,
+native records and clocks; `already-formatted` means no publication was needed.
+Dirty input and damaged identity are refused, not recreated. This is not a
+daily-sync fallback or a way to discard local edits.
 
-Run `sync DIR --apply` once within the user's write scope; it performs whole-vault
-lint, fresh planning, guarded apply and verification. `sync DIR` remains preview;
-`--apply --plan-hash HASH` requires a previously reviewed frozen plan. The plan can include incoming
+Run `sync apply DIR` once within the user's write scope; it performs whole-vault
+lint, fresh planning, guarded apply and verification. Plan/apply default to
+`--scope changed` for locally dirty Rems and necessary dependencies. Repeat
+`--path PATH` to filter vault-relative files/directories, not globs or patches;
+confirm existing edits in a selected file are authorized too. `--scope all`
+reconciles all bound IDs in the selected paths; no path means the entire vault.
+Scope and path are independent, out-of-scope edits remain intact, and full-vault
+local lint/identity/freeze still run. Changed scope is not a remote changes-since
+feed. Offline `sync diff DIR` supports path filtering; status/lint stay full-vault.
+Verification-only dependencies do not advance their native baseline or clocks;
+later all-scope reconciliation must still discover their remote-only edits.
+Clean changed/empty selections make no native calls. Layout-only apply may publish
+selected files offline (`localPublished: true`, `remoteChecked: false`) while
+preserving unselected bytes, all native records/clocks and a separate pending plan.
+This receipt does not establish remote freshness.
+
+`sync apply DIR --plan-hash HASH` requires a previously reviewed frozen plan with
+matching normalized selectors, selected documents/IDs and all frozen vault files;
+never reuse it for a materially different selection. The plan can include incoming
 and outgoing changes; recheck both endpoints and advance the common baseline only
 after semantic verification. Pre/post checks are optimistic, not an atomic native
 conditional write: concurrent edits can still fall into the check-write window.
 Native transactions stay disabled. Any lint error blocks the whole sync. Preserve opaque
 content, native identity, parent/order and review history. Local renames preserve
 Rem identity; missing files or remote objects are not automatic deletion or movement requests.
-Deletion needs exact `--delete-id`/`--scope-root` intent and the destructive gates.
+Deletion is independent: `sync delete DIR --id ID --scope-root ID` previews by
+default; execution also requires `--apply --plan-hash HASH`, destructive
+authorization and live write gates. It accepts no scope/path filters.
 Finish with exact-ID semantic readback; represented metadata alone is not proof of
 native writability or full import coverage.
 

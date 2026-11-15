@@ -78,13 +78,14 @@ The sync design supports editing in both a private human-readable Markdown vault
 and RemNote, including card edits during review. Users in Obsidian and agents
 edit the same local files. A shared baseline supports per-Rem semantic three-way
 merging without whole-file last-write-wins. Keep
-content outside code Git, optionally in a separate local-only Git repository
-without a network remote. Sync does not configure Git or upload content to a remote.
+content outside code Git, optionally in a separate private content repository;
+network backup needs explicit user authorization. Sync does not configure Git or
+upload content to a remote.
 
 ```bash
 remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
 remnote-cli sync status /PRIVATE/vault
-remnote-cli sync /PRIVATE/vault --apply
+remnote-cli sync apply /PRIVATE/vault
 ```
 
 Import establishes the initial baseline in a new empty directory, from a declared
@@ -97,10 +98,29 @@ versions. File mtime, sync capture time and review time are not content authorit
 Review history and scheduling remain RemNote-owned and never flow back from a
 local snapshot. Missing content on either side does not imply deletion.
 
-Daily editing needs one `sync DIR --apply` invocation: it validates, plans,
+Daily editing needs one `sync apply DIR` invocation: it validates, plans,
 applies and verifies without a manual read/save/lint/diff/preview pipeline.
-Omit `--apply` for a preview, or add `--plan-hash HASH` to require a previously
-reviewed frozen plan. Neither apply form retries uncertain writes automatically.
+Use `sync plan DIR` for a preview with zero native writes, or add
+`--plan-hash HASH` to apply a previously reviewed frozen plan. `sync` is only a
+command group; `apply` has no `--apply` flag. Neither apply form retries uncertain
+writes automatically.
+
+Plan/apply default to `--scope changed`, reading locally dirty Rems and necessary
+dependencies. Repeat `--path 'Folder/Note.md'` or `--path 'Folder'` to select
+vault-relative files/directories, not globs or individual patches. `--scope all`
+reconciles every bound ID in those selected paths; omit `--path` to select the
+entire vault. Scope and path are independent selectors. Out-of-scope local edits
+are preserved, while local lint, identity validation and freezing still cover the
+whole vault. Changed scope is not a remote changes-since feed or proof of global
+freshness. `sync diff DIR` is offline and accepts `--path`; status/lint stay
+whole-vault. Frozen plan hashes bind the normalized selectors, actual selection
+and full-vault frozen inputs, so a materially changed selection cannot reuse one.
+Dependencies are checked for safety, not merged as incoming content or given new
+baseline clocks. A later all-scope sync still sees their remote-only edits.
+Clean changed/empty selections make no remote calls. Selected layout-only edits
+can publish offline, with `localPublished: true` and `remoteChecked: false`;
+unselected source bytes, native records and clocks stay unchanged.
+
 The current candidate reports `incoming`, `outgoing`,
 `converged` and conflict receipts; native acceptance is separate. The offline
 `sync read` / `sync save` workflow binds controlled local edits to each changed Rem
@@ -136,6 +156,9 @@ New imports use this human format. For a clean previously published native-YAML
 vault, explicit offline `sync format DIR` converts its projection with zero backend
 calls, preserving native records and originals. Dirty source, incomplete baselines,
 pending journals or damaged identity are refused; daily sync has no legacy fallback.
+The same explicit command can canonically re-render a clean already-human vault,
+including empty-note block anchors, without changing native records or clocks.
+It reports `already-formatted` only when no publication is needed.
 See the [sync reference](docs/guides/remnote-cli-command-reference.md#sync) for exact
 format and write boundaries.
 
@@ -143,7 +166,10 @@ Keep the vault root 0700; Obsidian-saved Markdown may be 0644, CLI-created Markd
 is 0600, and private sidecars/state remain 0600. Exclude `.obsidian/`, `.trash/`
 and `.DS_Store` from content scans, frozen plans and Git; also ignore `.sync/`,
 locks and credentials in Git. Existing Rem/card IDs, parent/order and review
-history are protected; file removal is not a delete or move instruction. For
+history are protected; file removal is not a delete or move instruction. Preview
+deletion separately with `sync delete DIR --id ID --scope-root ID`; execution
+also requires `--apply --plan-hash HASH`, destructive authorization and live write
+gates. Delete accepts no scope/path filters. For
 native syntax, explicit deletion and recovery, see the
 [sync reference](docs/guides/remnote-cli-command-reference.md#sync).
 Writes are sequential, not atomic. Pre/post revision hashes are client optimistic
