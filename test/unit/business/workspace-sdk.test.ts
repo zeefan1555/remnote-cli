@@ -237,6 +237,16 @@ describe('public SDK sync adapter', () => {
     expect(await readCardHistory(history)).toStrictEqual(expected);
   });
   it.each([
+    { label: 'Date', value: new Date(0) },
+    { label: 'class instance', value: new (class Future {})() },
+    {
+      label: 'custom prototype',
+      value: Object.assign(Object.create({ inherited: 1 }), { own: 2 }),
+    },
+  ])('rejects $label objects in Card history', async ({ value }) => {
+    await expect(readCardHistory([{ future: value }])).rejects.toThrow(TypeError);
+  });
+  it.each([
     { label: 'undefined history entry', history: [undefined] },
     { label: 'sparse history', history: new Array(1) },
     { label: 'nested undefined array entry', history: [{ future: [undefined] }] },
@@ -246,8 +256,6 @@ describe('public SDK sync adapter', () => {
     { label: 'bigint', history: [{ future: 1n }] },
     { label: 'NaN', history: [{ future: Number.NaN }] },
     { label: 'infinity', history: [{ future: Number.POSITIVE_INFINITY }] },
-    { label: 'Date', history: [{ future: new Date(0) }] },
-    { label: 'class instance', history: [{ future: new (class Future {})() }] },
     {
       label: 'non-JSON special key value',
       history: [{ future: Object.fromEntries([['__proto__', 1n]]) }],

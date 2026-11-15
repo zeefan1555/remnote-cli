@@ -31,11 +31,10 @@ function publicSnapshot(rem: PluginRem): Record<string, unknown> {
 
 function cardHistoryJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(cardHistoryJson);
-  if (
-    value !== null &&
-    typeof value === 'object' &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
-  ) {
+  if (value !== null && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      throw new TypeError('Native Card history requires plain JSON objects');
     const result = Object.fromEntries(
       Object.entries(value)
         .filter(([, item]) => item !== undefined)

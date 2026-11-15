@@ -181,9 +181,10 @@ practice direction/enabled state, tags and references. Structured facts use:
 - `cards`: exact `id`, `remId`, forward/backward or `{clozeId}` type, `createdAt`,
   `repetitionHistory`, `nextRepetitionTime`, `lastRepetitionTime`, `timesWrongInRow`.
   History and scheduling fields are read-only.
-  SDK history snapshots omit undefined object properties recursively, preserving
-  defined JSON values, unknown fields and array order. Undefined array elements,
-  array holes and other non-JSON values remain invalid.
+  SDK history snapshots accept plain or null-prototype objects only and omit
+  undefined object properties recursively, preserving defined JSON values,
+  unknown fields and array order. Undefined array elements, array holes and
+  other non-JSON values remain invalid.
 
 Nullable orthogonal details preserve list/quote/code/TODO/table, property and
 Power-up flags; `embeddedQueueViewMode`, `todoStatus`, `fontSize`, `highlightColor`,

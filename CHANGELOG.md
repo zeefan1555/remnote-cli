@@ -50,8 +50,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Workspace SDK Card history snapshots omit undefined object properties recursively,
-  preserving defined JSON values, unknown fields and review order. Array holes,
-  undefined array elements and other non-JSON values still fail validation.
+  preserving defined JSON values, unknown fields and review order. Only plain or
+  null-prototype objects are accepted. Array holes, undefined array elements and
+  other non-JSON values still fail validation.
 - Workspace aggregate manifests and state mirrors now share bounded 32 MiB
   publication, readback and recovery support; ordinary payloads remain limited
   to 4 MiB. Final serialized sizes, including the publication ledger, are checked
