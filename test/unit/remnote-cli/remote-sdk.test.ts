@@ -136,6 +136,24 @@ describe('remote SDK values', () => {
     await expect(sdk.rem.findOne('r')).rejects.toThrow('mismatch');
   });
 
+  it('decodes an explicitly undefined SDK read result', async () => {
+    const request = vi.fn(async () => ({
+      capability: 'namespace:rem.findOne',
+      value: { $type: 'undefined' },
+    }));
+    const sdk = remoteSdk({ request } as never, catalog(), false);
+    expect(await sdk.rem.findOne('r')).toBeUndefined();
+  });
+
+  it.each([{}, { value: undefined }])(
+    'rejects a missing or unencoded SDK response value: %j',
+    async (result) => {
+      const request = vi.fn(async () => ({ capability: 'namespace:rem.findOne', ...result }));
+      const sdk = remoteSdk({ request } as never, catalog(), false);
+      await expect(sdk.rem.findOne('r')).rejects.toThrow('Incomplete SDK response value');
+    }
+  );
+
   it('refuses native transactions before any callback or request runs', async () => {
     const request = vi.fn(async () => ({}));
     const sdk = remoteSdk({ request } as never, catalog(), false);

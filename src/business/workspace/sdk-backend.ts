@@ -151,15 +151,21 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     const cards = cardsSnapshot(await rem.getCards(), rem._id);
     let portal: WorkspaceRem['portal'];
     if (rem.type === RemType.PORTAL) {
-      const [type, members] = await settleReads([
+      const [rawType, members] = await settleReads([
         rem.getPortalType(),
         rem.getPortalDirectlyIncludedRem(),
       ]);
+      // The SDK may explicitly return undefined for an unclassified portal subtype.
+      const type = rawType === undefined ? null : rawType;
       if (
         (type !== null && (typeof type !== 'number' || !Number.isInteger(type))) ||
         !Array.isArray(members)
       )
-        throw new Error('Incomplete native portal membership');
+        throw new Error(
+          `Incomplete native portal membership for ${rem._id}: ` +
+            `subtype=${rawType === null ? 'null' : typeof rawType}, integer=${Number.isInteger(rawType)}, ` +
+            `members=${members === null ? 'null' : Array.isArray(members) ? 'array' : typeof members}`
+        );
       const ids = members.map((member) => idSchema.parse(member?._id));
       if (new Set(ids).size !== ids.length) throw new Error('Ambiguous native portal membership');
       portal = { type, directlyIncludedRemIds: ids };

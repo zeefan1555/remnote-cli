@@ -107,18 +107,21 @@ describe('public SDK sync adapter', () => {
     expect(methods.getPortalType).toHaveBeenCalledTimes(2);
   });
 
-  it('preserves an observed null portal subtype without classifying it', async () => {
-    const f = fixture();
-    f.objects.get('r1')!.type = 6;
-    f.flags.get('r1')!.getPortalType!.mockResolvedValue(null);
-    f.flags.get('r1')!.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r0' }]);
-    const rem = (await f.backend.read(['r1']))[0]!;
-    expect(rem.portal).toEqual({ type: null, directlyIncludedRemIds: ['r0'] });
-    expect(isReferencePortal(rem)).toBe(false);
-  });
+  it.each([null, undefined])(
+    'preserves an observed nullish portal subtype without classifying it: %s',
+    async (type) => {
+      const f = fixture();
+      f.objects.get('r1')!.type = 6;
+      f.flags.get('r1')!.getPortalType!.mockResolvedValue(type);
+      f.flags.get('r1')!.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r0' }]);
+      const rem = (await f.backend.read(['r1']))[0]!;
+      expect(rem.portal).toEqual({ type: null, directlyIncludedRemIds: ['r0'] });
+      expect(isReferencePortal(rem)).toBe(false);
+    }
+  );
 
   it.each([
-    { type: undefined, members: [] },
+    { type: undefined, members: undefined },
     { type: '4', members: [] },
     { type: 1.5, members: [] },
     { type: Infinity, members: [] },
@@ -131,6 +134,16 @@ describe('public SDK sync adapter', () => {
     f.flags.get('r0')!.getPortalType!.mockResolvedValue(type);
     f.flags.get('r0')!.getPortalDirectlyIncludedRem!.mockResolvedValue(members);
     await expect(f.backend.read(['r0'])).rejects.toThrow();
+  });
+
+  it('reports malformed portal value shapes without subtype content', async () => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    f.flags.get('r0')!.getPortalType!.mockResolvedValue('synthetic unclassified subtype');
+    f.flags.get('r0')!.getPortalDirectlyIncludedRem!.mockResolvedValue(undefined);
+    await expect(f.backend.read(['r0'])).rejects.toThrow(
+      /^Incomplete native portal membership for r0: subtype=string, integer=false, members=undefined$/
+    );
   });
 
   it('drains a portal membership read before reporting a sibling portal failure', async () => {
