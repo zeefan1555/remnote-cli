@@ -527,6 +527,16 @@ Unknown or partial journal outcomes remain blocked for exact-ID reconciliation;
 omitting `--plan-hash` is not a retry or recovery bypass. Deletion still requires
 its explicit ID, scope boundary and destructive permission gates.
 
+For a final plan with no native mutations, selected multiline questions may ingest
+new direct answer leaves or a reordered child list. All original answer IDs must
+remain under the same parent; the original question Card identities must be known
+and unchanged. Every answer, including an empty separator, must have verified
+leaf/card-item facts and zero independent Cards. Exact new child IDs are read and
+included in `incoming`, never recreated. Removals, moves, nested additions, unknown
+facts and mixed outgoing/structural-incoming plans remain conflicts. A read-only
+plan may observe changed child lists on verification-only dependencies without
+publishing those dependencies; the ordinary outgoing structure guard is unchanged.
+
 Only reads are parallel: up to 16 local file reads and 4 exact-ID remote batches
 of 50. Each native batch snapshots at most 4 Rems concurrently, each with up to
 12 independent SDK flags (192 in-flight flag reads at the composed maximum).
@@ -552,8 +562,9 @@ with `remoteChecked: false` and no checked IDs. Bound-ID planning reports
 `discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`; even an all-scope
 success cannot establish global discovery. `diff` is local-only and reports
 `remoteChecked: false`; it cannot establish remote freshness or convergence.
-`checkedIds` / `checkedCount` describe the initial bound-ID verification set,
-not the number of SDK calls or repeated reads. Created IDs have separate `ids`
+`checkedIds` / `checkedCount` describe the bound-ID verification set, including
+exact new incoming answer IDs, not the number of SDK calls or repeated reads.
+Locally created IDs have separate `ids`
 and readback receipts. `selection` records canonical `paths`, selected `files`,
 actual local-key `outgoingKeys`, `reconcileIds` and disjoint `verificationIds`.
 Verification-only dependencies do not advance their shared native baseline or

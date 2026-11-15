@@ -382,7 +382,13 @@ export async function writeSnapshot(
   const files = frozen ?? (await FrozenFiles.capture(root));
   await files.check();
   const reconciled = new Set(
-    selection ? [...selection.reconcileIds, ...Object.values(assignedIds)] : byId.keys()
+    selection
+      ? [
+          ...selection.reconcileIds,
+          ...Object.values(assignedIds),
+          ...rems.filter((rem) => !previous?.entries[rem.id]).map((rem) => rem.id),
+        ]
+      : byId.keys()
   );
   const localVersions = { ...previous?.localVersions },
     remoteVersions = { ...previous?.remoteVersions };

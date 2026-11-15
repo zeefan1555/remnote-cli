@@ -116,7 +116,10 @@ freshness. `sync diff DIR` is offline and accepts `--path`; status/lint stay
 whole-vault. Frozen plan hashes bind the normalized selectors, actual selection
 and full-vault frozen inputs, so a materially changed selection cannot reuse one.
 Dependencies are checked for safety, not merged as incoming content or given new
-baseline clocks. A later all-scope sync still sees their remote-only edits.
+baseline clocks. A zero-native-write plan may observe a changed dependency child
+list without importing it; any final outgoing operation keeps the sealed child
+list guard. Identity, flags, missing facts and concurrent-change checks remain.
+A later all-scope sync still sees their remote-only edits.
 Clean changed/empty selections make no remote calls. Selected layout-only edits
 can publish offline, with `localPublished: true` and `remoteChecked: false`;
 unselected source bytes, native records and clocks stay unchanged.
@@ -132,9 +135,13 @@ Independent front/back edits to the same basic card still share one whole-Rem
 merge unit, not individual fields.
 Legacy `pull`/`push` aliases are removed. Continuous discovery is limited to bound
 IDs (`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`), read in
-batches of at most 50. Unknown children, missing Rems and reparenting fail or
-conflict; new top-level roots are not discovered by this scope. An initial archive
-import does not prove continuous whole-library coverage.
+batches of at most 50. A zero-native-write plan can also ingest new direct answer
+leaves (including empty separators) or reorder retained answers under a selected
+multiline question. It reads exact child IDs, preserves all old answer IDs and the
+original question Card IDs, and requires verified leaf facts with no independent
+Cards. Mixed outgoing/structural-incoming plans, removed answers, nested additions,
+other unknown children, missing Rems and reparenting conflict. New top-level roots
+are not discovered; an initial archive import does not prove continuous coverage.
 
 Ordinary nested Markdown lists use short, stable Obsidian anchors; a single
 hidden `<!-- remnote:document-key -->` before H1 binds each imported document.

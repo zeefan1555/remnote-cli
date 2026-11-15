@@ -424,7 +424,7 @@ describe('identity-preserving outline relationships', () => {
   it('rejects inserting grandchildren beneath an existing multiline answer before connecting', async () => {
     const f = await prepare();
     await edit(f.path, (source) =>
-      source.replace(/(    - Because[^\n]*)/, '$1\n      - Nested ^nested-answer')
+      source.replace(/( {4}- Because[^\n]*)/, '$1\n      - Nested ^nested-answer')
     );
     expect(await lintWorkspace(directory)).toMatchObject({ ok: false });
     const factory = vi.fn(async () => f.backend);
@@ -1099,6 +1099,307 @@ describe('identity-preserving outline relationships', () => {
 });
 
 describe('selected incremental sync', () => {
+  async function incomingDependencyFixture(childCount = 1) {
+    const f = fixture();
+    f.rems.get('answer')!.text = ['Because ', { i: 'q', _id: 'subdoc' }];
+    f.rems.get('subdoc')!.children = Array.from({ length: childCount }, (_, n) => `old_child_${n}`);
+    for (const id of f.rems.get('subdoc')!.children)
+      f.rems.set(id, native(id, [id], { parent: 'subdoc' }));
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.answer!.path;
+    f.rems.get('subdoc')!.children.push('remote_child');
+    f.rems.set('remote_child', native('remote_child', ['Unselected child'], { parent: 'subdoc' }));
+    return { ...f, state, path };
+  }
+
+  it('accepts zero-write incoming after a dependency gains its twentieth child without publishing that dependency', async () => {
+    const f = await incomingDependencyFixture(19),
+      dependencyPath = f.state.entries.subdoc!.path;
+    f.rems.get('answer')!.text = ['Remote answer ', { i: 'q', _id: 'subdoc' }];
+    f.rems.get('subdoc')!.text = ['Unselected remote dependency'];
+    f.rems.get('subdoc')!.public = { updatedAt: Date.now() - 1000 };
+    f.backend.identity = vi.fn(async () => ({ kbId: 'kb', writable: false, destructive: false }));
+    const dependency = await workspace.readWorkspace(directory, dependencyPath);
+    await workspace.saveWorkspace(
+      directory,
+      dependencyPath,
+      dependency.content.replace('Child doc', 'Dirty unselected dependency') + '\n- Local draft\n',
+      dependency.fileHash
+    );
+    const before = await loadState(directory),
+      raw = await readPrivate(directory, before.entries.subdoc!.rawPath),
+      bytes = await readPrivate(directory, dependencyPath);
+    const preview = (await syncWorkspace(directory, async () => f.backend, {
+      scope: 'all',
+      paths: [f.path],
+    })) as { planHash: string };
+    expect(preview).toMatchObject({
+      status: 'preview',
+      incoming: ['answer'],
+      outgoing: [],
+      creates: 0,
+      updates: 0,
+      selection: { verificationIds: expect.arrayContaining(['subdoc']) },
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [f.path],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).toMatchObject({ status: 'verified', incoming: ['answer'], remoteWrites: 0, outgoing: [] });
+    const after = await loadState(directory);
+    expect(f.calls).toEqual([]);
+    expect(await readPrivate(directory, f.path)).toContain('Remote answer');
+    expect(await readPrivate(directory, dependencyPath)).toBe(bytes);
+    expect(await readPrivate(directory, before.entries.subdoc!.rawPath)).toBe(raw);
+    expect(after.entries.subdoc).toEqual(before.entries.subdoc);
+    expect(after.documents[dependencyPath]).toEqual(before.documents[dependencyPath]);
+    expect(after.remoteVersions!.subdoc).toEqual(before.remoteVersions!.subdoc);
+    expect(after.localVersions!.subdoc).toEqual(before.localVersions!.subdoc);
+    expect(after.entries.remote_child).toBeUndefined();
+    expect(vi.mocked(f.backend.read).mock.calls.flatMap(([ids]) => ids)).not.toContain(
+      'remote_child'
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    await edit(f.path, (s) => s.replace('Remote answer', 'Later local answer'));
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Verification dependency structure changed: subdoc');
+    expect(f.calls).toEqual([]);
+  });
+
+  it('imports new native direct multiline answers and empty separators with no native writes or Card replacement', async () => {
+    const f = await incomingDependencyFixture(),
+      cards = await f.backend.cardFacts('question');
+    f.rems.get('answer')!.text = ['Remote revised answer ', { i: 'q', _id: 'subdoc' }];
+    f.rems.get('question')!.children = ['remote_blank', 'answer', 'remote_answer'];
+    f.rems.set('remote_blank', native('remote_blank', [], { parent: 'question', cardItem: true }));
+    f.rems.set(
+      'remote_answer',
+      native('remote_answer', ['Remote additional answer'], { parent: 'question', cardItem: true })
+    );
+    f.backend.identity = vi.fn(async () => ({ kbId: 'kb', writable: false, destructive: false }));
+    const preview = (await syncWorkspace(directory, async () => f.backend, {
+      scope: 'all',
+      paths: [f.path],
+    })) as { planHash: string };
+    expect(preview).toMatchObject({
+      status: 'preview',
+      incoming: ['answer', 'question', 'remote_answer', 'remote_blank'],
+      outgoing: [],
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [f.path],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).toMatchObject({ status: 'verified', complete: true, remoteWrites: 0, outgoing: [] });
+    expect(f.calls).toEqual([]);
+    expect(await f.backend.cardFacts('question')).toEqual(cards);
+    const after = await loadState(directory),
+      source = await workspace.readWorkspace(directory, f.path, { outline: true });
+    expect(source.outline!.nodes.question!.children).toEqual([
+      'remote_blank',
+      'answer',
+      'remote_answer',
+    ]);
+    expect(source.outline!.nodes.remote_blank).toMatchObject({
+      text: '',
+      cardItem: true,
+      children: [],
+      cards: [],
+    });
+    expect(source.content).toContain('Remote additional answer');
+    expect(source.content).toContain('Remote revised answer');
+    expect(source.content).not.toContain('rems:');
+    for (const id of ['question', 'answer'])
+      expect(after.entries[id]!.blockId).toBe(f.state.entries[id]!.blockId);
+    expect(after.remoteVersions!.remote_answer).toBeDefined();
+    expect(after.entries.remote_child).toBeUndefined();
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
+    const factory = vi.fn(async () => f.backend);
+    expect(await syncWorkspace(directory, factory)).toMatchObject({
+      status: 'unchanged',
+      remoteChecked: false,
+      remoteWrites: 0,
+    });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'old-leaf-removal',
+    'old-leaf-card',
+    'new-leaf-card',
+    'nested-leaf',
+    'unknown-card-item',
+    'replacement-question-card',
+    'mixed-outgoing',
+  ])('rejects %s in a structural incoming answer update before native writes', async (kind) => {
+    const f = await prepare();
+    f.rems.get('question')!.children.push('remote_answer');
+    f.rems.set(
+      'remote_answer',
+      native('remote_answer', ['Remote answer'], { parent: 'question', cardItem: true })
+    );
+    if (kind === 'old-leaf-removal') f.rems.get('question')!.children = ['remote_answer'];
+    if (kind === 'old-leaf-card')
+      f.rems.get('answer')!.cards = [
+        { ...(await f.backend.read(['question']))[0]!.cards![0]!, id: 'unexpected-answer-card' },
+      ];
+    if (kind === 'new-leaf-card') f.rems.get('remote_answer')!.backText = ['Independent answer'];
+    if (kind === 'nested-leaf') f.rems.get('remote_answer')!.children = ['nested'];
+    if (kind === 'unknown-card-item') f.rems.get('remote_answer')!.cardItem = null;
+    if (kind === 'replacement-question-card')
+      f.rems.get('question')!.cards = [
+        { ...(await f.backend.read(['question']))[0]!.cards![0]!, id: 'replacement-card' },
+      ];
+    if (kind === 'mixed-outgoing') await edit(f.path, (s) => s.replace('Front', 'Local front'));
+    const before = await readPrivate(directory, f.path);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [f.path],
+        apply: true,
+      })
+    ).toMatchObject({ status: 'conflict', complete: false, remoteWrites: 0 });
+    expect(await readPrivate(directory, f.path)).toBe(before);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('refuses incoming answer Card replacement between the initial read and native guard', async () => {
+    const f = await prepare();
+    f.rems.get('question')!.children.push('remote_answer');
+    f.rems.set(
+      'remote_answer',
+      native('remote_answer', ['Remote answer'], { parent: 'question', cardItem: true })
+    );
+    const card = (await f.backend.read(['question']))[0]!.cards![0]!,
+      guard = f.backend.guard,
+      before = await readPrivate(directory, f.path);
+    f.backend.guard = vi.fn(async (ids) => {
+      f.rems.get('remote_answer')!.cards = [{ ...card, id: 'late-card', remId: 'remote_answer' }];
+      return guard(ids);
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [f.path],
+        apply: true,
+      })
+    ).toMatchObject({
+      status: 'conflict',
+      complete: false,
+      remoteWrites: 0,
+      error: 'Incoming Card identity changed on remote_answer',
+    });
+    expect(await readPrivate(directory, f.path)).toBe(before);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('uses the final operation set when local and remote content converge without writes', async () => {
+    const f = await incomingDependencyFixture();
+    await edit(f.path, (s) => s.replace('Because', 'Converged answer'));
+    f.rems.get('answer')!.text = ['Converged answer ', { i: 'q', _id: 'subdoc' }];
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
+    ).toMatchObject({ status: 'verified', converged: ['answer'], outgoing: [], remoteWrites: 0 });
+    expect(f.calls).toEqual([]);
+    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
+  });
+
+  it.each(['edit', 'create', 'delete'])(
+    'still refuses dependency child drift before any outgoing %s',
+    async (kind) => {
+      const f = await incomingDependencyFixture();
+      if (kind === 'edit') await edit(f.path, (s) => s.replace('Because', 'Local answer'));
+      if (kind === 'create')
+        await edit(f.path, (s) => s + '\n- New note [Target](remnote:subdoc)\n');
+      await expect(
+        syncWorkspace(directory, async () => f.backend, {
+          apply: kind !== 'delete',
+          ...(kind === 'delete'
+            ? { deleteId: 'question', scopeRoot: 'daily' }
+            : { scope: 'all', paths: [f.path] }),
+        })
+      ).rejects.toThrow('Verification dependency structure changed: subdoc');
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it.each(['missing', 'card-identity', 'flags'])(
+    'still refuses %s on an incoming-only dependency',
+    async (kind) => {
+      const f = await incomingDependencyFixture();
+      f.rems.get('answer')!.text = ['Remote answer ', { i: 'q', _id: 'subdoc' }];
+      if (kind === 'missing') f.rems.delete('subdoc');
+      if (kind === 'flags') f.rems.get('subdoc')!.folder = true;
+      if (kind === 'card-identity')
+        f.rems.get('subdoc')!.cards = [
+          { ...(await f.backend.read(['question']))[0]!.cards![0]!, id: 'unexpected-card' },
+        ];
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { scope: 'all', paths: [f.path] })
+      ).rejects.toThrow(
+        /(?:Missing verification dependency|Verification dependency structure changed):? subdoc/
+      );
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('binds incoming dependency observations to the preview hash', async () => {
+    const f = await incomingDependencyFixture();
+    f.rems.get('answer')!.text = ['Remote answer ', { i: 'q', _id: 'subdoc' }];
+    const bytes = await readPrivate(directory, f.path),
+      preview = (await syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [f.path],
+      })) as { planHash: string };
+    f.rems.get('subdoc')!.children.push('later_child');
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        scope: 'all',
+        paths: [f.path],
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).rejects.toThrow('Apply requires the exact frozen --plan-hash');
+    expect(await readPrivate(directory, f.path)).toBe(bytes);
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['local', 'dependency'])(
+    'refuses %s drift after freezing an incoming-only apply',
+    async (side) => {
+      const f = await incomingDependencyFixture();
+      f.rems.get('answer')!.text = ['Remote answer ', { i: 'q', _id: 'subdoc' }];
+      const bytes = await readPrivate(directory, f.path),
+        guard = f.backend.guard;
+      f.backend.guard = vi.fn(async (ids) => {
+        const digest = await guard(ids);
+        if (side === 'local') await edit(f.path, (s) => s.replace('Because', 'New local input'));
+        else f.rems.get('subdoc')!.children.push('later_child');
+        return digest;
+      });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, {
+          scope: 'all',
+          paths: [f.path],
+          apply: true,
+        })
+      ).toMatchObject({ status: 'conflict', complete: false, remoteWrites: 0 });
+      expect(await readPrivate(directory, f.path)).toBe(
+        side === 'local' ? bytes.replace('Because', 'New local input') : bytes
+      );
+      expect(f.calls).toEqual([]);
+    }
+  );
+
   it('does not open a backend for a clean changed selection or an existing empty directory', async () => {
     const f = await prepare(),
       factory = vi.fn(async () => f.backend);
