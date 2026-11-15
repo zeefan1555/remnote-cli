@@ -101,11 +101,14 @@ Review history and scheduling remain RemNote-owned and never flow back from a
 local snapshot. Missing content on either side does not imply deletion.
 
 The current candidate implements preview/apply with `incoming`, `outgoing`,
-`converged` and conflict receipts; native acceptance is separate. There is no
-trustworthy local per-Rem edit clock, so divergent same-content edits currently
-preserve both versions as `untrusted-edit-order` instead of guessing a winner.
-This includes independent front/back edits to the same basic card: the current
-merge unit is a whole Rem, not individual fields.
+`converged` and conflict receipts; native acceptance is separate. The offline
+`sync read` / `sync save` workflow binds controlled local edits to each changed Rem
+version's content hash and save time. Divergent same-Rem edits use whole-Rem
+`version-time-lww` only with comparable, hash-bound local/native clocks, after
+archiving both versions. Direct file edits do not establish a trusted local clock;
+missing, equal, or invalid clocks preserve both versions as `untrusted-edit-order`.
+Independent front/back edits to the same basic card still share one whole-Rem
+merge unit, not individual fields.
 Legacy `pull`/`push` aliases are removed. Continuous discovery is limited to bound
 IDs (`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`), read in
 batches of at most 50. Unknown children, missing Rems and reparenting fail or

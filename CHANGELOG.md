@@ -54,6 +54,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Correct the README sync summary to describe guarded local save clocks and
+  whole-Rem version-time LWW while retaining conflicts for untrusted ordering;
+  no runtime behavior changes.
 - Workspace SDK Card history snapshots omit undefined object properties recursively,
   preserving defined JSON values, unknown fields and review order. Only plain or
   null-prototype objects are accepted. Array holes, undefined array elements and
