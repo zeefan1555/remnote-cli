@@ -9,6 +9,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Disconnected CLI sessions retain the unknown-write/no-replay warning and report
+  the actual WebSocket close code. Only exact known Bridge close reasons become
+  fixed diagnostic labels; arbitrary peer text is redacted. Pending requests still
+  fail together without reconnecting or replaying operations.
+
 - Wiki link resolution indexes normalized full paths, stems and basenames once per
   local inspection instead of rescanning every document per link. Exact-path
   precedence, case/Unicode ambiguity, block/heading checks and all sync guards

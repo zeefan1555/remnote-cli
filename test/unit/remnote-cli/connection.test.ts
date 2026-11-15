@@ -82,6 +82,106 @@ describe('command-owned loopback session', () => {
     expect(next.port).toBe(port);
   });
 
+  it.each([
+    [4008, 'Protocol or authentication failure', 'protocol-or-authentication-failure'],
+    [4008, 'Authentication timeout', 'authentication-timeout'],
+    [1000, 'Command session ended', 'command-session-ended'],
+  ] as const)(
+    'reports close code %i and the safe label for %s without replaying concurrent requests',
+    async (code, reason, label) => {
+      const { connection, opened, port } = await listen();
+      const ws = await plugin(port);
+      await opened;
+      const requests: string[] = [];
+      ws.on('message', (raw) => {
+        const frame = JSON.parse(String(raw));
+        if (frame.id) requests.push(frame.id);
+      });
+      const outcomes = Promise.allSettled([
+        connection.request('first', {}),
+        connection.request('second', {}),
+      ]);
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      const closed = once(ws, 'close');
+      ws.close(code, reason);
+      await closed;
+      const message =
+        'Connection lost; write outcome unknown. Do not blindly replay. ' +
+        `WebSocket close code=${code}, reason=${label}.`;
+      for (const outcome of await outcomes) {
+        expect(outcome.status).toBe('rejected');
+        if (outcome.status === 'rejected') {
+          expect(outcome.reason).toBeInstanceOf(Error);
+          expect(outcome.reason.message).toBe(message);
+        }
+      }
+      await expect(connection.request('later', {})).rejects.toThrow(message);
+      expect(requests).toHaveLength(2);
+      expect(connection.timings.sdkCalls).toBe(2);
+    }
+  );
+
+  it.each([
+    { label: 'arbitrary text', reason: 'private knowledge base detail' },
+    { label: 'token-shaped text', reason: 'e'.repeat(64) },
+    { label: 'control characters', reason: 'Protocol or authentication failure\n\u001b[31m' },
+    {
+      label: 'a known prefix with private suffix',
+      reason: 'Command session ended: ' + 'd'.repeat(64),
+    },
+    { label: 'an object prototype name', reason: 'constructor' },
+    { label: 'an empty reason', reason: '' },
+  ])('redacts $label in a real close frame', async ({ reason }) => {
+    const { connection, opened, port } = await listen();
+    const ws = await plugin(port);
+    await opened;
+    const received = new Promise<void>((resolve) => {
+      ws.on('message', (raw) => {
+        if (JSON.parse(String(raw)).id) resolve();
+      });
+    });
+    const pending = connection.request('pending', {});
+    const message =
+      'Connection lost; write outcome unknown. Do not blindly replay. ' +
+      'WebSocket close code=4008, reason=<redacted>.';
+    const rejected = expect(pending).rejects.toMatchObject({ message });
+    await received;
+    const closed = once(ws, 'close');
+    ws.close(4008, reason);
+    await closed;
+    await rejected;
+    await expect(connection.request('later', {})).rejects.toMatchObject({ message });
+    expect(connection.timings.sdkCalls).toBe(1);
+  });
+
+  it('keeps the selected session usable when a non-selected socket closes', async () => {
+    const { connection, opened, port } = await listen();
+    const other = new WebSocket('ws://127.0.0.1:' + port);
+    sockets.push(other);
+    other.on('error', () => {});
+    const otherClosed = once(other, 'close');
+    await once(other, 'message');
+    const ws = await plugin(port);
+    await opened;
+    const requests: Array<{ id: string; payload: unknown }> = [];
+    let reply = false;
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (!frame.id) return;
+      requests.push(frame);
+      if (reply) ws.send(JSON.stringify({ id: frame.id, result: frame.payload }));
+    });
+    const pending = connection.request('pending', { n: 1 });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect((await otherClosed)[0]).toBe(1008);
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.send(JSON.stringify({ id: requests[0]!.id, result: requests[0]!.payload }));
+    await expect(pending).resolves.toEqual({ n: 1 });
+    reply = true;
+    await expect(connection.request('later', { n: 2 })).resolves.toEqual({ n: 2 });
+    expect(requests).toHaveLength(2);
+  });
+
   it.each(['token', 'kb', 'protocol', 'schema'])(
     'rejects invalid %s before an operation can start',
     async (kind) => {
@@ -183,7 +283,9 @@ describe('command-owned loopback session', () => {
     await opened;
     const requests = vi.fn();
     ws.on('message', requests);
-    await expect(connection.request('sdk_call', {}, 15)).rejects.toThrow('outcome unknown');
+    await expect(connection.request('sdk_call', {}, 15)).rejects.toThrow(
+      'SDK timeout; write outcome unknown. Do not blindly replay.'
+    );
     await expect(connection.request('sdk_call', {})).rejects.toThrow();
     expect(requests.mock.calls.filter(([raw]) => JSON.parse(String(raw)).action)).toHaveLength(1);
   });

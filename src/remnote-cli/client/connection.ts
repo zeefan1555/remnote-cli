@@ -8,6 +8,12 @@ export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 /** Current RemNote CLI Bridge manifest id. The previous id stays valid during the rename. */
 export const ACCEPTED_PLUGIN_IDS = ['remnote-cli-bridge', 'zeefan-remnote-sdk-bridge'] as const;
 export const ACCEPTED_PLUGIN_NAMES = ['RemNote CLI Bridge', 'RemNote SDK Bridge'] as const;
+// Close reasons come from the peer; only exact Bridge constants may become diagnostic labels.
+const BRIDGE_CLOSE_REASON_LABELS = new Map([
+  ['Authentication timeout', 'authentication-timeout'],
+  ['Protocol or authentication failure', 'protocol-or-authentication-failure'],
+  ['Command session ended', 'command-session-ended'],
+]);
 export const IdentitySchema = z
   .object({
     protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -112,13 +118,17 @@ export class Connection {
           })
         );
         ws.on('error', () => {});
-        ws.on('close', () => {
+        ws.on('close', (code, reason) => {
           clearTimeout(timer);
           this.sockets.delete(ws);
           if (this.client === ws) {
             this.client = undefined;
+            const label = BRIDGE_CLOSE_REASON_LABELS.get(reason.toString()) ?? '<redacted>';
             this.failPending(
-              new Error('Connection lost; write outcome unknown. Do not blindly replay.')
+              new Error(
+                'Connection lost; write outcome unknown. Do not blindly replay. ' +
+                  `WebSocket close code=${code}, reason=${label}.`
+              )
             );
           }
         });
