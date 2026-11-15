@@ -34,6 +34,8 @@ export function remoteSdk(
       expectedCatalogHash: catalog.sdkCatalogHash,
     })) as { capability: string; value: unknown };
     if (response.capability !== capability) throw new Error('SDK response capability mismatch');
+    if (!Object.hasOwn(response, 'value') || response.value === undefined)
+      throw new Error('Incomplete SDK response value');
     return decode(response.value);
   };
   const decode = (value: unknown): unknown => {

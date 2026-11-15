@@ -93,6 +93,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Preserve a successfully returned undefined portal subtype as unclassified `null`,
+  while still requiring complete direct membership. Missing or unencoded SDK
+  response values fail closed; malformed portal errors expose only the target
+  identity and value shapes, not subtype content.
 - Remove presentation attributes only for explicitly deleted blocks when publishing
   verified deletions. Pending verified deletions can finish local publication without
   repeating remote mutations; surviving attributes and strict orphan checks remain.
