@@ -3989,6 +3989,115 @@ describe('controlled RemNote workspace', () => {
     expect(f.calls).toEqual([]);
     expect((await loadState(directory)).entries).toEqual(f.state.entries);
   });
+  it.each(
+    (['direct', 'guarded'] as const).flatMap((mode) =>
+      (['add', 'replace', 'remove'] as const).map((change) => ({ mode, change }))
+    )
+  )(
+    'rejects incoming card $change before the first guard in $mode apply',
+    async ({ mode, change }) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+      const card = {
+        id: 'original-card',
+        remId: 'incoming',
+        type: 'forward',
+        createdAt: 1,
+        repetitionHistory: [],
+        nextRepetitionTime: null,
+        lastRepetitionTime: null,
+        timesWrongInRow: null,
+      };
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set(
+        'incoming',
+        native('incoming', [], { parent: 'chapter', cards: change === 'add' ? [] : [card] })
+      );
+      const guard = f.backend.guard;
+      let changed = false;
+      f.backend.guard = vi.fn(async (ids) => {
+        if (!changed) {
+          changed = true;
+          f.rems.get('incoming')!.cards =
+            change === 'remove' ? [] : [{ ...card, id: 'replacement-card' }];
+        }
+        return guard(ids);
+      });
+      const options =
+        mode === 'guarded'
+          ? {
+              paths: [f.path],
+              expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
+            }
+          : {};
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, ...options })
+      ).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        remoteWrites: 0,
+        error: expect.stringContaining('card identity'),
+      });
+      expect(f.calls).toEqual([]);
+      expect((await loadState(directory)).entries).toEqual(f.state.entries);
+    }
+  );
+  it.each(['direct', 'guarded'] as const)(
+    'preserves incoming remote-owned review updates before first guard in %s apply',
+    async (mode) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+      const card = {
+        id: 'incoming-card',
+        remId: 'incoming',
+        type: 'forward',
+        createdAt: 1,
+        repetitionHistory: [],
+        nextRepetitionTime: null,
+        lastRepetitionTime: null,
+        timesWrongInRow: null,
+      };
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set('incoming', native('incoming', [], { parent: 'chapter', cards: [card] }));
+      const reviewed = {
+        ...card,
+        repetitionHistory: [{ time: 2, score: 1 }],
+        nextRepetitionTime: 5,
+        lastRepetitionTime: 2,
+        timesWrongInRow: 0,
+      };
+      const guard = f.backend.guard;
+      let changed = false;
+      f.backend.guard = vi.fn(async (ids) => {
+        if (!changed) {
+          changed = true;
+          f.rems.get('incoming')!.cards = [reviewed];
+        }
+        return guard(ids);
+      });
+      const options =
+        mode === 'guarded'
+          ? {
+              paths: [f.path],
+              expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
+            }
+          : {};
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, ...options })
+      ).toMatchObject({
+        status: 'verified',
+        complete: true,
+        remoteWrites: 1,
+        cardsPreserved: true,
+      });
+      const state = await loadState(directory);
+      expect(
+        JSON.parse(await readPrivate(directory, state.entries.incoming!.rawPath))
+      ).toMatchObject({ cards: [reviewed] });
+      expect(f.rems.get('incoming')!.cards).toEqual([reviewed]);
+      expect(f.calls).toEqual(['answer:text']);
+    }
+  );
   it.each(['child', 'query', 'card'] as const)(
     'rejects an incoming %s race at the first write boundary',
     async (kind) => {

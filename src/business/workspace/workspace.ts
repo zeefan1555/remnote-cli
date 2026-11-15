@@ -1035,6 +1035,8 @@ async function synchronizeWorkspace(
         'Prior write outcome requires exact-ID reconciliation; automatic replay is forbidden'
       );
     const existingIds = affectedIds(plan, remote, metadataChanged);
+    // Incoming descendants already exist natively; only outgoing creations may acquire new cards.
+    const observedNativeIds = new Set([...context.native.keys(), ...(selection.addedIds ?? [])]);
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     const protectedIds = existingIds.filter((id) => !plan.deletion?.ids.includes(id));
     const guardHash = await backend.guard(protectedIds);
@@ -1162,10 +1164,10 @@ async function synchronizeWorkspace(
           throw new Error(`Concurrent native Powerup change on ${id}`);
         if (
           !plan.deletion?.ids.includes(id) &&
-          (context.native.has(id) || (createdIds.has(id) && rem.cards?.length)) &&
+          (observedNativeIds.has(id) || (createdIds.has(id) && rem.cards?.length)) &&
           hash(cardIdentities(current)) !== hash(cardIdentities(rem))
         )
-          throw new Error(`New card identity changed after resume readback: ${id}`);
+          throw new Error(`Native card identity changed after observed readback: ${id}`);
         fresh.set(id, current);
       }
       if (!step && (await backend.guard(protectedIds)) !== guardHash)
