@@ -23,8 +23,21 @@ const label = (value: string) => value.replace(/[[\]|\r\n]/g, ' ').trim() || 'Un
 /** Every lookup is an exact modeled identity. No guessed target or remote search fallback. */
 export class WorkspaceLinks {
   private readonly byId = new Map<string, LinkTarget>();
-  constructor(private readonly documents: LinkDocument[]) {
+  private readonly byPath = new Map<string, LinkDocument[]>();
+  private readonly byStem = new Map<string, LinkDocument[]>();
+  private readonly byBasename = new Map<string, LinkDocument[]>();
+  // Paths are fixed for this operation; retain all matches so collisions still fail closed.
+  constructor(documents: readonly LinkDocument[]) {
     for (const document of documents) {
+      for (const [index, key] of [
+        [this.byPath, pathKey(document.path)],
+        [this.byStem, pathKey(stem(document.path))],
+        [this.byBasename, pathKey(stem(posix.basename(document.path)))],
+      ] as const) {
+        const matches = index.get(key) ?? [];
+        matches.push(document);
+        index.set(key, matches);
+      }
       const hidden = new Set(
         [...referenceBranches(document.metadata).values()].flatMap((branch) => branch.ids.slice(1))
       );
@@ -53,18 +66,15 @@ export class WorkspaceLinks {
     if (target.includes('\\') || target.includes('\n') || file.includes(':'))
       throw new Error('Unsupported Wiki link target');
     let candidates: LinkDocument[];
-    if (!file)
-      candidates = this.documents.filter((doc) => pathKey(doc.path) === pathKey(currentPath));
+    if (!file) candidates = this.byPath.get(pathKey(currentPath)) ?? [];
     else {
       const exact =
         file.startsWith('./') || file.startsWith('../')
           ? posix.normalize(posix.join(posix.dirname(currentPath), file))
           : file.replace(/^\//, '');
-      candidates = this.documents.filter((doc) => pathKey(stem(doc.path)) === pathKey(stem(exact)));
+      candidates = this.byStem.get(pathKey(stem(exact))) ?? [];
       if (!candidates.length && !file.includes('/'))
-        candidates = this.documents.filter(
-          (doc) => pathKey(stem(posix.basename(doc.path))) === pathKey(stem(file))
-        );
+        candidates = this.byBasename.get(pathKey(stem(file))) ?? [];
     }
     if (candidates.length !== 1)
       throw new Error(

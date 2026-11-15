@@ -9,6 +9,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Wiki link resolution indexes normalized full paths, stems and basenames once per
+  local inspection instead of rescanning every document per link. Exact-path
+  precedence, case/Unicode ambiguity, block/heading checks and all sync guards
+  remain unchanged; no cross-operation cache or native-read shortcut is added.
+
 - Workspace structural observations use the public SDK `getChildrenRem()` entity
   list consistently in cheap probes, full reads, guards and discovery. Optional or
   incomplete public `children` fields no longer create false emptiness. Entity IDs,
