@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { NativeDetails, NativeMetadata, WorkspaceMetadata } from './metadata.js';
+import type {
+  DocumentAttributes,
+  NativeDetails,
+  NativeMetadata,
+  WorkspaceMetadata,
+} from './metadata.js';
 
 export function hash(value: unknown): string {
   function canonical(input: unknown): unknown {
@@ -105,12 +110,15 @@ export interface OutlineNode {
   children: string[];
   contentHash: string;
 }
-export interface ParsedDocument {
+export interface ParsedOutline {
   path: string;
-  fileHash: string;
+  attributes?: DocumentAttributes;
   metadata?: WorkspaceMetadata;
   nodes: OutlineNode[];
   references: Array<{ id: string; line: number }>;
+}
+export interface ParsedDocument extends ParsedOutline {
+  fileHash: string;
 }
 export interface WorkspaceChange {
   key: string;
@@ -127,9 +135,21 @@ export interface WorkspacePlan {
   directory: string;
   kbId: string;
   baseHash: string;
+  /** Whole-vault byte seal, including verification-only records and excluded owned guides. */
+  inputHash?: string;
   files: Record<string, string>;
   changes: WorkspaceChange[];
   deletion?: { rootId: string; scopeRoot: string; ids: string[] };
+  selection?: SyncSelection;
+}
+/** Outgoing intent, reconciliation candidates and verification dependencies are distinct sets. */
+export interface SyncSelection {
+  scope: 'changed' | 'all' | 'delete';
+  paths: string[];
+  files: string[];
+  outgoingKeys: string[];
+  reconcileIds: string[];
+  verificationIds: string[];
 }
 export interface SyncConflict {
   id: string;

@@ -28,7 +28,9 @@ import {
   type WorkspaceState,
   type SyncPlan,
   type ContentVersion,
+  type SyncSelection,
 } from './types.js';
+import { selectPlan, type SelectionOptions } from './selection.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
 import {
   contentProjection,
@@ -37,6 +39,7 @@ import {
   withNativeSnapshot,
 } from './snapshots.js';
 import { nodeContent } from './versions.js';
+import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
@@ -48,13 +51,19 @@ import {
 } from './publication.js';
 
 interface Journal {
-  version: 1;
+  version: 2;
   planHash: string;
   guardHash: string;
   state: 'preview' | 'applying' | 'verified' | 'unknown' | 'conflict';
   steps: Record<string, 'started' | 'verified' | 'unknown'>;
   ids: Record<string, string>;
-  final?: { hashes: Record<string, string>; files: Record<string, string>; deleted: string[] };
+  selection: SyncSelection;
+  final?: {
+    hashes: Record<string, string>;
+    inputHash: string;
+    deleted: string[];
+    structuralIds: string[];
+  };
 }
 
 async function requirePreviewOnly(state: WorkspaceState): Promise<void> {
@@ -62,7 +71,7 @@ async function requirePreviewOnly(state: WorkspaceState): Promise<void> {
   const old = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
   if (
     !old ||
-    old.version !== 1 ||
+    old.version !== 2 ||
     old.planHash !== state.pending.planHash ||
     old.state !== 'preview' ||
     Object.keys(old.steps).length
@@ -79,7 +88,7 @@ export async function readWorkspace(directory: string, path: string) {
     await requireNoPublication(root);
     const local = await inspectLocal(root);
     if (!local.parsed.has(path)) throw new Error('Read requires an exact tracked Markdown path');
-    const content = await readPrivate(root, path);
+    const content = await local.inputs.read(path);
     return {
       status: 'read',
       kbId: local.state.kbId,
@@ -101,8 +110,8 @@ export async function saveWorkspace(
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
-    const frozen = await FrozenFiles.capture(root),
-      before = await inspectLocal(root);
+    const before = await inspectLocal(root),
+      frozen = await before.inputs.freeze();
     await requirePreviewOnly(before.state);
     const original = before.parsed.get(path);
     if (
@@ -114,7 +123,7 @@ export async function saveWorkspace(
         'Save requires the current fileHash from sync read for this exact Markdown path'
       );
     assertFileSize(path, content);
-    const after = await inspectLocal(root, before.state, new Map([[path, content]]));
+    const after = await inspectLocal(root, before.state, new Map([[path, content]]), before.inputs);
     planLocal(after);
     await frozen.check();
     if (hash(content) === expectedFileHash)
@@ -407,10 +416,6 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
       });
     }
   }
-  if (plan.changes.length > 100)
-    throw new Error(
-      'One sync is limited to 100 changed/new nodes; split edits into reviewed batches'
-    );
   const deletion = planDeletion(context, options);
   if (deletion) {
     if (plan.changes.length)
@@ -422,14 +427,19 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
 
 export async function diffWorkspace(
   directory: string,
-  options: DeleteOptions = {}
+  options: { paths?: string[] } = {}
 ): Promise<unknown> {
   const root = await workspaceDirectory(directory),
-    plan = planLocal(await inspectLocal(root), options);
+    context = await inspectLocal(root),
+    plan = await selectPlan(context, planLocal(context), options),
+    frozen = await context.inputs.freeze();
+  plan.inputHash = hash(frozen.hashes());
+  await frozen.check();
   return {
     kbId: plan.kbId,
     remoteChecked: false,
     planHash: hash(plan),
+    selection: plan.selection,
     changes: plan.changes.map((change) => ({
       id: change.key,
       path: change.path,
@@ -496,31 +506,150 @@ function affectedIds(plan: SyncPlan, native: Map<string, WorkspaceRem>): string[
         current = current.parent ? native.get(current.parent) : undefined;
       }
     }
+  for (const id of [
+    ...(plan.selection?.reconcileIds ?? []),
+    ...(plan.selection?.verificationIds ?? []),
+  ])
+    if (native.has(id) && native.get(id)!.unsupported !== 'unverified-native-flags') ids.add(id);
   return [...ids].sort();
 }
 
+/** Only candidates and actual structural mutations advance the shared native baseline. */
+function publicationRems(
+  context: LocalContext,
+  remote: Map<string, WorkspaceRem>,
+  selection: SyncSelection,
+  assigned: Record<string, string>,
+  deleted: string[],
+  structuralIds: string[]
+) {
+  const result = new Map(context.native);
+  for (const id of [...selection.reconcileIds, ...Object.values(assigned)])
+    if (remote.has(id)) result.set(id, remote.get(id)!);
+  for (const id of structuralIds) {
+    if (selection.reconcileIds.includes(id) || !result.has(id)) continue;
+    const base = result.get(id)!,
+      current = remote.get(id)!;
+    result.set(id, {
+      ...base,
+      children: [...current.children],
+      ...(base.public ? { public: { ...base.public, children: [...current.children] } } : {}),
+    });
+  }
+  for (const id of deleted) result.delete(id);
+  return [...result.values()];
+}
+
 async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
-  for (const [path, digest] of Object.entries(plan.files))
+  await mapReads(Object.entries(plan.files), 16, async ([path, digest]) => {
     if (hash(await readPrivate(root, path)) !== digest)
       throw new Error('Local Markdown changed after plan was frozen');
+  });
 }
 
 /** Offline lint completes before backendFactory, so lint failures cause zero remote calls. */
 export async function pushWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: DeleteOptions & { apply?: boolean; planHash?: string } = {}
+  options: DeleteOptions & SelectionOptions & { apply?: boolean; planHash?: string } = {}
 ): Promise<unknown> {
+  if (options.deleteId || options.scopeRoot) {
+    if (options.scope !== undefined || options.paths !== undefined)
+      throw new Error('Explicit deletion does not accept --scope or --path');
+    if (options.apply && !options.planHash)
+      throw new Error('Explicit deletion apply requires the exact --plan-hash');
+  }
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
     const context = await inspectLocal(root),
       state = context.state,
-      localPlan = planLocal(context, options);
-    const frozen = await FrozenFiles.capture(root);
+      localPlan = await selectPlan(context, planLocal(context, options), options);
+    if (localPlan.changes.length > 100)
+      throw new Error('One sync is limited to 100 changed/new nodes; narrow --path or split edits');
+    let stateHash = hash(state);
+    async function persistState(): Promise<void> {
+      // Check before replacing either authority or mirror; a post-save check could hide tampering.
+      if (hash(await loadState(root)) !== stateHash)
+        throw new Error('Local sync metadata changed after plan was frozen');
+      await saveState(root, state);
+      stateHash = hash(state);
+    }
+    const frozen = await context.inputs.freeze();
+    localPlan.inputHash = hash(frozen.hashes());
     const store = localStore(state.kbId);
     await requirePreviewOnly(state);
-    if (options.apply && (!state.pending || options.planHash !== state.pending.planHash))
+    if (
+      options.planHash !== undefined &&
+      (!options.apply || !/^[a-f0-9]{64}$/.test(options.planHash))
+    )
+      throw new Error(
+        'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
+      );
+    const requestedSelection = localPlan.selection;
+    const checkedIds = [
+      ...requestedSelection.reconcileIds,
+      ...requestedSelection.verificationIds,
+    ].sort();
+    const coverage = {
+      discoveryScope: 'bound-ids',
+      globalDiscoveryComplete: false,
+      remoteChecked: checkedIds.length > 0,
+      checkedIds,
+      checkedCount: checkedIds.length,
+      partial: requestedSelection.reconcileIds.length < context.native.size,
+      selection: requestedSelection,
+    };
+    if (!checkedIds.length) {
+      // Every selected Rem already equals its native baseline; only local layout may publish.
+      const layoutChanged = context.dirty.some((path) => requestedSelection.files.includes(path));
+      const planHash = hash(localPlan);
+      if (options.planHash !== undefined && (!layoutChanged || options.planHash !== planHash))
+        throw new Error('Apply requires the exact frozen --plan-hash; selected layout changed');
+      await frozen.check();
+      if (!layoutChanged)
+        return {
+          status: 'unchanged',
+          complete: true,
+          changes: 0,
+          localPublished: false,
+          remoteWrites: 0,
+          ...coverage,
+        };
+      if (options.apply)
+        await writeSnapshot(
+          root,
+          state.kbId,
+          [...context.native.values()],
+          state,
+          state,
+          frozen,
+          undefined,
+          undefined,
+          [],
+          context.parsed,
+          {},
+          requestedSelection
+        );
+      return {
+        status: options.apply ? 'verified' : 'preview',
+        complete: true,
+        planHash,
+        creates: 0,
+        updates: 0,
+        incoming: [],
+        outgoing: [],
+        converged: [],
+        resolutions: [],
+        localPublished: options.apply === true,
+        remoteWrites: 0,
+        ...coverage,
+      };
+    }
+    if (
+      options.planHash !== undefined &&
+      (!state.pending || options.planHash !== state.pending.planHash)
+    )
       throw new Error(
         'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
       );
@@ -531,12 +660,12 @@ export async function pushWorkspace(
     const remote = await readRemote(context, localPlan, backend),
       { plan, metadataChanged, remoteVersions } = reconcile(context, localPlan, remote),
       planHash = hash(plan);
-    const coverage = {
-      discoveryScope: 'bound-ids',
-      globalDiscoveryComplete: false,
-      remoteChecked: true,
-    };
-    if (options.apply && (state.pending!.planHash !== planHash || options.planHash !== planHash))
+    const selection = plan.selection!;
+    coverage.selection = selection;
+    if (
+      options.planHash !== undefined &&
+      (state.pending!.planHash !== planHash || options.planHash !== planHash)
+    )
       throw new Error(
         'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
       );
@@ -546,7 +675,7 @@ export async function pushWorkspace(
     if (state.pending && state.pending.planHash !== planHash) {
       delete state.pending;
     }
-    if (hash(state) !== stateBeforeObservations) await saveState(root, state);
+    if (hash(state) !== stateBeforeObservations) await persistState();
     const resolutions = await archiveResolutions(root, context, plan, remote);
     if (plan.conflicts.length) {
       const conflicts = [];
@@ -584,15 +713,16 @@ export async function pushWorkspace(
       !plan.incoming.length &&
       !plan.converged.length &&
       !metadataChanged.length &&
-      !context.dirty.length
+      !context.dirty.some((path) => selection.files.includes(path))
     )
       return { status: 'unchanged', complete: true, changes: 0, remoteWrites: 0, ...coverage };
-    const key = `workspace-v1:${state.kbId}:${hash(root)}:${planHash}`;
+    const key = `workspace-v2:${state.kbId}:${hash(root)}:${planHash}`;
     let journal = await store.getLocal<Journal>(key);
     if (
       journal &&
-      (journal.version !== 1 ||
+      (journal.version !== 2 ||
         journal.planHash !== planHash ||
+        hash(journal.selection) !== hash(selection) ||
         journal.state !== 'preview' ||
         Object.keys(journal.steps).length)
     )
@@ -605,10 +735,18 @@ export async function pushWorkspace(
     const guardHash = await backend.guard(protectedIds);
     if (journal && journal.guardHash !== guardHash)
       throw new Error('Native card identity or immutable flags changed since preview');
-    journal ??= { version: 1, planHash, guardHash, state: 'preview', steps: {}, ids: {} };
+    journal ??= {
+      version: 2,
+      planHash,
+      guardHash,
+      state: 'preview',
+      steps: {},
+      ids: {},
+      selection,
+    };
     await store.setLocal(key, journal);
     state.pending = { planHash, journalKey: key };
-    await saveState(root, state);
+    await persistState();
     if (!options.apply)
       return {
         status: 'preview',
@@ -635,6 +773,8 @@ export async function pushWorkspace(
     journal.state = 'applying';
     await store.setLocal(key, journal);
     let active: string | undefined;
+    const structuralIds = new Set<string>();
+    let checkedWriteBoundary = false;
     async function preflight(): Promise<void> {
       await checkFiles(root, plan);
       const fresh = await readExact(backend, [...expected.keys()]);
@@ -653,6 +793,13 @@ export async function pushWorkspace(
         (plan.deletion && !identity.destructive)
       )
         throw new Error('Live KB/write permission changed');
+      if (!checkedWriteBoundary) {
+        // Expire inspection caches after the final native guard, before the first mutation.
+        await frozen.check();
+        if (hash(await loadState(root)) !== stateHash)
+          throw new Error('Local sync metadata changed after plan was frozen');
+        checkedWriteBoundary = true;
+      }
       // Refresh remote-owned review metadata only after the semantic revision and identities pass.
       for (const [id, rem] of fresh) expected.set(id, rem);
     }
@@ -683,6 +830,7 @@ export async function pushWorkspace(
               throw new Error('Deleted Rem is still present');
             const rem = expected.get(id)!;
             if (rem.parent) {
+              structuralIds.add(rem.parent);
               const parent = expected.get(rem.parent)!;
               expected.set(rem.parent, {
                 ...parent,
@@ -755,6 +903,7 @@ export async function pushWorkspace(
             async () => {
               expected.set(id, { ...expected.get(id)!, parent });
               const p = expected.get(parent)!;
+              structuralIds.add(parent);
               const children = [...p.children];
               children.splice(change.position, 0, id);
               expected.set(parent, { ...p, children });
@@ -793,15 +942,18 @@ export async function pushWorkspace(
         hashes: Object.fromEntries(
           [...remote].map(([id, rem]) => [id, publicationRevisionHash(rem)])
         ),
-        files: plan.files,
+        inputHash: plan.inputHash!,
         deleted: plan.deletion?.ids ?? [],
+        structuralIds: [...structuralIds].sort(),
       };
       journal.state = 'verified';
       await store.setLocal(key, journal);
       await writeSnapshot(
         root,
         state.kbId,
-        [...remote.values()],
+        publicationRems(context, remote, selection, journal.ids, plan.deletion?.ids ?? [], [
+          ...structuralIds,
+        ]),
         state,
         { ...state, globalDiscoveryComplete: false },
         frozen,
@@ -809,7 +961,8 @@ export async function pushWorkspace(
         undefined,
         plan.deletion?.ids,
         context.parsed,
-        journal.ids
+        journal.ids,
+        selection
       );
       return {
         status: 'verified',
@@ -875,22 +1028,33 @@ export async function recoverWorkspace(
         remoteWrites: 0,
         pending: state.pending,
       };
-    if (!journal || journal.state !== 'verified' || !journal.final)
+    if (
+      !journal ||
+      journal.version !== 2 ||
+      journal.planHash !== state.pending.planHash ||
+      !journal.selection ||
+      journal.state !== 'verified' ||
+      !journal.final
+    )
       throw new Error(
         'Remote outcome is not verified; preserve the original journal and known IDs, never retry mutations'
       );
     const local = await inspectLocal(root);
     if (local.diagnostics.length)
       throw new Error('Local content changed or failed lint; reconcile before recovery');
-    for (const [path, digest] of Object.entries(journal.final.files))
-      if (hash(await readPrivate(root, path)) !== digest)
-        throw new Error('Local Markdown changed since verified sync');
-    const frozen = await FrozenFiles.capture(root),
-      backend = await backendFactory();
+    const frozen = await local.inputs.freeze();
+    if (hash(frozen.hashes()) !== journal.final.inputHash)
+      throw new Error('Local workspace changed since verified sync');
+    const backend = await backendFactory();
     if ((await backend.identity()).kbId !== state.kbId) throw new Error('Recovery KB mismatch');
     // Reuse the same full/public read policy as the verified pass, without turning unknown
     // native flags into assumed values or re-executing any operation from the journal.
-    const rems = await readRemote(local, planLocal(local), backend);
+    const localPlan = planLocal(local);
+    localPlan.changes = localPlan.changes.filter((change) =>
+      journal.selection.outgoingKeys.includes(change.key)
+    );
+    localPlan.selection = journal.selection;
+    const rems = await readRemote(local, localPlan, backend);
     for (const [id, rem] of await readExact(backend, Object.values(journal.ids))) rems.set(id, rem);
     if (rems.size !== Object.keys(journal.final.hashes).length)
       throw new Error('Remote ID set changed after verified sync');
@@ -903,7 +1067,14 @@ export async function recoverWorkspace(
     await writeSnapshot(
       root,
       state.kbId,
-      [...rems.values()],
+      publicationRems(
+        local,
+        rems,
+        journal.selection,
+        journal.ids,
+        journal.final.deleted,
+        journal.final.structuralIds
+      ),
       state,
       { ...state, globalDiscoveryComplete: false },
       frozen,
@@ -911,7 +1082,8 @@ export async function recoverWorkspace(
       undefined,
       journal.final.deleted,
       local.parsed,
-      journal.ids
+      journal.ids,
+      journal.selection
     );
     return { status: 'recovered', complete: true, remoteWrites: 0, ids: journal.ids };
   });

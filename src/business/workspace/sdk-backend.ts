@@ -1,6 +1,9 @@
 import type { ReactRNPlugin, PluginRem, RichTextInterface } from '@remnote/plugin-sdk';
 import { cardMetadataSchema } from './metadata.js';
+import { RemType } from '../sdk-constants.generated.js';
+import { idSchema } from './identity.js';
 import { immutableProjection } from './snapshots.js';
+import { mapReads, settleReads } from './read-pool.js';
 import {
   hash,
   type MetadataStore,
@@ -76,20 +79,6 @@ function cardsSnapshot(
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function mapBounded<T, R>(items: T[], action: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(4, items.length) }, async () => {
-      while (cursor < items.length) {
-        const index = cursor++;
-        results[index] = await action(items[index]!);
-      }
-    })
-  );
-  return results;
-}
-
 /** No SDK handles are cached. Every read obtains fresh public SDK objects. */
 export class SdkWorkspaceBackend implements WorkspaceBackend {
   constructor(
@@ -131,7 +120,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       powerupProperty,
       powerupEnum,
       powerupList,
-    ] = await Promise.all([
+    ] = await settleReads([
       rem.isDocument(),
       rem.isFolder(),
       rem.isCardItem(),
@@ -159,6 +148,22 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       .join(',');
     if (!['forward', 'backward', 'both', 'none'].includes(practice))
       throw new Error('Incomplete native practice direction');
+    const cards = cardsSnapshot(await rem.getCards(), rem._id);
+    let portal: WorkspaceRem['portal'];
+    if (rem.type === RemType.PORTAL) {
+      const [type, members] = await settleReads([
+        rem.getPortalType(),
+        rem.getPortalDirectlyIncludedRem(),
+      ]);
+      if (
+        (type !== null && (typeof type !== 'number' || !Number.isInteger(type))) ||
+        !Array.isArray(members)
+      )
+        throw new Error('Incomplete native portal membership');
+      const ids = members.map((member) => idSchema.parse(member?._id));
+      if (new Set(ids).size !== ids.length) throw new Error('Ambiguous native portal membership');
+      portal = { type, directlyIncludedRemIds: ids };
+    }
     return {
       id: rem._id,
       parent: rem.parent,
@@ -172,7 +177,8 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       practice,
       enablePractice: boolean(enablePractice, 'enablePractice'),
       public: publicSnapshot(rem),
-      cards: cardsSnapshot(await rem.getCards(), rem._id),
+      cards,
+      ...(portal === undefined ? {} : { portal }),
       facts: {
         isTable: boolean(table, 'table'),
         isProperty: boolean(property, 'property'),
@@ -190,15 +196,21 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     // Official global enumeration. Transport errors remain incomplete: no search/known-root fallback.
     const rems = await this.plugin.rem.getAll();
     if (!Array.isArray(rems)) throw new Error('Full-library enumeration did not return an array');
-    return mapBounded(rems, (rem) => this.snapshot(rem));
+    return mapReads(rems, 4, (rem) => this.snapshot(rem));
   }
 
   async read(ids: string[]): Promise<WorkspaceRem[]> {
     if (ids.length > 50) throw new Error('Exact-ID native read batch exceeds 50');
     const rems = await this.plugin.rem.findMany(ids);
-    if (!Array.isArray(rems) || rems.length !== ids.length)
+    if (
+      !Array.isArray(rems) ||
+      rems.length !== ids.length ||
+      new Set(rems.map((rem) => rem._id)).size !== ids.length ||
+      rems.some((rem) => !ids.includes(rem._id))
+    )
       throw new Error('Incomplete exact-ID native read');
-    return mapBounded(rems, (rem) => this.snapshot(rem));
+    const byId = new Map(rems.map((rem) => [rem._id, rem]));
+    return mapReads(ids, 4, (id) => this.snapshot(byId.get(id)!));
   }
 
   async readPublic(ids: string[]): Promise<Record<string, unknown>[]> {
@@ -211,7 +223,8 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       rems.some((rem) => !ids.includes(rem._id))
     )
       throw new Error('Malformed exact public read');
-    return rems.map(publicSnapshot);
+    const byId = new Map(rems.map((rem) => [rem._id, rem]));
+    return ids.flatMap((id) => (byId.has(id) ? [publicSnapshot(byId.get(id)!)] : []));
   }
 
   async subtree(rootIds: string[]): Promise<WorkspaceRem[]> {
@@ -251,15 +264,24 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
         rems.some((rem) => !batch.includes(rem._id))
       )
         throw new Error('Incomplete official exact-ID public snapshot collection');
-      await mapBounded(rems, async (rem) => {
-        const [document, folder] = await Promise.all([rem.isDocument(), rem.isFolder()]);
-        result.snapshots.push(publicSnapshot(rem));
-        result.flags[rem._id] = {
-          document: boolean(document, 'document'),
-          folder: boolean(folder, 'folder'),
-          unsupported: 'unverified-native-flags',
+      const byId = new Map(rems.map((rem) => [rem._id, rem]));
+      const collected = await mapReads(batch, 4, async (id) => {
+        const rem = byId.get(id)!;
+        const [document, folder] = await settleReads([rem.isDocument(), rem.isFolder()]);
+        return {
+          snapshot: publicSnapshot(rem),
+          id: rem._id,
+          flags: {
+            document: boolean(document, 'document'),
+            folder: boolean(folder, 'folder'),
+            unsupported: 'unverified-native-flags',
+          },
         };
       });
+      for (const item of collected) {
+        result.snapshots.push(item.snapshot);
+        result.flags[item.id] = item.flags;
+      }
     }
     return result;
   }
@@ -286,7 +308,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   }
 
   async guard(ids: string[]): Promise<string> {
-    const facts = await mapBounded([...ids].sort(), async (id) => {
+    const facts = await mapReads([...ids].sort(), 4, async (id) => {
       const rem = await this.rem(id),
         snapshot = await this.snapshot(rem),
         tags = await rem.getTagRems();

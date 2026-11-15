@@ -3,6 +3,8 @@ import type { ReactRNPlugin } from '@remnote/plugin-sdk';
 import { SdkWorkspaceBackend } from '../../../src/business/workspace/sdk-backend.js';
 import { remoteEditedAt } from '../../../src/business/workspace/snapshots.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
+import { mapReads } from '../../../src/business/workspace/read-pool.js';
+import { isReferencePortal } from '../../../src/business/workspace/reference-projection.js';
 
 function fixture(count = 2) {
   const objects = new Map<string, Record<string, unknown>>();
@@ -33,6 +35,8 @@ function fixture(count = 2) {
       getPracticeDirection: vi.fn(async () => 'forward'),
       getEnablePractice: vi.fn(async () => true),
       getCards: vi.fn(async () => []),
+      getPortalType: vi.fn(async () => 0),
+      getPortalDirectlyIncludedRem: vi.fn(async () => []),
       getTagRems: vi.fn(async () => []),
       setText: vi.fn(async (value) => {
         object.text = value;
@@ -84,6 +88,155 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('reads fresh portal subtype and direct membership only for native portal Rems', async () => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    const methods = f.flags.get('r0')!;
+    methods.getPortalType!.mockResolvedValue(4);
+    methods.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r1' }]);
+    const first = (await f.backend.read(['r0', 'r1']))[0]!;
+    expect(first.portal).toEqual({ type: 4, directlyIncludedRemIds: ['r1'] });
+    expect(isReferencePortal(first)).toBe(true);
+    expect(f.flags.get('r1')!.getPortalType).not.toHaveBeenCalled();
+    expect(f.flags.get('r1')!.getPortalDirectlyIncludedRem).not.toHaveBeenCalled();
+    methods.getPortalType!.mockResolvedValue(99);
+    methods.getPortalDirectlyIncludedRem!.mockResolvedValue([]);
+    const next = (await f.backend.read(['r0']))[0]!;
+    expect(next.portal).toEqual({ type: 99, directlyIncludedRemIds: [] });
+    expect(isReferencePortal(next)).toBe(false);
+    expect(methods.getPortalType).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves an observed null portal subtype without classifying it', async () => {
+    const f = fixture();
+    f.objects.get('r1')!.type = 6;
+    f.flags.get('r1')!.getPortalType!.mockResolvedValue(null);
+    f.flags.get('r1')!.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r0' }]);
+    const rem = (await f.backend.read(['r1']))[0]!;
+    expect(rem.portal).toEqual({ type: null, directlyIncludedRemIds: ['r0'] });
+    expect(isReferencePortal(rem)).toBe(false);
+  });
+
+  it.each([
+    { type: undefined, members: [] },
+    { type: '4', members: [] },
+    { type: 1.5, members: [] },
+    { type: Infinity, members: [] },
+    { type: 4, members: null },
+    { type: 4, members: [{ _id: 'r1' }, { _id: 'r1' }] },
+    { type: 4, members: [{}] },
+  ])('rejects incomplete or ambiguous portal facts: %j', async ({ type, members }) => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    f.flags.get('r0')!.getPortalType!.mockResolvedValue(type);
+    f.flags.get('r0')!.getPortalDirectlyIncludedRem!.mockResolvedValue(members);
+    await expect(f.backend.read(['r0'])).rejects.toThrow();
+  });
+
+  it('drains a portal membership read before reporting a sibling portal failure', async () => {
+    const f = fixture();
+    f.objects.get('r0')!.type = 6;
+    let release!: () => void, started!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const invoked = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    f.flags.get('r0')!.getPortalType!.mockRejectedValue(new Error('portal unavailable'));
+    f.flags.get('r0')!.getPortalDirectlyIncludedRem!.mockImplementation(async () => {
+      started();
+      await pending;
+      return [];
+    });
+    let finished = false;
+    const result = f.backend.read(['r0']).finally(() => {
+      finished = true;
+    });
+    const rejected = expect(result).rejects.toThrow('portal unavailable');
+    await invoked;
+    expect(finished).toBe(false);
+    release();
+    await rejected;
+    expect(finished).toBe(true);
+  });
+
+  it('returns requested identity order even when findMany returns shuffled results', async () => {
+    const f = fixture();
+    f.findMany.mockImplementation(async (ids) => ids.map((id) => f.objects.get(id)!).reverse());
+    expect((await f.backend.read(['r0', 'r1'])).map((rem) => rem.id)).toEqual(['r0', 'r1']);
+    expect((await f.backend.readPublic(['r0', 'r1'])).map((rem) => rem.id)).toEqual(['r0', 'r1']);
+    expect((await f.backend.discover(['r0', 'r1'])).snapshots.map((rem) => rem.id)).toEqual([
+      'r0',
+      'r1',
+    ]);
+  });
+
+  it('bounds four concurrent full batches to 16 snapshots and 192 in-flight native flags', async () => {
+    const f = fixture(200);
+    let active = 0,
+      peak = 0;
+    for (const methods of f.flags.values()) {
+      for (const name of [
+        'isDocument',
+        'isFolder',
+        'isCardItem',
+        'isTable',
+        'isProperty',
+        'isPowerup',
+        'isPowerupSlot',
+        'isPowerupProperty',
+        'isPowerupEnum',
+        'isPowerupPropertyListItem',
+        'getPracticeDirection',
+        'getEnablePractice',
+      ]) {
+        methods[name]!.mockImplementation(async () => {
+          active++;
+          peak = Math.max(peak, active);
+          await Promise.resolve();
+          active--;
+          return name === 'getPracticeDirection' ? 'forward' : name === 'getEnablePractice';
+        });
+      }
+    }
+    const ids = [...f.objects.keys()];
+    const batches = Array.from({ length: 4 }, (_, i) => ids.slice(i * 50, i * 50 + 50));
+    const result = await mapReads(batches, 4, (batch) => f.backend.read(batch));
+    expect(result.flat().map((rem) => rem.id)).toEqual(ids);
+    expect(peak).toBe(192);
+    expect(active).toBe(0);
+  });
+
+  it('does not return from a failed native batch until outstanding flag reads have drained', async () => {
+    const f = fixture(10);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.flags.get('r0')!.isDocument!.mockRejectedValue(new Error('native flag lost'));
+    f.flags.get('r0')!.isFolder!.mockImplementation(async () => {
+      await pending;
+      return false;
+    });
+    let finished = false;
+    const result = f.backend.read([...f.objects.keys()]).finally(() => {
+      finished = true;
+    });
+    const rejected = expect(result).rejects.toThrow('native flag lost');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    release();
+    await rejected;
+    expect(finished).toBe(true);
+    const calls = [...f.flags.values()].map((methods) => methods.isDocument!.mock.calls.length);
+    await Promise.resolve();
+    expect([...f.flags.values()].map((methods) => methods.isDocument!.mock.calls.length)).toEqual(
+      calls
+    );
+  });
+
   it('discovers an exact subtree through bounded public snapshots without getAll', async () => {
     const f = fixture(52),
       rems = await f.backend.subtree(['r0']);

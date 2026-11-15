@@ -1,13 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   documentMetadata,
   normalizeRichText,
-  parseDocument,
-  renderDocument,
+  parseDocument as parseBoundDocument,
+  renderDocument as renderNativeDocument,
+  renderParsedDocument,
 } from '../../../src/business/workspace/markdown.js';
-import { parseFrontmatter, renderFrontmatter } from '../../../src/business/workspace/metadata.js';
+import {
+  parseFrontmatter,
+  renderFrontmatter,
+  type WorkspaceMetadata,
+} from '../../../src/business/workspace/metadata.js';
+import { nativeBlockId } from '../../../src/business/workspace/identity.js';
 import { WorkspaceLinks } from '../../../src/business/workspace/links.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
+
+// The standalone codec receives the same authoritative fixture bindings that inspectLocal hydrates.
+const bindings = new Map<string, WorkspaceMetadata>();
+beforeEach(() => bindings.clear());
+function renderDocument(...args: Parameters<typeof renderNativeDocument>): string {
+  for (const [id, path] of args[3])
+    bindings.set(path, documentMetadata(id, args[2], args[3], args[4]));
+  return renderNativeDocument(...args);
+}
+function parseDocument(path: string, source: string, links?: WorkspaceLinks) {
+  return parseBoundDocument(path, source, bindings.get(path)!, links);
+}
 
 function rem(id: string, text: unknown, extra: Partial<WorkspaceRem> = {}): WorkspaceRem {
   return {
@@ -64,6 +82,85 @@ export function codecFixture() {
 }
 
 describe('Obsidian Rem codec', () => {
+  it.each([
+    { label: 'ordinary text', text: ['example'] },
+    { label: 'one trailing space', text: ['example '] },
+    { label: 'multiple trailing spaces', text: ['example  '] },
+    { label: 'trailing tab', text: ['example\t'] },
+    { label: 'mixed trailing whitespace', text: ['example \t '] },
+    { label: 'segmented trailing whitespace', text: ['example', '', ' ', '\t'] },
+    { label: 'whitespace-only text', text: [' \t '] },
+    { label: 'terminal LF', text: ['example\n'] },
+    { label: 'terminal CRLF', text: ['example\r\n'] },
+    { label: 'terminal LF and empty segment', text: ['example\n', ''] },
+    { label: 'space before terminal LF', text: ['example \n'] },
+    { label: 'literal anchor-like text', text: ['example ^literal '] },
+    { label: 'strong trailing space', text: [{ i: 'm', text: 'example ', b: true }] },
+    { label: 'emphasis trailing tab', text: [{ i: 'm', text: 'example\t', l: true }] },
+    { label: 'inline-code trailing space', text: [{ i: 'm', text: 'example ', q: true }] },
+    { label: 'strong trailing LF', text: [{ i: 'm', text: 'example\n', b: true }] },
+    {
+      label: 'rich-text adjacency',
+      text: [
+        'Before ',
+        { i: 'm', text: 'bold', b: true },
+        { i: 'm', text: ' italic', l: true },
+        '\t',
+      ],
+    },
+    { label: 'strong followed by terminal LF', text: [{ i: 'm', text: 'bold', b: true }, '\n'] },
+    { label: 'reference followed by terminal LF', text: [{ i: 'q', _id: 'question' }, '\n'] },
+  ])('keeps block-anchor syntax and exact semantics for $label', ({ text }) => {
+    const byId = new Map([
+      ['root', rem('root', ['Root'], { parent: null, children: ['question', 'ordinary'] })],
+      ['question', rem('question', ['Question'], { type: 1, backText: [], children: ['answer'] })],
+      ['answer', rem('answer', text, { parent: 'question', type: 2, cardItem: true })],
+      ['ordinary', rem('ordinary', text, { children: ['child'] })],
+      ['child', rem('child', ['Child'], { parent: 'ordinary' })],
+    ]);
+    const before = structuredClone(byId),
+      blocks = new Map([...byId.keys()].map((id) => [id, `custom-${id}`])),
+      source = renderDocument('root', 'Root.md', byId, new Map([['root', 'Root.md']]), { blocks }),
+      parsed = parseDocument('Root.md', source);
+    expect(parsed.diagnostics).toEqual([]);
+    expect(byId).toEqual(before);
+    expect(parsed.document.nodes.map(({ key }) => key)).toEqual([...byId.keys()]);
+    for (const node of parsed.document.nodes) {
+      const native = byId.get(node.key)!;
+      expect(node.blockId).toBe(blocks.get(node.key));
+      expect(node.parent).toBe(native.parent);
+      expect(node.children).toEqual(native.children);
+      expect(normalizeRichText(node.text)).toEqual(normalizeRichText(native.text));
+      expect(normalizeRichText(node.backText)).toEqual(normalizeRichText(native.backText ?? []));
+      expect(node.kind).toBe(node.key === 'question' ? 'multiline' : 'text');
+      const binding = parsed.document.metadata?.rems[node.key];
+      if (!binding || binding.id === null) throw new Error('Missing native binding');
+      expect(binding.id).toBe(native.id);
+      expect(binding.native).toMatchObject({
+        type: native.type,
+        isCardItem: native.cardItem,
+      });
+    }
+    // The delimiter is Markdown syntax: an entity decoding to a space is not sufficient.
+    expect(source).toContain(' ^custom-answer\n');
+    expect(source).toContain(' ^custom-ordinary\n');
+  });
+
+  it('retains the same native facts and opaque/rich-text outline without a YAML roundtrip', () => {
+    const byId = codecFixture();
+    const paths = new Map([['root', 'Note.md']]);
+    const ordinary = parseDocument('Note.md', renderDocument('root', 'Note.md', byId, paths));
+    const direct = renderParsedDocument('root', 'Note.md', byId, paths);
+    expect(direct.diagnostics).toEqual([]);
+    expect(direct.document.metadata).toEqual(ordinary.document.metadata);
+    const withoutLines = (nodes: typeof direct.document.nodes) =>
+      nodes.map(({ line: _line, ...node }) => node);
+    expect(withoutLines(direct.document.nodes)).toEqual(withoutLines(ordinary.document.nodes));
+    expect(direct.document.references.map(({ id }) => id)).toEqual(
+      ordinary.document.references.map(({ id }) => id)
+    );
+  });
+
   it.each([
     ['plain LF', ['a\nb']],
     ['plain CRLF', ['a\r\nb']],
@@ -148,18 +245,19 @@ describe('Obsidian Rem codec', () => {
     }
   );
 
-  it('uses YAML kinds, native H1, stable blocks and ordinary Markdown without HTML or card markers', () => {
+  it('uses hidden identity, native H1, short blocks and ordinary Markdown without default YAML or card markers', () => {
     const source = renderDocument(
       'root',
       'Folder/Note.md',
       codecFixture(),
       new Map([['root', 'Folder/Note.md']])
     );
-    expect(source).not.toContain('<!--');
+    expect(source).toContain(`<!-- remnote:${nativeBlockId('root')} -->`);
+    expect(source).not.toContain('schema:');
     expect(source).not.toContain('Question? ===');
     expect(source).not.toContain('Front >>');
     expect(source).toContain('> Back');
-    expect(source).toContain('[[Folder/Note#^rn-61|');
+    expect(source).toContain(`[[Folder/Note#^${nativeBlockId('a')}|`);
     const parsed = parseDocument('Folder/Note.md', source);
     expect(parsed.diagnostics).toEqual([]);
     const nodes = new Map(parsed.document.nodes.map((node) => [node.key, node]));
@@ -182,12 +280,11 @@ describe('Obsidian Rem codec', () => {
       new Map([['root', rem('root', ['Note'], { parent: null })]]),
       new Map([['root', 'Note.md']])
     );
-    const meta = parseFrontmatter('Note.md', source).metadata!;
-    meta.rems['new:q'] = { id: null, block: 'local-q', content: 'multiline' };
-    meta.rems['new:a'] = { id: null, block: 'local-a', content: 'text' };
+    const header = parseFrontmatter('Note.md', source);
     const parsed = parseDocument(
       'Note.md',
-      renderFrontmatter(meta) +
+      renderFrontmatter({ rems: { 'local-q': { content: 'multiline' } } }) +
+        `<!-- remnote:${header.documentKey} -->\n\n` +
         '# Different native title\n\n- Question === >> ^local-q\n  - Answer ^local-a\n'
     );
     expect(parsed.diagnostics).toEqual([]);
@@ -213,11 +310,15 @@ describe('Obsidian Rem codec', () => {
     expect(
       parseDocument(
         'Note.md',
-        source.replace('Answer ^rn-61', 'Answer ^rn-61\n\n    > ordinary quote')
+        source.replace(
+          `Answer ^${nativeBlockId('a')}`,
+          `Answer ^${nativeBlockId('a')}\n\n    > ordinary quote`
+        )
       ).diagnostics.length
     ).toBeGreaterThan(0);
     expect(
-      parseDocument('Note.md', source.replace('^rn-61', '^missing')).diagnostics.length
+      parseDocument('Note.md', source.replace(`^${nativeBlockId('a')}`, '^missing')).diagnostics
+        .length
     ).toBeGreaterThan(0);
   });
 
@@ -238,24 +339,18 @@ describe('Obsidian Rem codec', () => {
     expect(parsed.document.nodes.find((node) => node.key === 'child')!.text).toEqual(
       byId.get('child')!.text
     );
-    const metadata = parseFrontmatter('Root.md', source).metadata!;
+    const metadata = bindings.get('Root.md')!;
     for (const text of ['[[|empty]]', '**[[Root]]**', '[[unclosed', '![[Root|*embed*]]']) {
       const invalid = parseDocument(
         'Root.md',
-        renderFrontmatter(metadata) + `# Root\n\n- ${text} ^${metadata.rems.child!.block}\n`
+        `<!-- remnote:${metadata.rems.root!.block} -->\n\n# Root\n\n- ${text} ^${metadata.rems.child!.block}\n`
       );
       expect(invalid.diagnostics.length).toBeGreaterThan(0);
     }
   });
 
   it('resolves exact vault paths and unique headings but refuses ambiguous short names and unknown blocks', () => {
-    const source = renderDocument(
-      'root',
-      'One/Note.md',
-      codecFixture(),
-      new Map([['root', 'One/Note.md']])
-    );
-    const metadata = parseFrontmatter('One/Note.md', source).metadata!;
+    const metadata = documentMetadata('root', codecFixture(), new Map([['root', 'One/Note.md']]));
     const other = structuredClone(metadata);
     other.root = 'other';
     other.rems = {
@@ -265,10 +360,13 @@ describe('Obsidian Rem codec', () => {
       { path: 'One/Note.md', title: 'Note', metadata },
       { path: 'Two/Note.md', title: 'Other', metadata: other },
     ]);
-    expect(links.resolve('One/Note.md', '#^rn-61').id).toBe('a');
+    expect(links.resolve('One/Note.md', `#^${nativeBlockId('a')}`).id).toBe('a');
     expect(links.resolve('One/Note.md', 'Two/Note#Other').id).toBe('other');
     expect(() => links.resolve('One/Note.md', 'Note')).toThrow('Ambiguous');
     expect(() => links.resolve('One/Note.md', '#^absent')).toThrow('Unknown');
+    expect(() => links.resolve('One/Note.md', `#^${nativeBlockId('root')}`)).toThrow(
+      'no visible block'
+    );
   });
   it('projects unsupported media and portals readably without inventing Obsidian embeds or writable media', () => {
     const rems = codecFixture();
@@ -279,8 +377,9 @@ describe('Obsidian Rem codec', () => {
     );
     const source = renderDocument('root', 'Note.md', rems, new Map([['root', 'Note.md']]));
     expect(source).toContain('![Native image](https://example.com/image.png)');
-    expect(source).toContain('Portal directly included targets');
-    expect(source).toContain('[[Note#^rn-61|');
+    expect(source).toContain('关联引用〔只读〕');
+    expect(source).not.toContain('Portal directly');
+    expect(source).toContain(`[[Note#^${nativeBlockId('a')}|`);
     expect(source).not.toContain('![[Note');
     const parsed = parseDocument('Note.md', source);
     expect(parsed.diagnostics).toEqual([]);

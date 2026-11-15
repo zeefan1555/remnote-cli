@@ -3,6 +3,7 @@ import { link, lstat, mkdir, open, readdir, realpath, rename, unlink } from 'nod
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { IDENTITY } from './identity.js';
 
 const MAX_FILE = 4 * 1024 * 1024;
 export const MAX_METADATA_BYTES = 32 * 1024 * 1024;
@@ -12,7 +13,16 @@ const IGNORED = new Set(['.git', '.sync', '.obsidian', '.trash']);
 
 /** Only these aggregate records share the CLI metadata store's larger bound. */
 export function fileByteLimit(name: string): number {
-  return name === STATE || name === OFFICIAL_MANIFEST ? MAX_METADATA_BYTES : MAX_FILE;
+  return name === STATE || name === OFFICIAL_MANIFEST || name === IDENTITY
+    ? MAX_METADATA_BYTES
+    : MAX_FILE;
+}
+
+/** Exact owned guide paths only; arbitrary README.md/SKILL.md remain modeled source. */
+export function isContentMarkdown(path: string): boolean {
+  return (
+    path.endsWith('.md') && path !== 'AGENTS.md' && path !== '.agents/skills/remnote-data/SKILL.md'
+  );
 }
 
 export function assertFileSize(

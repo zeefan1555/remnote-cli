@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { WorkspaceMetadata } from './metadata.js';
+import { referenceBranches } from './reference-projection.js';
 
 export interface LinkDocument {
   path: string;
@@ -12,6 +13,7 @@ export interface LinkTarget {
   block: string;
   root: boolean;
   title: string;
+  hidden?: boolean;
 }
 
 export const pathKey = (path: string): string => path.normalize('NFC').toLocaleLowerCase('en-US');
@@ -22,7 +24,10 @@ const label = (value: string) => value.replace(/[[\]|\r\n]/g, ' ').trim() || 'Un
 export class WorkspaceLinks {
   private readonly byId = new Map<string, LinkTarget>();
   constructor(private readonly documents: LinkDocument[]) {
-    for (const document of documents)
+    for (const document of documents) {
+      const hidden = new Set(
+        [...referenceBranches(document.metadata).values()].flatMap((branch) => branch.ids.slice(1))
+      );
       for (const [key, entry] of Object.entries(document.metadata.rems))
         this.byId.set(key, {
           id: key,
@@ -30,12 +35,14 @@ export class WorkspaceLinks {
           block: entry.block,
           root: key === document.metadata.root,
           title: key === document.metadata.root ? document.title : key,
+          hidden: hidden.has(key),
         });
+    }
   }
 
   render(id: string, display?: string): string {
     const target = this.byId.get(id);
-    if (!target) return `[${label(display ?? id)}](remnote:${id})`;
+    if (!target || target.hidden) return `[${label(display ?? id)}](remnote:${id})`;
     return `[[${stem(target.path)}${target.root ? '' : `#^${target.block}`}|${label(display ?? target.title)}]]`;
   }
 
@@ -72,7 +79,12 @@ export class WorkspaceLinks {
         ([, entry]) => entry.block === fragment.slice(1)
       );
       if (matches.length !== 1) throw new Error('Unknown or ambiguous Wiki block ID');
-      return this.byId.get(matches[0]![0])!;
+      const target = this.byId.get(matches[0]![0])!;
+      if (target.root || target.hidden)
+        throw new Error(
+          'Document roots and hidden reference wrappers have no visible block anchor'
+        );
+      return target;
     }
     // The supported outline has exactly one heading: H1, bound to the document root.
     if (pathKey(fragment) === pathKey(doc.title)) return this.byId.get(doc.metadata.root)!;

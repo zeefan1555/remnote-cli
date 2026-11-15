@@ -7,6 +7,7 @@ import {
   nativeSchema,
   cardMetadataSchema,
   type WorkspaceMetadata,
+  type DocumentAttributes,
 } from '../../../src/business/workspace/metadata.js';
 
 export const metadataFixture: WorkspaceMetadata = {
@@ -48,23 +49,42 @@ export const metadataFixture: WorkspaceMetadata = {
     'new:answer': { id: null, block: 'local-answer', content: 'text' },
   },
 };
+const attributes: DocumentAttributes = {
+  title: 'Optional display title',
+  aliases: ['Alias'],
+  tags: ['learning'],
+  rems: { 'local-question': { content: 'multiline' } },
+};
+const marker = '<!-- remnote:r-root -->\n\n';
 
 describe('Obsidian workspace frontmatter', () => {
-  it('roundtrips a source-mode YAML schema with native and local-only facts separated', () => {
-    const source = renderFrontmatter(metadataFixture) + '# Native title\n';
+  it('roundtrips only optional user attributes and keeps native facts out of source', () => {
+    const source = renderFrontmatter(attributes) + marker + '# Native title\n';
     const result = parseFrontmatter('Note.md', source);
     expect(result.diagnostics).toEqual([]);
-    expect(result.metadata).toEqual(metadataFixture);
+    expect(result.attributes).toEqual(attributes);
+    expect(result.metadata).toBeUndefined();
+    expect(result.documentKey).toBe('r-root');
     expect(result.body).toBe('# Native title\n');
     expect(result.bodyLine).toBeGreaterThan(1);
   });
 
   it('treats quotes, comments and key ordering semantically', () => {
-    const source = renderFrontmatter(metadataFixture).replace(
-      'schema: remnote-sync/1',
-      'schema: "remnote-sync/1" # same schema'
-    );
-    expect(hash(parseFrontmatter('Note.md', source).metadata)).toBe(hash(metadataFixture));
+    const source =
+      renderFrontmatter(attributes).replace(
+        'title: Optional display title',
+        'title: "Optional display title" # same title'
+      ) + marker;
+    expect(hash(parseFrontmatter('Note.md', source).attributes)).toBe(hash(attributes));
+  });
+
+  it('needs no YAML when no attributes were requested', () => {
+    expect(renderFrontmatter()).toBe('');
+    expect(parseFrontmatter('Note.md', marker + '# Title\n')).toMatchObject({
+      attributes: {},
+      diagnostics: [],
+      documentKey: 'r-root',
+    });
   });
 
   it('keeps PropertyType zero, typed cards and explicitly collected null values distinct from unknowns', () => {
@@ -102,7 +122,10 @@ describe('Obsidian workspace frontmatter', () => {
   });
 
   it.each([
-    ['duplicate key', (s: string) => s.replace('root: root', 'root: root\nroot: other')],
+    [
+      'duplicate key',
+      (s: string) => s.replace('title: Optional display title', 'title: first\ntitle: second'),
+    ],
     [
       'unknown tag',
       (s: string) => s.replace('title: Optional display title', 'title: !unsafe title'),
@@ -113,14 +136,20 @@ describe('Obsidian workspace frontmatter', () => {
     ],
     [
       'new native facts',
-      (s: string) => s.replace('block: local-answer', 'native: {}\n    block: local-answer'),
+      (s: string) => s.replace('content: multiline', 'native: {}\n    content: multiline'),
     ],
-    ['invalid block', (s: string) => s.replace('block: local-answer', 'block: local_answer')],
-    ['duplicate block', (s: string) => s.replace('block: local-answer', 'block: local-question')],
-    ['unbound root', (s: string) => s.replace('root: root', 'root: absent')],
+    ['invalid block', (s: string) => s.replace('local-question:', 'local_question:')],
+    [
+      'unknown attribute',
+      (s: string) => s.replace('content: multiline', 'content: multiline\n    tags: []'),
+    ],
+    ['unsupported content', (s: string) => s.replace('content: multiline', 'content: basic')],
+    ['duplicate root', (s: string) => s + marker],
+    ['missing root', (s: string) => s.replace(marker, '')],
+    ['legacy metadata', (s: string) => s.replace('title:', 'schema: remnote-sync/1\ntitle:')],
   ])('rejects %s without interpreting it as write authorization', (_name, change) => {
     expect(
-      parseFrontmatter('Note.md', change(renderFrontmatter(metadataFixture))).diagnostics.length
+      parseFrontmatter('Note.md', change(renderFrontmatter(attributes) + marker)).diagnostics.length
     ).toBeGreaterThan(0);
   });
 });

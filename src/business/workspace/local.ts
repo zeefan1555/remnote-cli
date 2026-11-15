@@ -6,6 +6,7 @@ import { LocalState } from '../../remnote-cli/client/local-state.js';
 import {
   allFiles,
   assertFileSize,
+  isContentMarkdown,
   MAX_METADATA_BYTES,
   OFFICIAL_MANIFEST,
   readPrivate,
@@ -16,33 +17,38 @@ import { FrozenFiles } from './frozen-files.js';
 import { stageSnapshot } from './publication.js';
 import {
   documentMetadata,
-  markdownHeadingTitle,
+  bindPreparedDocument,
   nodeKind,
-  parseDocument,
+  parsePreparedDocument,
+  prepareDocument,
+  preparedTitle,
   pathSegment,
   renderDocument,
+  renderParsedDocument,
   titleOf,
+  type PreparedDocument,
 } from './markdown.js';
 import {
   blockSchema,
   idSchema,
   keySchema,
-  nativeBlockId,
+  IDENTITY,
+  identitySchema,
+  shortBlockId,
+  workspaceIdentity,
   originalPath,
   recordPath,
 } from './identity.js';
 import { remoteVersion } from './versions.js';
-import {
-  cardMetadataSchema,
-  nativeDetailsSchema,
-  nativeSchema,
-  parseFrontmatter,
-} from './metadata.js';
+import { cardMetadataSchema, nativeDetailsSchema, nativeSchema } from './metadata.js';
+import { mapReads } from './read-pool.js';
 import { pathKey, WorkspaceLinks } from './links.js';
 import {
   hash,
   type Diagnostic,
   type ParsedDocument,
+  type ParsedOutline,
+  type SyncSelection,
   type WorkspaceRem,
   type WorkspaceState,
 } from './types.js';
@@ -292,29 +298,39 @@ export async function writeSnapshot(
   official: WorkspaceState['official'] = previous?.official,
   removedIds: string[] = [],
   sources: Map<string, ParsedDocument> = new Map(),
-  assignedIds: Record<string, string> = {}
+  assignedIds: Record<string, string> = {},
+  selection?: SyncSelection
 ): Promise<WorkspaceState> {
   const errors = validateGraph(rems, coverage.rootIds);
   if (errors.length) throw new Error(`Incomplete native graph: ${errors.slice(0, 10).join('; ')}`);
   const byId = new Map(rems.map((rem) => [rem.id, rem]));
-  const renamed = previous ? { ...previous, documents: { ...previous.documents } } : undefined;
-  for (const [path, source] of sources) {
-    const old = Object.entries(renamed?.documents ?? {}).find(
-      ([, doc]) => doc.rootId === source.metadata?.root
-    );
-    if (old && old[0] !== path) {
-      delete renamed!.documents[old[0]];
-      renamed!.documents[path] = old[1];
-    }
-  }
+  const sourcePaths = new Map([...sources].map(([path, source]) => [source.metadata?.root, path]));
+  const renamed = previous
+    ? {
+        ...previous,
+        documents: Object.fromEntries(
+          Object.entries(previous.documents).map(([path, document]) => [
+            sourcePaths.get(document.rootId) ?? path,
+            document,
+          ])
+        ),
+      }
+    : undefined;
   const paths = documentPaths(rems, renamed, coverage.rootIds);
   const blocks = new Map(
     Object.entries(previous?.entries ?? {}).map(([id, entry]) => [id, entry.blockId])
   );
-  for (const source of sources.values())
-    for (const node of source.nodes)
-      if (node.kind !== 'mount') blocks.set(assignedIds[node.key] ?? node.key, node.blockId);
-  for (const id of byId.keys()) if (!blocks.has(id)) blocks.set(id, nativeBlockId(id));
+  for (const [path, source] of sources)
+    if (!selection || selection.files.includes(path))
+      for (const node of source.nodes)
+        if (node.kind !== 'mount') blocks.set(assignedIds[node.key] ?? node.key, node.blockId);
+  const usedBlocks = new Set(blocks.values());
+  for (const id of byId.keys())
+    if (!blocks.has(id)) {
+      const block = shortBlockId(id, usedBlocks);
+      blocks.set(id, block);
+      usedBlocks.add(block);
+    }
   const originalIds = new Set(
     Object.entries(previous?.entries ?? {})
       .filter(([, entry]) => entry.originalHash)
@@ -327,6 +343,28 @@ export async function writeSnapshot(
       .map((source) => {
         const { root, title, aliases, tags } = source.metadata!;
         return [root, { ...(title === undefined ? {} : { title }), aliases, tags }];
+      })
+  );
+  const removed = new Set(removedIds);
+  const attributes = new Map(
+    [...sources.values()]
+      .filter((source) => source.metadata)
+      .map((source) => {
+        const value = source.attributes ?? {};
+        if (!value.rems || !removed.size) return [source.metadata!.root, value];
+        // Attributes belong to document-local blocks, not globally unique block names.
+        const deletedBlocks = new Set(
+          source.nodes.filter((node) => removed.has(node.key)).map((node) => node.blockId)
+        );
+        return [
+          source.metadata!.root,
+          {
+            ...value,
+            rems: Object.fromEntries(
+              Object.entries(value.rems).filter(([block]) => !deletedBlocks.has(block))
+            ),
+          },
+        ];
       })
   );
   const links = new WorkspaceLinks(
@@ -342,6 +380,17 @@ export async function writeSnapshot(
   );
   const files = frozen ?? (await FrozenFiles.capture(root));
   await files.check();
+  const reconciled = new Set(
+    selection ? [...selection.reconcileIds, ...Object.values(assignedIds)] : byId.keys()
+  );
+  const localVersions = { ...previous?.localVersions },
+    remoteVersions = { ...previous?.remoteVersions };
+  for (const key of [...reconciled, ...Object.keys(assignedIds), ...removedIds])
+    delete localVersions[key];
+  for (const id of removedIds) delete remoteVersions[id];
+  for (const rem of rems)
+    if (reconciled.has(rem.id))
+      remoteVersions[rem.id] = remoteVersion(rem, previous?.remoteVersions?.[rem.id]);
   const state: WorkspaceState = {
     version: 1,
     directory: root,
@@ -355,24 +404,40 @@ export async function writeSnapshot(
     errors: ['Snapshot write in progress'],
     entries: {},
     documents: {},
-    localVersions: {},
-    remoteVersions: Object.fromEntries(
-      rems.map((rem) => [rem.id, remoteVersion(rem, previous?.remoteVersions?.[rem.id])])
-    ),
+    localVersions,
+    remoteVersions,
+    // A layout-only publication cannot discard a separate pending native plan.
+    ...(selection &&
+    !selection.reconcileIds.length &&
+    !selection.verificationIds.length &&
+    previous?.pending
+      ? { pending: previous.pending }
+      : {}),
   };
   const writes = new Map<string, string | null>(originals);
   for (const [id, path] of paths) {
-    let content = renderDocument(id, path, byId, paths, {
+    if (selection && !selection.files.includes(path)) {
+      const prior = Object.entries(previous?.documents ?? {}).find(([, doc]) => doc.rootId === id);
+      if (!prior) throw new Error('Unselected document has no shared baseline');
+      const [priorPath, document] = prior;
+      if (state.documents[priorPath])
+        throw new Error('Select every document involved in a path swap');
+      state.documents[priorPath] = document;
+      for (const key of document.nodeIds) state.entries[key] = previous!.entries[key]!;
+      continue;
+    }
+    const options = {
       blocks,
       display: displays.get(id),
+      attributes: attributes.get(id),
       originalIds,
       links,
-    });
-    const parsed = parseDocument(path, content, links);
+    };
+    const parsed = renderParsedDocument(id, path, byId, paths, options);
     if (parsed.diagnostics.length)
       throw new Error(`Generated outline failed its own lint: ${parsed.diagnostics[0]!.code}`);
     const current = sources.get(path);
-    const semantic = (document: ParsedDocument) =>
+    const semantic = (document: ParsedOutline) =>
       hash({
         metadata: document.metadata,
         nodes: document.nodes.map((node) => ({
@@ -386,8 +451,11 @@ export async function writeSnapshot(
           ...(node.kind === 'opaque' ? { projection: node.contentHash } : {}),
         })),
       });
-    if (current && semantic(current) === semantic(parsed.document))
-      content = await readPrivate(root, path);
+    const content =
+      current && semantic(current) === semantic(parsed.document)
+        ? await readPrivate(root, path)
+        : renderDocument(id, path, byId, paths, options);
+    if (state.documents[path]) throw new Error('Select every document involved in a path swap');
     state.documents[path] = {
       rootId: id,
       fileHash: hash(content),
@@ -427,6 +495,7 @@ export async function writeSnapshot(
     throw new Error('Outline did not cover every enumerated Rem');
   state.complete = true;
   state.errors = [];
+  writes.set(IDENTITY, JSON.stringify(workspaceIdentity(state), null, 2) + '\n');
   for (const id of removedIds)
     if (previous?.entries[id]) writes.set(previous.entries[id]!.rawPath, null);
   const frozenHashes = files.hashes();
@@ -437,44 +506,67 @@ export async function writeSnapshot(
 }
 
 export interface LocalContext {
+  inputs: InspectionInputs;
   state: WorkspaceState;
   native: Map<string, WorkspaceRem>;
   parsed: Map<string, ParsedDocument>;
-  baseline: Map<string, ParsedDocument>;
+  baseline: Map<string, ParsedOutline>;
   diagnostics: Diagnostic[];
   dirty: string[];
   missing: string[];
 }
 
-export async function inspectLocal(
+/** One operation's bytes/ASTs only. Every write boundary still rereads through FrozenFiles. */
+export class InspectionInputs {
+  private readonly reads = new Map<string, Promise<string>>();
+  private readonly documents = new Map<string, { source: string; prepared: PreparedDocument }>();
+  private constructor(
+    private readonly root: string,
+    readonly paths: string[]
+  ) {}
+  static async scan(root: string): Promise<InspectionInputs> {
+    return new InspectionInputs(root, await allFiles(root));
+  }
+  read = (path: string): Promise<string> => {
+    if (!this.reads.has(path)) this.reads.set(path, readPrivate(this.root, path));
+    return this.reads.get(path)!;
+  };
+  prepare(path: string, source: string): PreparedDocument {
+    const before = this.documents.get(path);
+    if (before?.source === source) return before.prepared;
+    const prepared = prepareDocument(path, source);
+    this.documents.set(path, { source, prepared });
+    return prepared;
+  }
+  freeze(): Promise<FrozenFiles> {
+    return FrozenFiles.capture(this.root, this.paths, this.read);
+  }
+}
+
+/** One shared offline verification of every native/original record; format and sync use the same guards. */
+export async function inspectNativeRecords(
   root: string,
-  suppliedState?: WorkspaceState,
-  sources: ReadonlyMap<string, string> = new Map()
-): Promise<LocalContext> {
-  const state = suppliedState ?? (await loadState(root));
-  const files = await allFiles(root),
-    native = new Map<string, WorkspaceRem>(),
-    diagnostics: Diagnostic[] = [],
-    dirty: string[] = [],
-    missing: string[] = [];
+  state: WorkspaceState,
+  suppliedInputs?: InspectionInputs
+) {
+  const inputs = suppliedInputs ?? (await InspectionInputs.scan(root));
+  const native = new Map<string, WorkspaceRem>(),
+    diagnostics: Diagnostic[] = [];
   const fail = (path: string, line: number, code: string, message: string) =>
     diagnostics.push({ path, line, code, message });
   if (state.official) {
     try {
-      const data = await readPrivate(root, state.official.manifestPath);
+      const data = await inputs.read(state.official.manifestPath);
       if (hash(data) !== state.official.manifestHash)
         throw new Error('Official original manifest changed');
       const manifest = z
         .object({ files: z.record(z.string(), digest) })
         .passthrough()
         .parse(JSON.parse(data));
-      for (const [path, digest] of Object.entries(manifest.files)) {
-        if (
-          !path.startsWith('.remnote/originals/') ||
-          hash(await readPrivate(root, path)) !== digest
-        )
+      await mapReads(Object.entries(manifest.files), 16, async ([path, digest]) => {
+        if (!path.startsWith('.remnote/originals/') || hash(await inputs.read(path)) !== digest)
           throw new Error('Official original record changed or is missing');
-      }
+      });
     } catch (error) {
       fail(
         state.official.manifestPath,
@@ -484,9 +576,9 @@ export async function inspectLocal(
       );
     }
   }
-  for (const [id, entry] of Object.entries(state.entries)) {
+  const records = await mapReads(Object.entries(state.entries), 16, async ([id, entry]) => {
     try {
-      const raw = await readPrivate(root, entry.rawPath);
+      const raw = await inputs.read(entry.rawPath);
       if (hash(raw) !== entry.rawHash) throw new Error('Native baseline object was modified');
       const original: unknown = JSON.parse(raw);
       remSchema.parse(original);
@@ -496,94 +588,146 @@ export async function inspectLocal(
         throw new Error('Native baseline identity/hash mismatch');
       if (
         entry.publicHash &&
-        hash(await readPrivate(root, originalPath('public', id))) !== entry.publicHash
+        hash(await inputs.read(originalPath('public', id))) !== entry.publicHash
       )
         throw new Error('Original public snapshot was modified');
       if (
         entry.originalHash &&
-        hash(await readPrivate(root, originalPath('rems', id))) !== entry.originalHash
+        hash(await inputs.read(originalPath('rems', id))) !== entry.originalHash
       )
         throw new Error('Official original object was modified');
-      native.set(id, rem);
+      return { id, rem };
     } catch (error) {
-      fail(
-        entry.rawPath,
-        1,
-        'READONLY_METADATA',
-        error instanceof Error ? error.message : String(error)
-      );
+      return {
+        diagnostic: {
+          path: entry.rawPath,
+          line: 1,
+          code: 'READONLY_METADATA',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
     }
+  });
+  for (const record of records) {
+    if (record.rem) native.set(record.id, record.rem);
+    else diagnostics.push(record.diagnostic!);
+  }
+  return { inputs, native, diagnostics };
+}
+
+export async function inspectLocal(
+  root: string,
+  suppliedState?: WorkspaceState,
+  sources: ReadonlyMap<string, string> = new Map(),
+  suppliedInputs?: InspectionInputs
+): Promise<LocalContext> {
+  const state = suppliedState ?? (await loadState(root));
+  const { inputs, native, diagnostics } = await inspectNativeRecords(root, state, suppliedInputs);
+  const files = inputs.paths,
+    dirty: string[] = [],
+    missing: string[] = [];
+  const fail = (path: string, line: number, code: string, message: string) =>
+    diagnostics.push({ path, line, code, message });
+  try {
+    const identity = identitySchema.parse(JSON.parse(await inputs.read(IDENTITY)));
+    if (hash(identity) !== hash(workspaceIdentity(state)))
+      throw new Error('Tracked identity map differs from the authoritative manifest');
+  } catch (error) {
+    const missingIdentity =
+      error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
+    fail(
+      IDENTITY,
+      1,
+      'IDENTITY',
+      missingIdentity
+        ? 'Missing tracked identity; a clean sealed legacy vault requires explicit sync format DIR before normal sync'
+        : error instanceof Error
+          ? error.message
+          : String(error)
+    );
   }
   const parsed = new Map<string, ParsedDocument>(),
-    baseline = new Map<string, ParsedDocument>(),
+    baseline = new Map<string, ParsedOutline>(),
     allKeys = new Set<string>();
   const expectedRoots = new Map(
     Object.entries(state.documents).map(([path, doc]) => [doc.rootId, { path, doc }])
   );
+  const rootsByKey = new Map(
+    [...expectedRoots.keys()].map((id) => [state.entries[id]!.blockId, id])
+  );
   const paths = new Map<string, string>();
-  const currentFiles = new Map<
-    string,
-    { source: string; frontmatter: ReturnType<typeof parseFrontmatter> }
-  >();
+  const currentFiles = new Map<string, { source: string; prepared: PreparedDocument }>();
   const foldedPaths = new Set<string>();
-  for (const path of files.filter((file) => file.endsWith('.md'))) {
+  for (const path of files.filter(isContentMarkdown)) {
     if (foldedPaths.has(pathKey(path)))
       fail(path, 1, 'AMBIGUOUS_PATH', 'Case/Unicode-colliding Markdown paths are unsupported');
     foldedPaths.add(pathKey(path));
-    const source = sources.get(path) ?? (await readPrivate(root, path)),
-      frontmatter = parseFrontmatter(path, source);
-    currentFiles.set(path, { source, frontmatter });
+    const source = sources.get(path) ?? (await inputs.read(path)),
+      prepared = inputs.prepare(path, source),
+      frontmatter = prepared.frontmatter;
+    currentFiles.set(path, { source, prepared });
     diagnostics.push(...frontmatter.diagnostics);
-    const metadata = frontmatter.metadata;
-    if (!metadata) continue;
-    if (!expectedRoots.has(metadata.root)) {
+    if (!frontmatter.documentKey || !frontmatter.attributes) continue;
+    const rootId = rootsByKey.get(frontmatter.documentKey);
+    if (!rootId) {
       fail(
         path,
         1,
         'UNTRACKED_FILE',
-        'Document YAML root is not an imported native root; a filename does not create or move a native Rem'
+        'Hidden document key is not an imported native root; a filename does not create or move a native Rem'
       );
       continue;
     }
-    if (paths.has(metadata.root))
+    if (paths.has(rootId))
       fail(path, 1, 'DUPLICATE_ROOT', 'One native root is claimed by multiple Markdown files');
-    else paths.set(metadata.root, path);
+    else paths.set(rootId, path);
   }
   for (const [id, { path }] of expectedRoots)
     if (!paths.has(id)) {
       missing.push(path);
       fail(path, 1, 'MISSING_FILE', 'Missing file is not a remote deletion');
     }
-  const links = new WorkspaceLinks(
-    [...currentFiles]
-      .filter(([, value]) => value.frontmatter.metadata)
-      .map(([path, value]) => ({
-        path,
-        metadata: value.frontmatter.metadata!,
-        title: markdownHeadingTitle(value.frontmatter.body),
-      }))
-  );
   const blocks = new Map(Object.entries(state.entries).map(([id, entry]) => [id, entry.blockId]));
   const originalIds = new Set(
     Object.entries(state.entries)
       .filter(([, entry]) => entry.originalHash)
       .map(([id]) => id)
   );
+  if (native.size === Object.keys(state.entries).length)
+    for (const [rootId, path] of paths) {
+      const value = currentFiles.get(path)!;
+      value.prepared = bindPreparedDocument(
+        value.prepared,
+        documentMetadata(rootId, native, paths, { blocks, originalIds })
+      );
+    }
+  const links = new WorkspaceLinks(
+    [...currentFiles]
+      .filter(([, value]) => value.prepared.frontmatter.metadata)
+      .map(([path, value]) => ({
+        path,
+        metadata: value.prepared.frontmatter.metadata!,
+        title: preparedTitle(value.prepared),
+      }))
+  );
   for (const [rootId, path] of paths) {
     const doc = expectedRoots.get(rootId)!.doc;
-    const { source, frontmatter } = currentFiles.get(path)!;
-    const current = parseDocument(path, source, links);
+    const { source, prepared } = currentFiles.get(path)!;
+    const frontmatter = prepared.frontmatter;
+    const current = parsePreparedDocument(prepared, links);
     parsed.set(path, current.document);
     diagnostics.push(...current.diagnostics);
     if (hash(source) !== doc.fileHash || expectedRoots.get(rootId)!.path !== path) dirty.push(path);
     if (native.size !== Object.keys(state.entries).length) continue;
     const { title, aliases, tags } = frontmatter.metadata!;
     const display = { ...(title === undefined ? {} : { title }), aliases, tags };
-    const old = parseDocument(
-      path,
-      renderDocument(doc.rootId, path, native, paths, { blocks, originalIds, display, links }),
-      links
-    ).document;
+    const old = renderParsedDocument(doc.rootId, path, native, paths, {
+      blocks,
+      originalIds,
+      display,
+      links,
+      attributes: frontmatter.attributes,
+    }).document;
     baseline.set(path, old);
     if (current.document.nodes[0]?.key !== doc.rootId)
       fail(
@@ -611,7 +755,7 @@ export async function inspectLocal(
             path,
             node.line,
             'NEW_SHAPE',
-            'New nodes must have YAML content text or multiline under an existing mapped root'
+            'New nodes must be text or explicitly declared multiline under an existing mapped root'
           );
         const parent = current.document.nodes.find((candidate) => candidate.key === node.parent);
         if (!parent || ['opaque', 'mount', 'basic'].includes(parent.kind))
@@ -707,5 +851,5 @@ export async function inspectLocal(
         );
     }
   }
-  return { state, native, parsed, baseline, diagnostics, dirty, missing };
+  return { inputs, state, native, parsed, baseline, diagnostics, dirty, missing };
 }

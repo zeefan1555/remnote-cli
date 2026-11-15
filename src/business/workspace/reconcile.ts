@@ -2,6 +2,7 @@ import type { LocalContext } from './local.js';
 import { nodeKind } from './markdown.js';
 import {
   contentProjection,
+  immutableProjection,
   publicRevision,
   publicationRevisionHash,
   remoteEditedAt,
@@ -17,6 +18,13 @@ import {
   type ContentVersion,
 } from './types.js';
 import { remoteVersion, usableVersion } from './versions.js';
+import { mapReads } from './read-pool.js';
+
+function batches(ids: string[]): string[][] {
+  return Array.from({ length: Math.ceil(ids.length / 50) }, (_, index) =>
+    ids.slice(index * 50, index * 50 + 50)
+  );
+}
 
 /** Exact-ID public reads are bounded; this does not claim to discover new roots in the KB. */
 export async function readRemote(
@@ -25,20 +33,23 @@ export async function readRemote(
   backend: WorkspaceBackend
 ): Promise<Map<string, WorkspaceRem>> {
   const result = new Map<string, WorkspaceRem>(),
-    ids = [...context.native.keys()].sort();
-  for (let start = 0; start < ids.length; start += 50) {
-    const batch = ids.slice(start, start + 50);
-    const seen = new Set<string>();
+    ids = local.selection
+      ? [...local.selection.reconcileIds, ...local.selection.verificationIds].sort()
+      : [...context.native.keys()].sort();
+  const publicReads = await mapReads(batches(ids), 4, async (batch) => {
+    const seen = new Map<string, WorkspaceRem>();
     for (const snapshot of await backend.readPublic(batch)) {
       const id = snapshot.id;
       if (typeof id !== 'string' || !batch.includes(id) || seen.has(id))
         throw new Error('Malformed exact public snapshot batch');
-      seen.add(id);
-      result.set(id, withPublicSnapshot(context.native.get(id)!, snapshot));
+      seen.set(id, withPublicSnapshot(context.native.get(id)!, snapshot));
     }
-  }
+    return batch.flatMap((id) => (seen.has(id) ? [seen.get(id)!] : []));
+  });
+  for (const rem of publicReads.flat()) result.set(rem.id, rem);
   const full = new Set<string>();
-  for (const [id, before] of context.native) {
+  for (const id of ids) {
+    const before = context.native.get(id)!;
     const current = result.get(id);
     if (
       current &&
@@ -58,10 +69,12 @@ export async function readRemote(
       }
     }
   for (const id of local.deletion?.ids ?? []) if (result.has(id)) full.add(id);
+  for (const id of local.selection?.verificationIds ?? [])
+    if (result.has(id) && context.native.get(id)!.unsupported !== 'unverified-native-flags')
+      full.add(id);
   const fullIds = [...full].sort();
-  for (let start = 0; start < fullIds.length; start += 50) {
-    const batch = fullIds.slice(start, start + 50),
-      rems = await backend.read(batch);
+  const nativeReads = await mapReads(batches(fullIds), 4, async (batch) => {
+    const rems = await backend.read(batch);
     if (
       rems.length !== batch.length ||
       new Set(rems.map((rem) => rem.id)).size !== batch.length ||
@@ -71,9 +84,11 @@ export async function readRemote(
     for (const rem of rems) {
       if (hash(publicRevision(rem)) !== hash(publicRevision(result.get(rem.id)!)))
         throw new Error(`Concurrent remote change while reading ${rem.id}`);
-      result.set(rem.id, withNativeSnapshot(context.native.get(rem.id)!, rem));
     }
-  }
+    const byId = new Map(rems.map((rem) => [rem.id, rem]));
+    return batch.map((id) => withNativeSnapshot(context.native.get(id)!, byId.get(id)!));
+  });
+  for (const rem of nativeReads.flat()) result.set(rem.id, rem);
   return result;
 }
 
@@ -91,7 +106,7 @@ export function reconcile(
     conflicts: [],
     resolutions: [],
   };
-  const remoteVersions: Record<string, ContentVersion> = {};
+  const remoteVersions: Record<string, ContentVersion> = { ...context.state.remoteVersions };
   const nodes = new Map(
     [...context.parsed].flatMap(([path, doc]) =>
       doc.nodes
@@ -100,7 +115,22 @@ export function reconcile(
     )
   );
   const metadataChanged: string[] = [];
-  for (const [id, base] of context.native) {
+  // Dependency reads are validation only: they do not become incoming changes or advance clocks.
+  for (const id of local.selection?.verificationIds ?? []) {
+    const base = context.native.get(id)!,
+      current = remote.get(id);
+    if (!current) throw new Error(`Missing verification dependency ${id}`);
+    if (
+      hash([base.parent, base.children, base.type]) !==
+        hash([current.parent, current.children, current.type]) ||
+      (base.unsupported !== 'unverified-native-flags' &&
+        hash(immutableProjection(base)) !== hash(immutableProjection(current)))
+    )
+      throw new Error(`Verification dependency structure changed: ${id}`);
+  }
+  const graph = new Map([...context.native, ...remote]);
+  for (const id of local.selection?.reconcileIds ?? context.native.keys()) {
+    const base = context.native.get(id)!;
     const { path, node } = nodes.get(id)!,
       current = remote.get(id);
     const localRem =
@@ -152,7 +182,7 @@ export function reconcile(
       conflict('remote-structure');
       continue;
     }
-    if (localEdited && nodeKind(current, remote) !== node.kind) {
+    if (localEdited && nodeKind(current, graph) !== node.kind) {
       conflict('remote-structure');
       continue;
     }
@@ -202,6 +232,12 @@ export function reconcile(
       plan.changes.push({ ...localChange, fields });
     }
   }
+  for (const [id, rem] of remote) plan.remoteHashes[id] = publicationRevisionHash(rem);
+  if (plan.selection)
+    plan.selection = {
+      ...plan.selection,
+      outgoingKeys: plan.changes.map((change) => change.key).sort(),
+    };
   plan.resolutions.sort((a, b) => a.id.localeCompare(b.id));
   for (const list of [plan.incoming, plan.converged, metadataChanged]) list.sort();
   return { plan, metadataChanged, remoteVersions };
@@ -213,14 +249,14 @@ export async function checkPublicRevision(
   expected: Map<string, WorkspaceRem>
 ): Promise<void> {
   const ids = [...expected.keys()].sort();
-  for (let start = 0; start < ids.length; start += 50) {
-    const batch = ids.slice(start, start + 50),
-      snapshots = await backend.readPublic(batch);
+  const checked = await mapReads(batches(ids), 4, async (batch) => {
+    const snapshots = await backend.readPublic(batch);
     if (
       snapshots.length !== batch.length ||
       new Set(snapshots.map((snapshot) => snapshot.id)).size !== batch.length
     )
       throw new Error('Concurrent remote ID-set change');
+    const updated = new Map<string, WorkspaceRem>();
     for (const snapshot of snapshots) {
       const id = snapshot.id;
       if (typeof id !== 'string' || !batch.includes(id))
@@ -229,7 +265,9 @@ export async function checkPublicRevision(
         current = withPublicSnapshot(before, snapshot);
       if (hash(publicRevision(before)) !== hash(publicRevision(current)))
         throw new Error(`Concurrent remote change on ${id}`);
-      expected.set(id, current);
+      updated.set(id, current);
     }
-  }
+    return batch.map((id) => updated.get(id)!);
+  });
+  for (const rem of checked.flat()) expected.set(rem.id, rem);
 }

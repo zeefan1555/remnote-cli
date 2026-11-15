@@ -1,30 +1,62 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
-import { toMarkdown } from 'mdast-util-to-markdown';
-import type { RootContent, PhrasingContent, List, ListItem, Paragraph, Heading } from 'mdast';
-import { idSchema, nativeBlockId, originalPath, recordPath } from './identity.js';
+import { defaultHandlers, toMarkdown, type Options } from 'mdast-util-to-markdown';
+import type { Root, RootContent, PhrasingContent, List, ListItem, Paragraph, Heading } from 'mdast';
+import {
+  idSchema,
+  localNodeKey,
+  nativeBlockId,
+  originalPath,
+  recordPath,
+  shortBlockId,
+  shortBlockSchema,
+} from './identity.js';
 import { WorkspaceLinks } from './links.js';
 import { wikiFromMarkdown, wikiSyntax, wikiToMarkdown } from './wiki-markdown.js';
 import {
   nativeDetailsSchema,
+  metadataSchema,
   parseFrontmatter,
   renderFrontmatter,
   type NativeMetadata,
   type WorkspaceMetadata,
+  type DocumentAttributes,
 } from './metadata.js';
+import {
+  emptyReferenceWrappers,
+  isReferencePortal,
+  nativeReferenceTargets,
+  referenceBranches,
+} from './reference-projection.js';
 import {
   hash,
   type Diagnostic,
   type OutlineNode,
   type ParsedDocument,
+  type ParsedOutline,
   type WorkspaceRem,
 } from './types.js';
 
 export { idSchema } from './identity.js';
-const MARKDOWN_OPTIONS = {
+declare module 'mdast' {
+  interface ParagraphData {
+    remnoteBlockId?: string;
+  }
+}
+const MARKDOWN_OPTIONS: Options = {
   bullet: '-' as const,
   emphasis: '*' as const,
   strong: '*' as const,
   extensions: [wikiToMarkdown],
+  handlers: {
+    paragraph(node: Paragraph, parent, state, info) {
+      const body = defaultHandlers.paragraph(node, parent, state, info),
+        anchor = node.data?.remnoteBlockId;
+      // The block-ID delimiter is syntax, outside native text and attention escaping.
+      return anchor === undefined
+        ? body
+        : `${body}${body ? ' ' : ''}^${shortBlockSchema.parse(anchor)}`;
+    },
+  },
 };
 const PARSE_OPTIONS = { extensions: [wikiSyntax], mdastExtensions: [wikiFromMarkdown] };
 
@@ -118,9 +150,21 @@ export function readonlyReason(
     ) {
       if (
         front.type !== 'paragraph' ||
-        rem.children.some(
-          (id) => !byId.has(id) || byId.get(id)!.children.length || byId.get(id)!.cardItem !== true
-        )
+        !rem.children.some((id) => byId.get(id)?.cardItem === true) ||
+        rem.children.some((id) => {
+          const child = byId.get(id);
+          return (
+            !child ||
+            !(
+              isReferencePortal(child) ||
+              (child.cardItem === true &&
+                !child.children.length &&
+                [child.document, child.folder, child.practice, child.enablePractice].every(
+                  (value) => value !== null
+                ))
+            )
+          );
+        })
       )
         return 'multiline-shape';
     } else if (back.length) {
@@ -207,6 +251,7 @@ export function nativeMetadata(rem: WorkspaceRem): NativeMetadata {
 export interface RenderOptions {
   blocks?: Map<string, string>;
   display?: Pick<WorkspaceMetadata, 'title' | 'aliases' | 'tags'>;
+  attributes?: DocumentAttributes;
   originalIds?: Set<string>;
   links?: WorkspaceLinks;
 }
@@ -217,6 +262,8 @@ export function documentMetadata(
   documents: Map<string, string>,
   options: RenderOptions = {}
 ): WorkspaceMetadata {
+  const wrappers = emptyReferenceWrappers(byId);
+  const referenceTargets = nativeReferenceTargets(byId);
   const metadata: WorkspaceMetadata = {
     schema: 'remnote-sync/1',
     root: rootId,
@@ -233,6 +280,11 @@ export function documentMetadata(
       id,
       block: options.blocks?.get(id) ?? nativeBlockId(id),
       content: kind === 'opaque' ? 'readonly' : (kind as 'text' | 'basic' | 'multiline'),
+      ...(rem.type === 6 && referenceTargets.has(id)
+        ? { projection: 'anchor-required' as const }
+        : wrappers.has(id)
+          ? { projection: 'reference-wrapper' as const }
+          : {}),
       native: nativeMetadata(rem),
       readOnly: {
         record: recordPath(id),
@@ -252,11 +304,10 @@ function readonlyInline(
   links: WorkspaceLinks,
   byId: Map<string, WorkspaceRem>
 ): PhrasingContent[] {
-  if (!Array.isArray(value))
-    return [{ type: 'text', value: value == null ? '' : '[Unsupported value]' }];
+  if (!Array.isArray(value)) return [{ type: 'text', value: value == null ? '' : '〔原生内容〕' }];
   return value.flatMap((part): PhrasingContent[] => {
     if (typeof part === 'string') return [{ type: 'text', value: part }];
-    if (!part || typeof part !== 'object') return [{ type: 'text', value: '[Unsupported value]' }];
+    if (!part || typeof part !== 'object') return [{ type: 'text', value: '〔原生内容〕' }];
     const p = part as Record<string, unknown>;
     if (p.i === 'q' && typeof p._id === 'string' && idSchema.safeParse(p._id).success)
       return [
@@ -278,19 +329,20 @@ function readonlyInline(
           children: [{ type: 'text', value: `[${String(p.i ?? 'media')}]` }],
         },
       ];
-    return [{ type: 'text', value: `[Native ${String(p.i ?? 'object')}; original retained]` }];
+    return [{ type: 'text', value: '〔原生内容〕' }];
   });
 }
 
-export function renderDocument(
+function renderParts(
   rootId: string,
   path: string,
   byId: Map<string, WorkspaceRem>,
   documents: Map<string, string>,
   options: RenderOptions = {}
-): string {
+): { metadata: WorkspaceMetadata; body: string } {
   const root = byId.get(rootId)!;
   const metadata = documentMetadata(rootId, byId, documents, options);
+  const branches = referenceBranches(metadata);
   const links =
     options.links ??
     new WorkspaceLinks(
@@ -315,50 +367,33 @@ export function renderDocument(
     if (front.type !== 'paragraph') throw new Error('Invalid native front block');
     if (kind === 'opaque') {
       if (!front.children.length)
-        front.children.push({ type: 'text', value: rem.type === 6 ? 'Portal' : 'Untitled' });
-      extra.push({
-        type: 'paragraph',
-        children: [
-          {
-            type: 'text',
-            value: `Read only: ${readonlyReason(rem, byId)}. Original retained in ${recordPath(rem.id)}.`,
-          },
-        ],
-      });
+        front.children.push({ type: 'text', value: rem.type === 6 ? '关联引用' : '原生内容' });
+      front.children.push({ type: 'text', value: '〔只读〕' });
       if (Array.isArray(rem.backText) && rem.backText.length)
         extra.push({
           type: 'blockquote',
           children: [{ type: 'paragraph', children: readonlyInline(rem.backText, links, byId) }],
         });
       if (rem.type === 6) {
-        const targets = rem.portal?.directlyIncludedRemIds;
-        extra.push({
-          type: 'paragraph',
-          children: [
-            {
-              type: 'text',
-              value: targets
-                ? 'Portal directly included targets (links, not Obsidian transclusion): '
-                : 'Portal membership is unverified; no inferred targets.',
-            },
-            ...(targets ?? []).flatMap((id, index): PhrasingContent[] => [
-              ...(index ? [{ type: 'text' as const, value: ', ' }] : []),
-              { type: 'html', value: links.render(id, byId.has(id) ? titleOf(byId.get(id)!) : id) },
-            ]),
-          ],
-        });
+        const targets = branches.get(rem.id)?.targets ?? rem.portal?.directlyIncludedRemIds ?? [];
+        front.children.push(
+          ...targets.flatMap((id): PhrasingContent[] => [
+            { type: 'text', value: ' ' },
+            { type: 'html', value: links.render(id, byId.has(id) ? titleOf(byId.get(id)!) : id) },
+          ])
+        );
       }
     } else if (kind === 'basic')
       extra.push({
         type: 'blockquote',
         children: [{ type: 'paragraph', children: inline(rem.backText, links, byId) }],
       });
-    if (!heading)
-      front.children.push({ type: 'text', value: `${front.children.length ? ' ' : ''}^${anchor}` });
+    // Empty rich-text segments are not visible content before an Obsidian block ID.
+    front.children = front.children.filter((node) => node.type !== 'text' || node.value !== '');
     return [
       {
         type: heading ? 'heading' : 'paragraph',
-        ...(heading ? { depth: 1 as const } : {}),
+        ...(heading ? { depth: 1 as const } : { data: { remnoteBlockId: anchor } }),
         children: front.children,
       } as Heading | Paragraph,
       ...extra,
@@ -384,14 +419,44 @@ export function renderDocument(
             ],
           };
         const children = ownContent(rem);
-        if (rem.children.length) children.push(list(rem.children));
+        if (rem.children.length && !branches.has(id)) children.push(list(rem.children));
         return { type: 'listItem', spread: false, children: children as ListItem['children'] };
       }),
     };
   }
   const children = ownContent(root, true);
-  if (root.children.length) children.push(list(root.children));
-  return renderFrontmatter(metadata) + toMarkdown({ type: 'root', children }, MARKDOWN_OPTIONS);
+  if (root.children.length && !branches.has(rootId)) children.push(list(root.children));
+  return { metadata, body: toMarkdown({ type: 'root', children }, MARKDOWN_OPTIONS) };
+}
+
+export function renderDocument(...args: Parameters<typeof renderParts>): string {
+  const { metadata, body } = renderParts(...args);
+  return (
+    renderFrontmatter(args[4]?.attributes) +
+    `<!-- remnote:${metadata.rems[metadata.root]!.block} -->\n\n` +
+    body
+  );
+}
+
+/** Native baselines use the same outline codec without serializing and reparsing generated YAML. */
+export function renderParsedDocument(
+  ...args: Parameters<typeof renderParts>
+): ReturnType<typeof parseOutline> {
+  const { metadata, body } = renderParts(...args);
+  return parseOutline(
+    {
+      path: args[1],
+      frontmatter: {
+        metadata: metadataSchema.parse(metadata),
+        attributes: args[4]?.attributes ?? {},
+        body,
+        bodyLine: 1,
+        diagnostics: [],
+      },
+      tree: fromMarkdown(body, PARSE_OPTIONS),
+    },
+    args[4]?.links
+  );
 }
 
 /** Semantic rich-text representation ignores segmentation and false formatting flags. */
@@ -413,7 +478,11 @@ export function normalizeRichText(value: unknown): unknown {
 }
 
 export function markdownHeadingTitle(body: string): string {
-  const first = fromMarkdown(body, PARSE_OPTIONS).children[0];
+  return headingTitle(fromMarkdown(body, PARSE_OPTIONS));
+}
+
+function headingTitle(tree: Root): string {
+  const first = tree.children[0];
   function plain(nodes: PhrasingContent[]): string {
     return nodes
       .map((node) =>
@@ -430,29 +499,112 @@ export function markdownHeadingTitle(body: string): string {
   return first?.type === 'heading' && first.depth === 1 ? plain(first.children) : '';
 }
 
+export interface PreparedDocument {
+  path: string;
+  fileHash: string;
+  frontmatter: ReturnType<typeof parseFrontmatter>;
+  tree: Root;
+}
+
+export function prepareDocument(path: string, source: string): PreparedDocument {
+  const frontmatter = parseFrontmatter(path, source);
+  return {
+    path,
+    fileHash: hash(source),
+    frontmatter,
+    tree: fromMarkdown(frontmatter.body, PARSE_OPTIONS),
+  };
+}
+
+export function preparedTitle(source: PreparedDocument): string {
+  return headingTitle(source.tree);
+}
+
+/** Bind a source only after its hidden document key matched a sealed manifest entry. */
+export function bindPreparedDocument(
+  source: PreparedDocument,
+  baseline: WorkspaceMetadata
+): PreparedDocument {
+  const frontmatter = { ...source.frontmatter, diagnostics: [...source.frontmatter.diagnostics] };
+  if (frontmatter.attributes === undefined) return { ...source, frontmatter };
+  if (frontmatter.documentKey !== baseline.rems[baseline.root]!.block) {
+    frontmatter.diagnostics.push({
+      path: source.path,
+      line: 1,
+      code: 'ROOT_BINDING',
+      message: 'Hidden document key does not match the bound root',
+    });
+    return { ...source, frontmatter };
+  }
+  const { title, aliases = [], tags = [] } = frontmatter.attributes;
+  frontmatter.metadata = {
+    ...structuredClone(baseline),
+    ...(title === undefined ? {} : { title }),
+    aliases,
+    tags,
+  };
+  for (const [block, attrs] of Object.entries(frontmatter.attributes.rems ?? {})) {
+    const entry = Object.values(frontmatter.metadata.rems).find((entry) => entry.block === block);
+    if (entry && attrs.content !== undefined && attrs.content !== entry.content)
+      frontmatter.diagnostics.push({
+        path: source.path,
+        line: 1,
+        code: 'IMMUTABLE_STRUCTURE',
+        message: 'Existing native card kind and read-only content cannot be changed by attributes',
+      });
+  }
+  return { ...source, frontmatter };
+}
+
 export function parseDocument(
   path: string,
   source: string,
+  metadata?: WorkspaceMetadata,
   suppliedLinks?: WorkspaceLinks
 ): { document: ParsedDocument; diagnostics: Diagnostic[] } {
-  const frontmatter = parseFrontmatter(path, source),
+  const prepared = prepareDocument(path, source);
+  if (!metadata) {
+    prepared.frontmatter.diagnostics.push({
+      path,
+      line: 1,
+      code: 'IDENTITY',
+      message: 'Parsing requires the sealed document identity and native baseline',
+    });
+    return parsePreparedDocument(prepared, suppliedLinks);
+  }
+  return parsePreparedDocument(bindPreparedDocument(prepared, metadata), suppliedLinks);
+}
+
+export function parsePreparedDocument(
+  source: PreparedDocument,
+  suppliedLinks?: WorkspaceLinks
+): { document: ParsedDocument; diagnostics: Diagnostic[] } {
+  const result = parseOutline(source, suppliedLinks);
+  return { ...result, document: { ...result.document, fileHash: source.fileHash } };
+}
+
+function parseOutline(
+  source: Omit<PreparedDocument, 'fileHash'>,
+  suppliedLinks?: WorkspaceLinks
+): { document: ParsedOutline; diagnostics: Diagnostic[] } {
+  const { path, frontmatter, tree } = source,
     diagnostics = [...frontmatter.diagnostics];
-  const result: ParsedDocument = {
+  const result: ParsedOutline = {
     path,
-    fileHash: hash(source),
+    attributes: frontmatter.attributes,
     metadata: frontmatter.metadata,
     nodes: [],
     references: [],
   };
   const metadata = frontmatter.metadata;
   if (!metadata) return { document: result, diagnostics };
-  const body = frontmatter.body,
-    tree = fromMarkdown(body, PARSE_OPTIONS);
-  const title = markdownHeadingTitle(body);
+  const title = headingTitle(tree);
   const links = suppliedLinks ?? new WorkspaceLinks([{ path, title, metadata }]);
   const entriesByBlock = new Map(
     Object.entries(metadata.rems).map(([key, entry]) => [entry.block, { key, entry }])
   );
+  const branches = referenceBranches(metadata);
+  const usedBlocks = new Set(entriesByBlock.keys());
   const seen = new Set<string>();
   const fail = (line: number, code: string, message: string) =>
     diagnostics.push({ path, line, code, message });
@@ -541,13 +693,17 @@ export function parseDocument(
       kind = content === 'readonly' ? 'opaque' : content;
     } else if (anchor && last?.type === 'text') {
       const target = entriesByBlock.get(anchor[1]!);
-      if (!target) {
-        fail(line, 'BLOCK_BINDING', 'Block has no corresponding YAML Rem entry');
+      blockId = anchor[1]!;
+      if (!shortBlockSchema.safeParse(blockId).success) {
+        fail(line, 'BLOCK_BINDING', 'Block IDs must be 1-64 ASCII letters, digits or hyphens');
         return;
       }
-      key = target.key;
-      blockId = target.entry.block;
-      kind = target.entry.content === 'readonly' ? 'opaque' : target.entry.content;
+      key = target?.key ?? localNodeKey(metadata!.root, blockId);
+      kind = target
+        ? target.entry.content === 'readonly'
+          ? 'opaque'
+          : target.entry.content
+        : (frontmatter.attributes?.rems?.[blockId]?.content ?? 'text');
       last.value = last.value.slice(0, -anchor[0].length);
       if (!last.value) children.pop();
     } else {
@@ -557,11 +713,24 @@ export function parseDocument(
           mount?.type === 'wikiLink' && mount.target && !mount.embed
             ? links.resolve(path, mount.target)
             : undefined;
-        if (!target?.root || target.path === path)
-          throw new Error('Missing stable ^block-id at the end of the item');
-        key = target.id;
-        blockId = target.block;
-        kind = 'mount';
+        const parentEntry = parent ? metadata!.rems[parent] : undefined;
+        if (
+          target?.root &&
+          target.path !== path &&
+          parentEntry?.id !== null &&
+          parentEntry?.native.children?.includes(target.id)
+        ) {
+          key = target.id;
+          blockId = target.block;
+          kind = 'mount';
+        } else {
+          blockId = shortBlockId(
+            `${metadata!.root}:${first.position?.start.offset ?? line}:${parent}`,
+            usedBlocks
+          );
+          key = localNodeKey(metadata!.root, blockId);
+          kind = 'text';
+        }
       } catch (error) {
         fail(line, 'BLOCK_BINDING', error instanceof Error ? error.message : String(error));
         return;
@@ -570,6 +739,9 @@ export function parseDocument(
     if (kind !== 'mount') {
       if (seen.has(key)) fail(line, 'DUPLICATE_ID', 'Every real Rem must occur exactly once');
       seen.add(key);
+      usedBlocks.add(blockId);
+      if (key.startsWith('new:'))
+        metadata!.rems[key] = { id: null, block: blockId, content: kind as 'text' | 'multiline' };
     }
     const extra = blocks.slice(1).filter((node) => node.type !== 'list');
     let text: unknown[] = [],
@@ -630,6 +802,36 @@ export function parseDocument(
           : hash(toMarkdown({ type: 'root', children: own }, MARKDOWN_OPTIONS)),
     };
     result.nodes.push(node);
+    const branch = branches.get(key);
+    if (branch) {
+      if (blocks.some((node) => node.type === 'list'))
+        fail(line, 'OPAQUE_EDIT', 'Reference wrapper structure is a sealed read-only projection');
+      const entry = metadata!.rems[key]!;
+      if (entry.id !== null) node.children = [...entry.native.children!];
+      for (const hidden of branch.ids.slice(1)) {
+        if (seen.has(hidden))
+          fail(
+            line,
+            'DUPLICATE_ID',
+            'Hidden native reference wrappers cannot also occur in the Markdown body'
+          );
+        seen.add(hidden);
+        const entry = metadata!.rems[hidden]!;
+        if (entry.id === null) throw new Error('Unbound hidden reference wrapper');
+        result.nodes.push({
+          key: hidden,
+          blockId: entry.block,
+          parent: entry.native.parent,
+          kind: 'opaque',
+          line,
+          text: [],
+          backText: [],
+          children: [...entry.native.children!],
+          contentHash: hash({ hiddenReference: hidden }),
+        });
+      }
+      return node;
+    }
     for (const list of blocks.filter((node): node is List => node.type === 'list')) {
       if (list.ordered)
         fail(atLine(list), 'STRUCTURE', 'Only unordered outline lists are supported');
@@ -653,6 +855,9 @@ export function parseDocument(
   const [first, ...rest] = tree.children;
   content(first ? [first, ...rest] : [], null, true);
   for (const key of Object.keys(metadata.rems))
-    if (!seen.has(key)) fail(1, 'YAML_NODE_MISSING', `YAML entry ${key} has no real body node`);
+    if (!seen.has(key)) fail(1, 'MISSING_ID', `Existing identity ${key} has no real body node`);
+  for (const block of Object.keys(frontmatter.attributes?.rems ?? {}))
+    if (!result.nodes.some((node) => node.blockId === block))
+      fail(1, 'ATTRIBUTE_NODE_MISSING', `Attributes for ${block} have no body node`);
   return { document: result, diagnostics };
 }

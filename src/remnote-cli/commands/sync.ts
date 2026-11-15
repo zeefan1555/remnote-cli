@@ -1,4 +1,4 @@
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import {
   diffWorkspace,
   lintWorkspace,
@@ -10,6 +10,7 @@ import {
   saveWorkspace,
 } from '../../business/workspace/workspace.js';
 import { fileByteLimit } from '../../business/workspace/files.js';
+import { formatWorkspace } from '../../business/workspace/format.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatError, formatResult } from '../output/formatter.js';
@@ -19,6 +20,8 @@ interface SyncOptions {
   planHash?: string;
   deleteId?: string;
   scopeRoot?: string;
+  scope?: 'changed' | 'all';
+  paths?: string[];
   rootId?: string;
   export?: string;
   snapshot?: string;
@@ -27,23 +30,28 @@ interface SyncOptions {
   expectedFileHash?: string;
 }
 
-function deletionOptions(command: Command): Command {
-  return command
-    .option('--delete-id <id>', 'Explicitly preview deletion of this note/card and its descendants')
-    .option('--scope-root <id>', 'Required exact ancestor boundary for explicit deletion');
+interface SelectionOptions {
+  scope: 'changed' | 'all';
+  path: string[];
+  planHash?: string;
+}
+
+function pathOptions(command: Command): Command {
+  return command.option(
+    '--path <path>',
+    'Select a vault-relative Markdown file or directory; repeatable, no globs',
+    (value: string, paths: string[]) => paths.concat(value),
+    [] as string[]
+  );
 }
 
 export function registerSyncCommands(program: Command): void {
-  const workspace = deletionOptions(
-    program
-      .command('sync [directory]')
-      .description('Preview per-Rem three-way synchronization between local Markdown and RemNote')
-      .option('--apply', 'Apply the exact previously previewed plan')
-      .option('--plan-hash <sha256>', 'Exact plan hash returned by sync preview')
-  );
+  const workspace = program
+    .command('sync')
+    .description('Synchronize local Markdown and RemNote through explicit bounded commands');
 
   async function execute(
-    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover' | 'read' | 'save',
+    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover' | 'read' | 'save' | 'format',
     directory: string,
     options: SyncOptions,
     path?: string
@@ -53,6 +61,7 @@ export function registerSyncCommands(program: Command): void {
     try {
       let result: unknown;
       if (name === 'read') result = await readWorkspace(directory, path!);
+      else if (name === 'format') result = await formatWorkspace(directory);
       else if (name === 'save')
         result = await saveWorkspace(
           directory,
@@ -95,13 +104,48 @@ export function registerSyncCommands(program: Command): void {
     }
   }
 
-  workspace.action(async (directory: string | undefined, options: SyncOptions) => {
-    if (!directory) {
-      workspace.outputHelp();
-      return;
-    }
-    await execute('sync', directory, options);
-  });
+  for (const name of ['plan', 'apply'] as const) {
+    const command = pathOptions(workspace.command(name + ' <directory>'))
+      .description(
+        name === 'plan'
+          ? 'Preview bidirectional synchronization with zero native writes'
+          : 'Plan, check, apply and verify synchronization in one invocation'
+      )
+      .addOption(
+        new Option('--scope <scope>', 'Reconcile local changes or all bound IDs in selected paths')
+          .choices(['changed', 'all'])
+          .default('changed')
+      );
+    if (name === 'apply')
+      command.option('--plan-hash <sha256>', 'Require this exact previous preview when applying');
+    command.action(async (directory: string, { path, ...options }: SelectionOptions) =>
+      execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })
+    );
+  }
+  workspace
+    .command('delete <directory>')
+    .description('Preview explicit deletion of an exact note/card and its bounded descendants')
+    .requiredOption('--id <id>', 'Exact note/card to delete')
+    .requiredOption('--scope-root <id>', 'Exact ancestor boundary for deletion')
+    .option('--apply', 'Apply the reviewed deletion with destructive authorization and live gates')
+    .option('--plan-hash <sha256>', 'Exact deletion preview hash required with --apply')
+    .action(
+      async (
+        directory: string,
+        { id, ...options }: SyncOptions & { id: string },
+        command: Command
+      ) => {
+        if (options.apply && !options.planHash)
+          command.error('sync delete --apply requires --plan-hash', {
+            code: 'commander.missingMandatoryOptionValue',
+          });
+        await execute('sync', directory, {
+          ...options,
+          apply: options.apply === true,
+          deleteId: id,
+        });
+      }
+    );
   workspace
     .command('read <directory> <path>')
     .description('Read local Markdown and its exact fileHash offline')
@@ -114,14 +158,15 @@ export function registerSyncCommands(program: Command): void {
     .action(async (directory: string, path: string, options: SyncOptions) =>
       execute('save', directory, options, path)
     );
-  for (const name of ['import', 'status', 'lint', 'diff', 'recover'] as const) {
+  for (const name of ['import', 'status', 'lint', 'diff', 'recover', 'format'] as const) {
     const command = workspace.command(name + ' <directory>').description(
       {
-        import: 'Create the first local baseline in an empty directory; use sync for later changes',
+        import: 'Create the first baseline in an empty directory; use sync apply for later changes',
         status: 'Offline local-source status',
         lint: 'Offline native metadata, outline, card and identity validation',
         diff: 'Offline supported changes; never infer deletion or movement',
         recover: 'Finish staged local publication without remote writes',
+        format: 'Offline canonical formatting of a clean sealed publication as human Markdown',
       }[name]
     );
     if (name === 'import')
@@ -130,9 +175,13 @@ export function registerSyncCommands(program: Command): void {
         .option('--export <file>', 'Official full JSON .rem export; collect public SDK snapshots')
         .option('--snapshot <file>', 'Exact archive-bound public SDK snapshot and native facts')
         .option('--editable-root-id <id>', 'Verify this subtree completely during official import');
-    if (name === 'diff') deletionOptions(command);
-    command.action(async (directory: string, options: SyncOptions) =>
-      execute(name, directory, options)
-    );
+    if (name === 'diff')
+      pathOptions(command).action(async (directory: string, options: { path: string[] }) =>
+        execute(name, directory, { paths: options.path })
+      );
+    else
+      command.action(async (directory: string, options: SyncOptions) =>
+        execute(name, directory, options)
+      );
   }
 }
