@@ -300,6 +300,400 @@ const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =
   });
 
 describe('identity-preserving outline relationships', () => {
+  it('binds same-apply native Card evidence without replacing unknown sealed history with empty history', async () => {
+    const f = fixture();
+    const cards = (await f.backend.read(['question']))[0]!.cards!;
+    f.rems.get('question')!.cards = cards.map((card) => ({ ...card, repetitionHistory: null }));
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    await edit(
+      path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+          },
+        }) + source
+    );
+    const before = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(before.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toBeNull();
+    f.rems.get('question')!.cards = cards.map((card) => ({
+      ...card,
+      repetitionHistory: [{ score: 3 }],
+    }));
+    const reviewHash = hash(
+      f.rems.get('question')!.cards!.map(({ id, createdAt, repetitionHistory }) => ({
+        id,
+        createdAt,
+        repetitionHistory,
+      }))
+    );
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [path],
+      expectedLocalHash: before.localHash,
+    })) as {
+      planHash: string;
+      verification: {
+        planHash: string;
+        localHash: string;
+        nativeBefore: Record<string, { cardIds: string[]; reviewHash: string }>;
+        nativeAfter: Record<string, { cardIds: string[]; reviewHash: string }>;
+      };
+    };
+    expect(result).toMatchObject({ status: 'verified', complete: true, remoteWrites: 1 });
+    expect(result.verification.planHash).toBe(result.planHash);
+    expect(result.verification.localHash).toBe(before.localHash);
+    expect(result.verification.nativeBefore.question).toEqual({
+      cardIds: cards.map((card) => card.id),
+      reviewHash,
+    });
+    expect(result.verification.nativeAfter.question).toEqual(
+      result.verification.nativeBefore.question
+    );
+    const after = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(after.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toEqual([
+      { score: 3 },
+    ]);
+  });
+
+  it('rejects changed known sealed Card IDs before native-before evidence can bless a replacement', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+          },
+        }) + source
+    );
+    const cards = (await f.backend.read(['question']))[0]!.cards!;
+    f.rems.get('question')!.cards = cards.map((card) => ({ ...card, id: 'replacement-card' }));
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Sealed Card identities changed');
+    expect(f.calls).toEqual([]);
+  });
+
+  it('creates an explicit empty direct answer without inventing a question or independent card', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) =>
+      source.replace('    - Because', '    - ^answer-spacer\n    - Because')
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    const outline = await workspace.readWorkspace(directory, f.path, { outline: true });
+    const spacer = Object.values(outline.outline!.nodes).find(
+      (node) => node.text === '' && node.id === null
+    )!;
+    expect(spacer).toMatchObject({
+      kind: 'text',
+      cardItem: true,
+      cards: [],
+      cardIds: [],
+      children: [],
+      observed: { cardItem: null, cards: null },
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'verified', complete: true });
+    expect(f.rems.get('created_1')).toMatchObject({
+      text: [],
+      parent: 'question',
+      children: [],
+      cardItem: true,
+      backText: null,
+    });
+    expect(await f.backend.cardFacts('created_1')).toEqual([]);
+    expect(f.rems.get('question')!.children).toEqual(['created_1', 'answer']);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
+  });
+
+  it('still rejects new empty ordinary notes before opening a backend', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source + '\n- ^empty-note\n');
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('EMPTY_QUESTION');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('rejects inserting grandchildren beneath an existing multiline answer before connecting', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) =>
+      source.replace(/(    - Because[^\n]*)/, '$1\n      - Nested ^nested-answer')
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: false });
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('ANSWER_SHAPE');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('retains unknown sealed history when unrelated reference drift blocks a metadata-only refresh', async () => {
+    const f = fixture();
+    const cards = (await f.backend.read(['question']))[0]!.cards!;
+    f.rems.get('question')!.cards = cards.map((card) => ({ ...card, repetitionHistory: null }));
+    f.rems.get('answer')!.text = [{ i: 'q', _id: 'subdoc' }];
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    const before = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(before.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toBeNull();
+    f.rems.get('question')!.cards = cards;
+    f.rems.get('subdoc')!.folder = true;
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { scope: 'all', paths: [path] })
+    ).rejects.toThrow('Verification dependency structure changed: subdoc');
+    const after = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(after.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toBeNull();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('measures the bounded read amplification of a multi-question leaf insertion batch', async () => {
+    const f = fixture();
+    const questions = Array.from({ length: 9 }, (_, n) => (n === 0 ? 'question' : `question${n}`));
+    const answers: string[] = [];
+    f.rems.get('chapter')!.children = questions;
+    for (const [qi, id] of questions.entries()) {
+      const children = Array.from({ length: 3 }, (_, n) =>
+        qi === 0 && n === 0 ? 'answer' : `answer${qi}_${n}`
+      );
+      f.rems.set(id, native(id, [`Question ${qi}`], { parent: 'chapter', children, backText: [] }));
+      for (const child of children) {
+        f.rems.set(child, native(child, [`Text ${child}`], { parent: id, cardItem: true }));
+        answers.push(child);
+      }
+    }
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    await edit(path, (source) => {
+      for (const [qi, id] of questions.entries()) {
+        const first = f.rems.get(id)!.children[0]!;
+        const leaves = Array.from(
+          { length: qi === 0 ? 9 : 5 },
+          (_, n) => `    - Label ${qi} ${n} ^leaf-${qi}-${n}`
+        ).join('\n');
+        source = source.replace(`    - Text ${first} `, `${leaves}\n    - Text ${first} `);
+      }
+      for (const id of answers) source = source.replace(`Text ${id} `, `Edited ${id} `);
+      return (
+        renderFrontmatter({
+          rems: {
+            [state.entries.chapter!.blockId]: { powerups: { cc: true } },
+            ...Object.fromEntries(
+              questions.map((id) => [
+                state.entries[id]!.blockId,
+                { tags: ['[[HOME]]', '[[Child doc]]'] },
+              ])
+            ),
+          },
+        }) + source
+      );
+    });
+    vi.mocked(f.backend.read).mockClear();
+    vi.mocked(f.backend.readPublic).mockClear();
+    vi.mocked(f.backend.readEditGuards!).mockClear();
+    vi.mocked(f.backend.identity).mockClear();
+    const start = performance.now();
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [path],
+    })) as { remoteWrites: number };
+    expect(result).toMatchObject({ status: 'verified', complete: true, remoteWrites: 242 });
+    const readCalls = vi.mocked(f.backend.read).mock.calls;
+    const guardCalls = vi.mocked(f.backend.readEditGuards!).mock.calls;
+    const exactRems = readCalls.reduce((sum, [ids]) => sum + ids.length, 0);
+    const guardedRems = guardCalls.reduce((sum, [ids]) => sum + ids.length, 0);
+    process.stdout.write(
+      'SYNTHETIC_SYNC_READ_PROFILE ' +
+        JSON.stringify({
+          elapsedMs: Math.round(performance.now() - start),
+          remoteWrites: result.remoteWrites,
+          exactBatches: readCalls.length,
+          exactRems,
+          guardBatches: guardCalls.length,
+          guardedRems,
+          publicBatches: vi.mocked(f.backend.readPublic).mock.calls.length,
+          identities: vi.mocked(f.backend.identity).mock.calls.length,
+        }) +
+        '\n'
+    );
+    expect(guardCalls).toHaveLength(1);
+    expect(exactRems + guardedRems).toBeLessThan(10_000);
+  }, 60_000);
+
+  it.each(['tags', 'powerups'] as const)(
+    'does not substitute sealed facts for missing fresh %s in an edit readback',
+    async (missing) => {
+      const f = await prepare();
+      await relationships(f);
+      const original = f.backend.read;
+      f.backend.read = vi.fn(async (ids, options) => {
+        const rems = await original(ids, options);
+        if (options?.tags)
+          for (const rem of rems) {
+            if (missing === 'tags') delete rem.tags;
+            else delete rem.powerupStates;
+          }
+        return rems;
+      });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        remoteWrites: 0,
+        error: expect.stringContaining('Incomplete exact native edit relationships'),
+      });
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it.each(['history', 'identity', 'content'] as const)(
+    'refuses final publication when an already-checked independent branch drifts in %s',
+    async (field) => {
+      const f = await prepare();
+      const before = await readPrivate(directory, f.state.entries.question!.rawPath);
+      await edit(
+        f.path,
+        (source) =>
+          renderFrontmatter({
+            rems: {
+              [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+              [f.state.entries.basic!.blockId]: { tags: ['[[HOME]]'] },
+            },
+          }) + source
+      );
+      const cards = (await f.backend.read(['question']))[0]!.cards!;
+      const original = f.backend.setTag!;
+      f.backend.setTag = vi.fn(async (...args) => {
+        await original(...args);
+        if (args[0] !== 'basic') return;
+        if (field === 'content') f.rems.get('question')!.text = ['Concurrent edit'];
+        else
+          f.rems.get('question')!.cards = cards.map((card) => ({
+            ...card,
+            ...(field === 'identity'
+              ? { id: 'replacement-card' }
+              : { repetitionHistory: [{ score: 1 }] }),
+          }));
+      });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        remoteWrites: 2,
+      });
+      expect(f.calls).toEqual(['question:tag:home:true', 'basic:tag:home:true']);
+      expect(await readPrivate(directory, f.state.entries.question!.rawPath)).toBe(before);
+    }
+  );
+
+  it('checks the full selected native guard before the first write, not just its first footprint', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+            [f.state.entries.basic!.blockId]: { tags: ['[[HOME]]'] },
+          },
+        }) + source
+    );
+    const cards = (await f.backend.read(['basic']))[0]!.cards!;
+    const original = f.backend.readEditGuards!;
+    f.backend.readEditGuards = vi.fn(async (...args) => {
+      const guards = await original(...args);
+      f.rems.get('basic')!.cards = cards.map((card) => ({
+        ...card,
+        repetitionHistory: [{ score: 2 }],
+      }));
+      return guards;
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({
+      status: 'conflict',
+      complete: false,
+      remoteWrites: 0,
+      steps: {},
+    });
+    expect(f.calls).toEqual([]);
+  });
+
+  it('retains a removed Tag target in the after-step guard footprint', async () => {
+    const f = fixture();
+    f.rems.get('question')!.tags = ['subdoc'];
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    await edit(
+      path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [state.entries.question!.blockId]: { tags: [] },
+          },
+        }) + source
+    );
+    const original = f.backend.setTag!;
+    f.backend.setTag = vi.fn(async (...args) => {
+      await original(...args);
+      f.rems.get('subdoc')!.folder = true;
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [path] })
+    ).toMatchObject({
+      status: 'unknown',
+      complete: false,
+      remoteWrites: 1,
+    });
+    expect(f.calls).toEqual(['question:tag:subdoc:false']);
+  });
+
+  it.each(['constructor', 'cardItem'] as const)(
+    'rejects independent Cards on a new answer at its %s boundary',
+    async (stage) => {
+      const f = await prepare();
+      await edit(f.path, (source) =>
+        source.replace('    - Because', '    - Label ^insert-label\n    - Because')
+      );
+      const card = (await f.backend.read(['question']))[0]!.cards![0]!;
+      const addCard = (id: string) => {
+        f.rems.get(id)!.cards = [{ ...card, id: 'unexpected-answer-card', remId: id }];
+      };
+      if (stage === 'constructor') {
+        const create = f.backend.create;
+        f.backend.create = vi.fn(async (...args) => {
+          const id = await create(...args);
+          addCard(id);
+          return id;
+        });
+      } else {
+        const set = f.backend.setCardItem;
+        f.backend.setCardItem = vi.fn(async (...args) => {
+          await set(...args);
+          addCard(args[0]);
+        });
+      }
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({
+        status: 'unknown',
+        complete: false,
+        remoteWrites: stage === 'constructor' ? 1 : 4,
+      });
+    }
+  );
+
   it('projects authored native relationships and a sealed input hash without a backend', async () => {
     const f = await prepare();
     await edit(
@@ -323,6 +717,44 @@ describe('identity-preserving outline relationships', () => {
     });
     expect(read.outline?.nodes.chapter).toMatchObject({ powerups: { cc: true } });
     expect(read.outline?.nodes.home).toMatchObject({ id: 'home', parent: null });
+    expect(read.outline?.nodes.question).toMatchObject({
+      cardItem: false,
+      observed: { cardItem: false },
+    });
+    expect(read.outline?.nodes.answer).toMatchObject({
+      cardItem: true,
+      observed: { cardItem: true },
+    });
+  });
+
+  it('projects new answer membership as intent without inventing native observations', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        source.replace('    - Because', '    - Planned answer ^planned-answer\n    - Because') +
+        '\n- Planned topic ^planned-topic\n'
+    );
+    const read = await workspace.readWorkspace(directory, f.path, { outline: true });
+    const nodes = Object.values(read.outline!.nodes);
+    expect(nodes.find((node) => node.text === 'Planned answer')).toMatchObject({
+      id: null,
+      kind: 'text',
+      cardItem: true,
+      cards: [],
+      cardIds: [],
+      document: false,
+      folder: false,
+      observed: { cardItem: null, cards: null, cardIds: null, document: null, folder: null },
+    });
+    expect(nodes.find((node) => node.text === 'Planned topic')).toMatchObject({
+      id: null,
+      kind: 'text',
+      cardItem: false,
+      cards: [],
+      cardIds: [],
+      observed: { cardItem: null, cards: null, cardIds: null },
+    });
   });
 
   it('inserts direct answer leaves without replacing existing answers or card identities', async () => {
@@ -404,6 +836,14 @@ describe('identity-preserving outline relationships', () => {
   it('resumes a confirmed-after uncertain tag write without repeating any relationship operation', async () => {
     const f = await prepare();
     await relationships(f);
+    const before = await workspace.readWorkspace(directory, f.path, { outline: true });
+    const cards = before.outline!.nodes.question!.observed.cards!;
+    const proof = {
+      cardIds: cards.map((card) => card.id),
+      reviewHash: hash(
+        cards.map(({ id, createdAt, repetitionHistory }) => ({ id, createdAt, repetitionHistory }))
+      ),
+    };
     const original = f.backend.setTag!;
     f.backend.setTag = vi.fn(async (...args) => {
       await original(...args);
@@ -417,7 +857,17 @@ describe('identity-preserving outline relationships', () => {
     const count = f.calls.length;
     f.backend.setTag = original;
     expect(await resumeWorkspace(directory, async () => f.backend, stopped.planHash)).toMatchObject(
-      { status: 'verified', complete: true, editGuardsVerified: true }
+      {
+        status: 'verified',
+        complete: true,
+        editGuardsVerified: true,
+        verification: {
+          planHash: stopped.planHash,
+          localHash: before.localHash,
+          nativeBefore: { question: proof },
+          nativeAfter: { question: proof },
+        },
+      }
     );
     expect(f.calls).toHaveLength(count);
   });
@@ -476,6 +926,18 @@ describe('identity-preserving outline relationships', () => {
       await edit(f.path, (source) =>
         source.replace('    - Because', '    - Label ^insert-label\n    - Because')
       );
+      const before = await workspace.readWorkspace(directory, f.path, { outline: true });
+      const questionCards = before.outline!.nodes.question!.observed.cards!;
+      const proof = {
+        cardIds: questionCards.map((card) => card.id),
+        reviewHash: hash(
+          questionCards.map(({ id, createdAt, repetitionHistory }) => ({
+            id,
+            createdAt,
+            repetitionHistory,
+          }))
+        ),
+      };
       const original = LocalState.prototype.setLocal;
       const spy = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
         this: LocalState,
@@ -503,6 +965,11 @@ describe('identity-preserving outline relationships', () => {
           status: 'recovered',
           complete: true,
           remoteWrites: 0,
+          verification: {
+            localHash: before.localHash,
+            nativeBefore: { question: proof },
+            nativeAfter: { question: proof },
+          },
         });
         const read = await workspace.readWorkspace(directory, f.path, { outline: true });
         expect(read.outline!.nodes.question!.observed.tags).toEqual(['home']);

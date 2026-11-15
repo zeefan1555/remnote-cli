@@ -767,14 +767,18 @@ export async function inspectLocal(
             'Cannot insert beneath an opaque, mount or basic-card node'
           );
         if (
-          parent?.kind === 'multiline' &&
-          (node.kind !== 'text' || node.children.length || !node.text.length)
+          (parent?.kind === 'multiline' && (node.kind !== 'text' || node.children.length)) ||
+          (parent &&
+            native.get(parent.key)?.cardItem === true &&
+            current.document.nodes.some(
+              (candidate) => candidate.key === parent.parent && candidate.kind === 'multiline'
+            ))
         )
           fail(
             path,
             node.line,
             'ANSWER_SHAPE',
-            'Multiline answers must be nonempty leaf text/code nodes'
+            'Multiline answers must be direct leaf text/code nodes'
           );
       } else if (!before)
         fail(path, node.line, 'UNKNOWN_ID', 'Native ID does not belong to this mapped document');

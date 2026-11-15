@@ -782,7 +782,15 @@ function parseOutline(
             'A Rem is one paragraph, one fenced code block, or an existing basic front plus blockquote back'
           );
       }
-      if ((kind === 'multiline' || kind === 'basic' || key.startsWith('new:')) && !text.length)
+      const explicitEmptyAnswer =
+        kind === 'text' &&
+        anchor !== null &&
+        result.nodes.some((node) => node.key === parent && node.kind === 'multiline');
+      if (
+        (kind === 'multiline' || kind === 'basic' || key.startsWith('new:')) &&
+        !text.length &&
+        !explicitEmptyAnswer
+      )
         fail(line, 'EMPTY_QUESTION', 'New notes and card questions cannot be empty');
       if (kind === 'basic' && !backText.length)
         fail(line, 'EMPTY_ANSWER', 'Basic card answer cannot be empty');

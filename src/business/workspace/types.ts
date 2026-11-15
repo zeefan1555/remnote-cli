@@ -108,6 +108,7 @@ export interface RemRelations {
 export interface EditGuard {
   id: string;
   invariantHash: string;
+  cardIds: string[];
   reviewHash: string;
   tags: string[];
   powerups: Record<string, boolean>;

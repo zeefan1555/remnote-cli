@@ -12,7 +12,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Sparse per-Rem native `tags` (exact bound wikilinks) and enable-only `powerups`
   attributes, separate from Obsidian display tags. Every atom preserves and
   verifies native invariants, known Powerup codes, original Card IDs and full
-  review history; uncertain relationship writes never replay. Direct nonempty
+  review history; uncertain relationship writes never replay. Direct
   leaf insertion retains existing multiline question/answer identities and order.
   Verified-publication recovery rechecks the same final guards without native writes.
 - Offline `sync read DIR PATH --outline` exposes parsed intent separately from
@@ -20,6 +20,20 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `--expected-local-hash` binds external content checks before connecting; guarded
   success receipts bind final observed snapshot hashes. Content convergence and
   remote-winning LWW no longer discard explicitly authored native relationships.
+- Explicit anchored blank multiline answers model native separator leaves,
+  retaining `isCardItem` without independent Cards. New nested children beneath
+  existing answers fail offline. Outline exposes actual/intent `cardItem`
+  separately from unknown pre-publication native observations.
+- Guarded apply/resume/recovery receipts bind compact native-before/after Card
+  IDs and full-history digests to the exact plan and local input seal. Fresh
+  guards must agree with known sealed Card IDs before writing; unknown sealed
+  history can be verified in that same apply without inventing empty history.
+- Per-mutation graph readsets replace repeated full-scope native reads between
+  mandatory initial/final checks. Card/history guards share fresh snapshots with
+  content verification; missing live relationship facts fail closed. Removed Tag
+  targets remain checked, Powerups include descendants, unrelated observed drift
+  blocks final publication, and new plain answers cannot acquire independent Cards.
+  All SDK mutations remain serial, and uncertain attempts are never replayed.
 - Explicit `sync resume DIR --plan-hash HASH` reconstructs the original
   outgoing-only plan, verifies its ordered journal prefix and exact native IDs,
   reuses known created Rems and continues only unattempted steps. Uncertain
