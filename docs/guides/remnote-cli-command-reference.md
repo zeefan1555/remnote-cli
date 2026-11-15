@@ -9,7 +9,7 @@ remnote-cli [global-options] <command> [command-options]
 ```
 
 Live commands require RemNote open with the authenticated RemNote CLI Bridge enabled.
-`sync read`, `sync save`, `sync status`, `sync lint`, `sync diff` and `sync format` operate offline. A live command owns a
+`sync read`, `sync save`, `sync status`, `sync lint`, `sync diff`, `sync format` and `sync relocate` operate offline. A live command owns a
 short-lived loopback connection; no daemon or MCP endpoint is used.
 Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
 See [configuration](configuration.md) for permissions and private pairing-file handling.
@@ -156,9 +156,31 @@ Ignore `.sync/`, locks and credentials in content Git. Exclude `.obsidian/`,
 Do not delete user configuration or Trash to make validation pass. Private CLI
 state holds authoritative manifests and metadata journals; vault state is not
 independent permission to bypass those guards.
-Only root `AGENTS.md` and exact `.agents/skills/remnote-data/SKILL.md` are excluded
+Only root `AGENTS.md` and exact `.agents/skills/remnote-obsidian/SKILL.md` are excluded
 from content parsing as tooling documents; they are still scanned and frozen.
 Other `README.md` or `SKILL.md` files are not silently exempt from content lint.
+
+`sync relocate OLD NEW` moves the existing private directory and rebinds its
+authoritative manifest offline. Stop all other filesystem writers first: Node's
+rename is not atomic no-replace, so destination prechecks do not close the external
+check/rename race. Content, dirty files,
+identity records, Git files and historical `.sync/` records are moved unchanged;
+only the current manifest's directory binding and mirror change. RemNote receives
+zero calls. Existing destinations (including orphaned CLI manifests), symlink
+aliases, nested paths, different filesystems, incomplete baselines and pending
+publication/native journals are refused. The command does not change Git remotes
+or Obsidian's recent-vault list.
+
+A durable private relocation receipt binds the exact paths, source inode/device
+and original state hash before rename. After failure, inspect both paths and the
+receipt before rerunning the same command. Recovery accepts only that directory
+and the exact original/new manifests and mirror; the old manifest remains until
+new-authority/mirror readback succeeds. Unknown writer locks are never broken
+automatically: inspect their recorded process and pending outcome first. Do not
+raw-move a bound directory, rewrite its mirror, or substitute another destination.
+Caught failures release the same owned lock inode; a hard kill can leave a lock
+and requires manual outcome inspection. Failure-injection tests are not proof of
+automatic recovery after process death or power loss.
 
 Lossless native records live in `.remnote/records/ID.json`; imported payloads
 live under `.remnote/originals/{rems,cards,public}/`. These read-only sidecars

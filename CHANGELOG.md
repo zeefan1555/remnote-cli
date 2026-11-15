@@ -9,6 +9,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Offline `sync relocate OLD NEW` moves a private vault and rebinds its authoritative
+  manifest without touching notes, identities, history or native RemNote. Exact
+  inode-bound receipts preserve recoverability through local failure windows;
+  unknown locks, pending writes/publication, nested paths, stale destination
+  authorities and cross-filesystem moves fail closed. The owned guide path is
+  now `.agents/skills/remnote-obsidian/SKILL.md`; the retired name is not an alias.
 - Explicit `sync resume DIR --plan-hash HASH` reconstructs the original
   outgoing-only plan, verifies its ordered journal prefix and exact native IDs,
   reuses known created Rems and continues only unattempted steps. Uncertain

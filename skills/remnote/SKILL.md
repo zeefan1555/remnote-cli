@@ -17,7 +17,7 @@ IDs from an unconfigured template.
 
 ## Preconditions
 
-Offline `sync read|save|status|lint|diff|format` needs only the bound private workspace.
+Offline `sync read|save|status|lint|diff|format|relocate` needs only the bound private workspace.
 Apply the connection prerequisites below to commands that contact RemNote.
 
 - RemNote desktop is open with RemNote CLI Bridge (`remnote-cli-bridge`) enabled. A plugin that still reports `zeefan-remnote-sdk-bridge` is accepted during the rename.
@@ -178,6 +178,14 @@ review time to pick a winner. Review history and scheduling remain RemNote-owned
 local snapshots are read-only and must not be sent back.
 Use an authorized private directory excluded from code Git. A separate private
 Git repository may track content; network backup needs explicit user authorization.
+To rename/move the vault, stop its other writers and use `sync relocate OLD NEW`.
+It moves the directory and rebinds the private manifest offline, preserving dirty
+files, identities and historical records. Never use a raw filesystem move or edit
+the manifest mirror. Pending publication/writes, locks and an existing destination
+are refused. After interruption, inspect both paths and the retained private receipt;
+the same command only resumes its exact inode-bound operation. Unknown/stale locks
+are never broken automatically. Repository remotes and Obsidian recent-vault lists
+are outside this command's scope.
 Ignore `.sync/`, locks and credentials. Exclude `.obsidian/`, `.trash/` and `.DS_Store` from content scans,
 frozen plans and Git. Preserve user configuration and trash.
 

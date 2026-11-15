@@ -65,11 +65,13 @@ import { reconcile } from '../../../src/business/workspace/reconcile.js';
 import { readPublication } from '../../../src/business/workspace/publication.js';
 import { formatWorkspace } from '../../../src/business/workspace/format.js';
 import { stringify as yamlStringify } from 'yaml';
+import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 
 let temporary: string, directory: string;
 beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-workspace-test-')));
-  directory = join(temporary, 'remnote-data');
+  directory = join(temporary, 'remnote-obsidian');
   vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
 });
 afterEach(async () => {
@@ -263,6 +265,41 @@ const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =
     ...(options.deleteId || options.scopeRoot ? {} : { scope: 'all' }),
     ...options,
   });
+
+it('CLI relocate keeps a nonempty imported identity/card baseline usable by offline status and lint', async () => {
+  const f = await prepare();
+  const before = await loadState(directory);
+  const paths = await fileOps.allFiles(directory);
+  const hashes = new Map(
+    await Promise.all(
+      paths.map(async (path) => [path, hash(await readPrivate(directory, path))] as const)
+    )
+  );
+  const destination = join(temporary, 'renamed-vault');
+  const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  for (const args of [
+    ['relocate', directory, destination],
+    ['status', destination],
+    ['lint', destination],
+  ])
+    await createProgram('test').parseAsync(['node', 'remnote-cli', 'sync', ...args]);
+  expect(backend).not.toHaveBeenCalled();
+  expect(log).toHaveBeenCalledTimes(3);
+  expect(await loadState(destination)).toEqual({ ...before, directory: destination });
+  expect(await statusWorkspace(destination)).toMatchObject({
+    complete: true,
+    rems: 8,
+    missing: [],
+    dirty: [],
+    diagnostics: [],
+  });
+  expect(await lintWorkspace(destination)).toMatchObject({ ok: true, diagnostics: [] });
+  for (const path of paths)
+    expect(hash(await readPrivate(destination, path))).toBe(hashes.get(path));
+  expect(f.calls).toEqual([]);
+  await expect(statusWorkspace(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+});
 
 describe('selected incremental sync', () => {
   it('does not open a backend for a clean changed selection or an existing empty directory', async () => {
@@ -1088,13 +1125,13 @@ describe('human Markdown workspace', () => {
 
   it('excludes only exact guide paths from Markdown parsing while freezing their bytes', async () => {
     const f = await prepare();
-    const paths = ['AGENTS.md', '.agents/skills/remnote-data/SKILL.md'];
+    const paths = ['AGENTS.md', '.agents/skills/remnote-obsidian/SKILL.md'];
     for (const path of paths) await writePrivate(directory, path, '# Synthetic guide\n');
     const local = await inspectLocal(directory);
     expect(local.diagnostics).toEqual([]);
     const frozen = await local.inputs.freeze();
     for (const path of paths) expect(frozen.hashes()[path]).toBe(hash('# Synthetic guide\n'));
-    for (const path of ['README.md', 'Other/SKILL.md']) {
+    for (const path of ['README.md', 'Other/SKILL.md', '.agents/skills/remnote-data/SKILL.md']) {
       await writePrivate(directory, path, '# Not a bound document\n');
       const factory = vi.fn(async () => f.backend);
       await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow(

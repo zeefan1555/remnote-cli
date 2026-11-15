@@ -56,4 +56,13 @@ export class LocalState {
       await unlink(temporary).catch(() => {});
     }
   }
+  async deleteLocal(key: string): Promise<void> {
+    await unlink(this.path(key));
+    const directory = await open(this.directory, 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  }
 }

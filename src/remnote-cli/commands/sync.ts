@@ -12,6 +12,7 @@ import {
 } from '../../business/workspace/workspace.js';
 import { fileByteLimit } from '../../business/workspace/files.js';
 import { formatWorkspace } from '../../business/workspace/format.js';
+import { relocateWorkspace } from '../../business/workspace/relocate.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatError, formatResult } from '../output/formatter.js';
@@ -62,6 +63,7 @@ export function registerSyncCommands(program: Command): void {
       | 'resume'
       | 'read'
       | 'save'
+      | 'relocate'
       | 'format',
     directory: string,
     options: SyncOptions,
@@ -72,6 +74,7 @@ export function registerSyncCommands(program: Command): void {
     try {
       let result: unknown;
       if (name === 'read') result = await readWorkspace(directory, path!);
+      else if (name === 'relocate') result = await relocateWorkspace(directory, path!);
       else if (name === 'format') result = await formatWorkspace(directory);
       else if (name === 'save')
         result = await saveWorkspace(
@@ -174,6 +177,12 @@ export function registerSyncCommands(program: Command): void {
           deleteId: id,
         });
       }
+    );
+  workspace
+    .command('relocate <directory> <destination>')
+    .description('Relocate a bound private workspace offline without changing note identities')
+    .action(async (directory: string, destination: string) =>
+      execute('relocate', directory, {}, destination)
     );
   workspace
     .command('read <directory> <path>')
