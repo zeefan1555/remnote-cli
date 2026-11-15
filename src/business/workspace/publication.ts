@@ -20,6 +20,7 @@ import {
 } from './local.js';
 import { FrozenFiles } from './frozen-files.js';
 import { hash, type WorkspaceState } from './types.js';
+import { mapReads } from './read-pool.js';
 
 interface Publication {
   version: 1;
@@ -76,7 +77,7 @@ async function publish(root: string, publication: Publication): Promise<void> {
       allowed = new Set([...Object.keys(publication.baseline), ...writes.keys()]);
     if (paths.some((path) => !allowed.has(path)))
       throw new Error('Local file set changed during sync publication');
-    for (const path of allowed) {
+    await mapReads([...allowed], 16, async (path) => {
       const actual = await currentHash(root, path),
         write = writes.get(path),
         before = publication.baseline[path] ?? null;
@@ -95,7 +96,7 @@ async function publish(root: string, publication: Publication): Promise<void> {
           : actual !== before
       )
         throw new Error(`Local file changed during sync publication: ${path}`);
-    }
+    });
   };
   await check();
   for (const item of publication.writes) {

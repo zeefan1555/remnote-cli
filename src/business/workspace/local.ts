@@ -16,12 +16,15 @@ import { FrozenFiles } from './frozen-files.js';
 import { stageSnapshot } from './publication.js';
 import {
   documentMetadata,
-  markdownHeadingTitle,
   nodeKind,
-  parseDocument,
+  parsePreparedDocument,
+  prepareDocument,
+  preparedTitle,
   pathSegment,
   renderDocument,
+  renderParsedDocument,
   titleOf,
+  type PreparedDocument,
 } from './markdown.js';
 import {
   blockSchema,
@@ -32,17 +35,14 @@ import {
   recordPath,
 } from './identity.js';
 import { remoteVersion } from './versions.js';
-import {
-  cardMetadataSchema,
-  nativeDetailsSchema,
-  nativeSchema,
-  parseFrontmatter,
-} from './metadata.js';
+import { cardMetadataSchema, nativeDetailsSchema, nativeSchema } from './metadata.js';
+import { mapReads } from './read-pool.js';
 import { pathKey, WorkspaceLinks } from './links.js';
 import {
   hash,
   type Diagnostic,
   type ParsedDocument,
+  type ParsedOutline,
   type WorkspaceRem,
   type WorkspaceState,
 } from './types.js';
@@ -362,17 +362,17 @@ export async function writeSnapshot(
   };
   const writes = new Map<string, string | null>(originals);
   for (const [id, path] of paths) {
-    let content = renderDocument(id, path, byId, paths, {
+    const options = {
       blocks,
       display: displays.get(id),
       originalIds,
       links,
-    });
-    const parsed = parseDocument(path, content, links);
+    };
+    const parsed = renderParsedDocument(id, path, byId, paths, options);
     if (parsed.diagnostics.length)
       throw new Error(`Generated outline failed its own lint: ${parsed.diagnostics[0]!.code}`);
     const current = sources.get(path);
-    const semantic = (document: ParsedDocument) =>
+    const semantic = (document: ParsedOutline) =>
       hash({
         metadata: document.metadata,
         nodes: document.nodes.map((node) => ({
@@ -386,8 +386,10 @@ export async function writeSnapshot(
           ...(node.kind === 'opaque' ? { projection: node.contentHash } : {}),
         })),
       });
-    if (current && semantic(current) === semantic(parsed.document))
-      content = await readPrivate(root, path);
+    const content =
+      current && semantic(current) === semantic(parsed.document)
+        ? await readPrivate(root, path)
+        : renderDocument(id, path, byId, paths, options);
     state.documents[path] = {
       rootId: id,
       fileHash: hash(content),
@@ -437,22 +439,52 @@ export async function writeSnapshot(
 }
 
 export interface LocalContext {
+  inputs: InspectionInputs;
   state: WorkspaceState;
   native: Map<string, WorkspaceRem>;
   parsed: Map<string, ParsedDocument>;
-  baseline: Map<string, ParsedDocument>;
+  baseline: Map<string, ParsedOutline>;
   diagnostics: Diagnostic[];
   dirty: string[];
   missing: string[];
 }
 
+/** One operation's bytes/ASTs only. Every write boundary still rereads through FrozenFiles. */
+class InspectionInputs {
+  private readonly reads = new Map<string, Promise<string>>();
+  private readonly documents = new Map<string, { source: string; prepared: PreparedDocument }>();
+  private constructor(
+    private readonly root: string,
+    readonly paths: string[]
+  ) {}
+  static async scan(root: string): Promise<InspectionInputs> {
+    return new InspectionInputs(root, await allFiles(root));
+  }
+  read = (path: string): Promise<string> => {
+    if (!this.reads.has(path)) this.reads.set(path, readPrivate(this.root, path));
+    return this.reads.get(path)!;
+  };
+  prepare(path: string, source: string): PreparedDocument {
+    const before = this.documents.get(path);
+    if (before?.source === source) return before.prepared;
+    const prepared = prepareDocument(path, source);
+    this.documents.set(path, { source, prepared });
+    return prepared;
+  }
+  freeze(): Promise<FrozenFiles> {
+    return FrozenFiles.capture(this.root, this.paths, this.read);
+  }
+}
+
 export async function inspectLocal(
   root: string,
   suppliedState?: WorkspaceState,
-  sources: ReadonlyMap<string, string> = new Map()
+  sources: ReadonlyMap<string, string> = new Map(),
+  suppliedInputs?: InspectionInputs
 ): Promise<LocalContext> {
   const state = suppliedState ?? (await loadState(root));
-  const files = await allFiles(root),
+  const inputs = suppliedInputs ?? (await InspectionInputs.scan(root));
+  const files = inputs.paths,
     native = new Map<string, WorkspaceRem>(),
     diagnostics: Diagnostic[] = [],
     dirty: string[] = [],
@@ -461,20 +493,17 @@ export async function inspectLocal(
     diagnostics.push({ path, line, code, message });
   if (state.official) {
     try {
-      const data = await readPrivate(root, state.official.manifestPath);
+      const data = await inputs.read(state.official.manifestPath);
       if (hash(data) !== state.official.manifestHash)
         throw new Error('Official original manifest changed');
       const manifest = z
         .object({ files: z.record(z.string(), digest) })
         .passthrough()
         .parse(JSON.parse(data));
-      for (const [path, digest] of Object.entries(manifest.files)) {
-        if (
-          !path.startsWith('.remnote/originals/') ||
-          hash(await readPrivate(root, path)) !== digest
-        )
+      await mapReads(Object.entries(manifest.files), 16, async ([path, digest]) => {
+        if (!path.startsWith('.remnote/originals/') || hash(await inputs.read(path)) !== digest)
           throw new Error('Official original record changed or is missing');
-      }
+      });
     } catch (error) {
       fail(
         state.official.manifestPath,
@@ -484,9 +513,9 @@ export async function inspectLocal(
       );
     }
   }
-  for (const [id, entry] of Object.entries(state.entries)) {
+  const records = await mapReads(Object.entries(state.entries), 16, async ([id, entry]) => {
     try {
-      const raw = await readPrivate(root, entry.rawPath);
+      const raw = await inputs.read(entry.rawPath);
       if (hash(raw) !== entry.rawHash) throw new Error('Native baseline object was modified');
       const original: unknown = JSON.parse(raw);
       remSchema.parse(original);
@@ -496,43 +525,47 @@ export async function inspectLocal(
         throw new Error('Native baseline identity/hash mismatch');
       if (
         entry.publicHash &&
-        hash(await readPrivate(root, originalPath('public', id))) !== entry.publicHash
+        hash(await inputs.read(originalPath('public', id))) !== entry.publicHash
       )
         throw new Error('Original public snapshot was modified');
       if (
         entry.originalHash &&
-        hash(await readPrivate(root, originalPath('rems', id))) !== entry.originalHash
+        hash(await inputs.read(originalPath('rems', id))) !== entry.originalHash
       )
         throw new Error('Official original object was modified');
-      native.set(id, rem);
+      return { id, rem };
     } catch (error) {
-      fail(
-        entry.rawPath,
-        1,
-        'READONLY_METADATA',
-        error instanceof Error ? error.message : String(error)
-      );
+      return {
+        diagnostic: {
+          path: entry.rawPath,
+          line: 1,
+          code: 'READONLY_METADATA',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
     }
+  });
+  for (const record of records) {
+    if (record.rem) native.set(record.id, record.rem);
+    else diagnostics.push(record.diagnostic!);
   }
   const parsed = new Map<string, ParsedDocument>(),
-    baseline = new Map<string, ParsedDocument>(),
+    baseline = new Map<string, ParsedOutline>(),
     allKeys = new Set<string>();
   const expectedRoots = new Map(
     Object.entries(state.documents).map(([path, doc]) => [doc.rootId, { path, doc }])
   );
   const paths = new Map<string, string>();
-  const currentFiles = new Map<
-    string,
-    { source: string; frontmatter: ReturnType<typeof parseFrontmatter> }
-  >();
+  const currentFiles = new Map<string, { source: string; prepared: PreparedDocument }>();
   const foldedPaths = new Set<string>();
   for (const path of files.filter((file) => file.endsWith('.md'))) {
     if (foldedPaths.has(pathKey(path)))
       fail(path, 1, 'AMBIGUOUS_PATH', 'Case/Unicode-colliding Markdown paths are unsupported');
     foldedPaths.add(pathKey(path));
-    const source = sources.get(path) ?? (await readPrivate(root, path)),
-      frontmatter = parseFrontmatter(path, source);
-    currentFiles.set(path, { source, frontmatter });
+    const source = sources.get(path) ?? (await inputs.read(path)),
+      prepared = inputs.prepare(path, source),
+      frontmatter = prepared.frontmatter;
+    currentFiles.set(path, { source, prepared });
     diagnostics.push(...frontmatter.diagnostics);
     const metadata = frontmatter.metadata;
     if (!metadata) continue;
@@ -556,11 +589,11 @@ export async function inspectLocal(
     }
   const links = new WorkspaceLinks(
     [...currentFiles]
-      .filter(([, value]) => value.frontmatter.metadata)
+      .filter(([, value]) => value.prepared.frontmatter.metadata)
       .map(([path, value]) => ({
         path,
-        metadata: value.frontmatter.metadata!,
-        title: markdownHeadingTitle(value.frontmatter.body),
+        metadata: value.prepared.frontmatter.metadata!,
+        title: preparedTitle(value.prepared),
       }))
   );
   const blocks = new Map(Object.entries(state.entries).map(([id, entry]) => [id, entry.blockId]));
@@ -571,19 +604,21 @@ export async function inspectLocal(
   );
   for (const [rootId, path] of paths) {
     const doc = expectedRoots.get(rootId)!.doc;
-    const { source, frontmatter } = currentFiles.get(path)!;
-    const current = parseDocument(path, source, links);
+    const { source, prepared } = currentFiles.get(path)!;
+    const frontmatter = prepared.frontmatter;
+    const current = parsePreparedDocument(prepared, links);
     parsed.set(path, current.document);
     diagnostics.push(...current.diagnostics);
     if (hash(source) !== doc.fileHash || expectedRoots.get(rootId)!.path !== path) dirty.push(path);
     if (native.size !== Object.keys(state.entries).length) continue;
     const { title, aliases, tags } = frontmatter.metadata!;
     const display = { ...(title === undefined ? {} : { title }), aliases, tags };
-    const old = parseDocument(
-      path,
-      renderDocument(doc.rootId, path, native, paths, { blocks, originalIds, display, links }),
-      links
-    ).document;
+    const old = renderParsedDocument(doc.rootId, path, native, paths, {
+      blocks,
+      originalIds,
+      display,
+      links,
+    }).document;
     baseline.set(path, old);
     if (current.document.nodes[0]?.key !== doc.rootId)
       fail(
@@ -707,5 +742,5 @@ export async function inspectLocal(
         );
     }
   }
-  return { state, native, parsed, baseline, diagnostics, dirty, missing };
+  return { inputs, state, native, parsed, baseline, diagnostics, dirty, missing };
 }

@@ -4,6 +4,7 @@ import {
   normalizeRichText,
   parseDocument,
   renderDocument,
+  renderParsedDocument,
 } from '../../../src/business/workspace/markdown.js';
 import { parseFrontmatter, renderFrontmatter } from '../../../src/business/workspace/metadata.js';
 import { WorkspaceLinks } from '../../../src/business/workspace/links.js';
@@ -64,6 +65,21 @@ export function codecFixture() {
 }
 
 describe('Obsidian Rem codec', () => {
+  it('retains the same native facts and opaque/rich-text outline without a YAML roundtrip', () => {
+    const byId = codecFixture();
+    const paths = new Map([['root', 'Note.md']]);
+    const ordinary = parseDocument('Note.md', renderDocument('root', 'Note.md', byId, paths));
+    const direct = renderParsedDocument('root', 'Note.md', byId, paths);
+    expect(direct.diagnostics).toEqual([]);
+    expect(direct.document.metadata).toEqual(ordinary.document.metadata);
+    const withoutLines = (nodes: typeof direct.document.nodes) =>
+      nodes.map(({ line: _line, ...node }) => node);
+    expect(withoutLines(direct.document.nodes)).toEqual(withoutLines(ordinary.document.nodes));
+    expect(direct.document.references.map(({ id }) => id)).toEqual(
+      ordinary.document.references.map(({ id }) => id)
+    );
+  });
+
   it.each([
     ['plain LF', ['a\nb']],
     ['plain CRLF', ['a\r\nb']],

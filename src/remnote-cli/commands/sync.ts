@@ -38,8 +38,8 @@ export function registerSyncCommands(program: Command): void {
     program
       .command('sync [directory]')
       .description('Preview per-Rem three-way synchronization between local Markdown and RemNote')
-      .option('--apply', 'Apply the exact previously previewed plan')
-      .option('--plan-hash <sha256>', 'Exact plan hash returned by sync preview')
+      .option('--apply', 'Plan, check and apply in one invocation')
+      .option('--plan-hash <sha256>', 'Require this exact previous preview when applying')
   );
 
   async function execute(

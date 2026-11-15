@@ -3,6 +3,7 @@ import type { ReactRNPlugin } from '@remnote/plugin-sdk';
 import { SdkWorkspaceBackend } from '../../../src/business/workspace/sdk-backend.js';
 import { remoteEditedAt } from '../../../src/business/workspace/snapshots.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
+import { mapReads } from '../../../src/business/workspace/read-pool.js';
 
 function fixture(count = 2) {
   const objects = new Map<string, Record<string, unknown>>();
@@ -84,6 +85,82 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('returns requested identity order even when findMany returns shuffled results', async () => {
+    const f = fixture();
+    f.findMany.mockImplementation(async (ids) => ids.map((id) => f.objects.get(id)!).reverse());
+    expect((await f.backend.read(['r0', 'r1'])).map((rem) => rem.id)).toEqual(['r0', 'r1']);
+    expect((await f.backend.readPublic(['r0', 'r1'])).map((rem) => rem.id)).toEqual(['r0', 'r1']);
+    expect((await f.backend.discover(['r0', 'r1'])).snapshots.map((rem) => rem.id)).toEqual([
+      'r0',
+      'r1',
+    ]);
+  });
+
+  it('bounds four concurrent full batches to 16 snapshots and 192 in-flight native flags', async () => {
+    const f = fixture(200);
+    let active = 0,
+      peak = 0;
+    for (const methods of f.flags.values()) {
+      for (const name of [
+        'isDocument',
+        'isFolder',
+        'isCardItem',
+        'isTable',
+        'isProperty',
+        'isPowerup',
+        'isPowerupSlot',
+        'isPowerupProperty',
+        'isPowerupEnum',
+        'isPowerupPropertyListItem',
+        'getPracticeDirection',
+        'getEnablePractice',
+      ]) {
+        methods[name]!.mockImplementation(async () => {
+          active++;
+          peak = Math.max(peak, active);
+          await Promise.resolve();
+          active--;
+          return name === 'getPracticeDirection' ? 'forward' : name === 'getEnablePractice';
+        });
+      }
+    }
+    const ids = [...f.objects.keys()];
+    const batches = Array.from({ length: 4 }, (_, i) => ids.slice(i * 50, i * 50 + 50));
+    const result = await mapReads(batches, 4, (batch) => f.backend.read(batch));
+    expect(result.flat().map((rem) => rem.id)).toEqual(ids);
+    expect(peak).toBe(192);
+    expect(active).toBe(0);
+  });
+
+  it('does not return from a failed native batch until outstanding flag reads have drained', async () => {
+    const f = fixture(10);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.flags.get('r0')!.isDocument!.mockRejectedValue(new Error('native flag lost'));
+    f.flags.get('r0')!.isFolder!.mockImplementation(async () => {
+      await pending;
+      return false;
+    });
+    let finished = false;
+    const result = f.backend.read([...f.objects.keys()]).finally(() => {
+      finished = true;
+    });
+    const rejected = expect(result).rejects.toThrow('native flag lost');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    release();
+    await rejected;
+    expect(finished).toBe(true);
+    const calls = [...f.flags.values()].map((methods) => methods.isDocument!.mock.calls.length);
+    await Promise.resolve();
+    expect([...f.flags.values()].map((methods) => methods.isDocument!.mock.calls.length)).toEqual(
+      calls
+    );
+  });
+
   it('discovers an exact subtree through bounded public snapshots without getAll', async () => {
     const f = fixture(52),
       rems = await f.backend.subtree(['r0']);

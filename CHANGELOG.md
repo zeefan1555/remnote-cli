@@ -9,6 +9,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `sync DIR --apply` plans, validates, applies and verifies in one invocation;
+  an explicit `--plan-hash` still binds an exact previous preview. Neither mode
+  retries unknown writes or relaxes explicit deletion and native permission gates.
+- Operation-local source/AST reuse and bounded, ordered read pools remove repeated
+  baseline YAML roundtrips and serial file/batch reads. Write and publication
+  boundaries still read fresh content hashes, with state checks before replacing
+  the authoritative manifest or its mirror. Native writes remain serial.
+
 - `sync DIR` preview/apply and `sync import|status|lint|diff|recover` for a private,
   exact-KB-bound Obsidian vault. The updated design permits edits in both RemNote
   and the shared Markdown/native-YAML files, using a common baseline and per-Rem

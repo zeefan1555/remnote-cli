@@ -105,12 +105,14 @@ export interface OutlineNode {
   children: string[];
   contentHash: string;
 }
-export interface ParsedDocument {
+export interface ParsedOutline {
   path: string;
-  fileHash: string;
   metadata?: WorkspaceMetadata;
   nodes: OutlineNode[];
   references: Array<{ id: string; line: number }>;
+}
+export interface ParsedDocument extends ParsedOutline {
+  fileHash: string;
 }
 export interface WorkspaceChange {
   key: string;

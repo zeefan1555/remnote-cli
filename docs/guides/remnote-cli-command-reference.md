@@ -361,14 +361,27 @@ not silently dropped. Existing Rem/card identity, parent/order and review histor
 are protected. Missing files, nodes or remote objects do not authorize movement
 or automatic deletion.
 
-`status` and `diff` inspect local state without applying changes. The retained
-entrypoint is `sync DIR` preview followed by `sync DIR --apply --plan-hash HASH`.
-Bidirectional planning extends that envelope with incoming/outgoing and conflict
-evidence. Apply must
-bind the exact frozen plan, unchanged candidate files, matching KB and native
+`status` and `diff` inspect local state without applying changes. `sync DIR` previews.
+`sync DIR --apply` performs whole-workspace lint, fresh bidirectional planning,
+guarded apply and verification in one invocation, without requiring a separate preview.
+Use `sync DIR --apply --plan-hash HASH` to require an exact previous preview instead;
+stale files, native content or hashes are refused, not silently replanned.
+Either apply path binds a frozen plan, unchanged candidate files, matching KB and native
 state, with live writes enabled for outgoing changes. Incoming changes are merged
 semantic results, not arbitrary remote snapshot overwrites. SDK writes are
 sequential, not atomic; there is no server-side CAS or exactly-once guarantee.
+Unknown or partial journal outcomes remain blocked for exact-ID reconciliation;
+omitting `--plan-hash` is not a retry or recovery bypass. Deletion still requires
+its explicit ID, scope boundary and destructive permission gates.
+
+Only reads are parallel: up to 16 local file reads and 4 exact-ID remote batches
+of 50. Each native batch snapshots at most 4 Rems concurrently, each with up to
+12 independent SDK flags (192 in-flight flag reads at the composed maximum).
+Read results retain input order; failures stop their pool and drain in-flight
+work before returning, without passing partial reads into writes. Parsed source
+and bytes are reused only within one operation. Full content hashes, safe paths,
+permissions and metadata are freshly checked at the write/publication boundaries;
+mtime is never a freshness shortcut. There is no persistent parse cache.
 
 Current receipt fields (arrays contain exact Rem IDs unless noted):
 

@@ -111,7 +111,11 @@ describe('sync command interface', () => {
   it('defaults sync DIR to three-way preview and requires explicit apply options', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
-    for (const options of [[], ['--apply', '--plan-hash', 'a'.repeat(64)]]) {
+    for (const [options, expected] of [
+      [[], {}],
+      [['--apply'], { apply: true }],
+      [['--apply', '--plan-hash', 'a'.repeat(64)], { apply: true, planHash: 'a'.repeat(64) }],
+    ] as const) {
       await createProgram('test').parseAsync([
         'node',
         'remnote-cli',
@@ -122,7 +126,7 @@ describe('sync command interface', () => {
       expect(sync.pushWorkspace).toHaveBeenLastCalledWith(
         '/private/tmp/sync',
         expect.any(Function),
-        options.length ? { apply: true, planHash: 'a'.repeat(64) } : {}
+        expected
       );
     }
     expect(backend).not.toHaveBeenCalled();

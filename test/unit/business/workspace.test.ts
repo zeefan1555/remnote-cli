@@ -9,6 +9,7 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -47,6 +48,7 @@ import {
 } from '../../../src/business/workspace/files.js';
 import { parseDocument } from '../../../src/business/workspace/markdown.js';
 import { parseFrontmatter, renderFrontmatter } from '../../../src/business/workspace/metadata.js';
+import * as metadataOps from '../../../src/business/workspace/metadata.js';
 import {
   contentProjection,
   immutableProjection,
@@ -235,6 +237,156 @@ async function prepare() {
 async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
 }
+
+describe('single-invocation sync', () => {
+  it('plans and applies a local edit without a previous preview, preserving native cards', async () => {
+    const f = await prepare();
+    const cards = await f.backend.cardFacts('question');
+    await edit(f.path, (source) => source.replace('Because ^', 'One shot ^'));
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+      updated: ['answer'],
+      remoteWrites: 1,
+      globalDiscoveryComplete: false,
+    });
+    expect(f.rems.get('answer')!.text).toEqual(['One shot']);
+    expect(await f.backend.cardFacts('question')).toEqual(cards);
+    expect((await loadState(directory)).pending).toBeUndefined();
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'unchanged',
+      remoteWrites: 0,
+    });
+  });
+
+  it('parses each source YAML once while still validating every native baseline', async () => {
+    const f = await prepare();
+    const parse = vi.spyOn(metadataOps, 'parseFrontmatter');
+    const read = vi.spyOn(fileOps, 'readPrivate');
+    const context = await inspectLocal(directory);
+    expect(context.diagnostics).toEqual([]);
+    expect(parse).toHaveBeenCalledTimes(Object.keys(f.state.documents).length);
+    for (const entry of Object.values(f.state.entries))
+      expect(read.mock.calls.filter(([, path]) => path === entry.rawPath)).toHaveLength(1);
+    const frozen = await context.inputs.freeze();
+    for (const entry of Object.values(f.state.entries))
+      expect(read.mock.calls.filter(([, path]) => path === entry.rawPath)).toHaveLength(1);
+    await frozen.check();
+    for (const entry of Object.values(f.state.entries))
+      expect(read.mock.calls.filter(([, path]) => path === entry.rawPath)).toHaveLength(2);
+  });
+
+  it('reuses unchanged source parsing for offline save but freshly hashes publication boundaries', async () => {
+    const f = await prepare();
+    const source = await readPrivate(directory, f.path);
+    const parse = vi.spyOn(metadataOps, 'parseFrontmatter');
+    const read = vi.spyOn(fileOps, 'readPrivate');
+    expect(
+      await workspace.saveWorkspace(
+        directory,
+        f.path,
+        source.replace('Because ^', 'Offline ^'),
+        hash(source)
+      )
+    ).toMatchObject({
+      status: 'saved',
+      remoteWrites: 0,
+    });
+    expect(parse).toHaveBeenCalledTimes(Object.keys(f.state.documents).length + 1);
+    for (const entry of Object.values(f.state.entries))
+      expect(read.mock.calls.filter(([, path]) => path === entry.rawPath)).toHaveLength(5);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('keeps the whole one-shot invocation offline when another document fails lint', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because ^', 'One shot ^'));
+    await edit(f.state.entries.subdoc!.path, (source) => source + '\n| unsupported | table |\n');
+    const factory = vi.fn(async () => f.backend);
+    await expect(pushWorkspace(directory, factory, { apply: true })).rejects.toThrow();
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['markdown', 'native'] as const)(
+    'freshly rejects same-size %s tampering after planning even with restored mtime',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because ^', 'One shot ^'));
+      const originalGuard = f.backend.guard;
+      f.backend.guard = vi.fn(async (ids) => {
+        const guard = await originalGuard(ids);
+        const target = kind === 'markdown' ? f.path : f.state.entries.answer!.rawPath;
+        const absolute = join(directory, target);
+        const before = await stat(absolute);
+        await edit(target, (source) =>
+          source.replace(
+            kind === 'markdown' ? 'One shot' : 'Because',
+            kind === 'markdown' ? 'Tampered' : 'Altered'
+          )
+        );
+        await utimes(absolute, before.atime, before.mtime);
+        return guard;
+      });
+      expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        steps: {},
+        error: expect.stringMatching(/Local (file|Markdown) changed/),
+      });
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it.each(['file-symlink', 'parent-symlink', 'permissions', 'oversized'] as const)(
+    'rejects %s introduced after inspection before the first native mutation',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because ^', 'One shot ^'));
+      const originalGuard = f.backend.guard;
+      let calls = 0;
+      f.backend.guard = vi.fn(async (ids) => {
+        const guard = await originalGuard(ids);
+        if (++calls !== 2) return guard;
+        const target = join(directory, f.state.entries.answer!.rawPath);
+        if (kind === 'permissions') await chmod(target, 0o644);
+        else if (kind === 'oversized') await writeFile(target, 'x'.repeat(4 * 1024 * 1024 + 1));
+        else {
+          const path = kind === 'file-symlink' ? target : join(directory, '.remnote/records');
+          await rename(path, path + '-original');
+          await symlink(path + '-original', path);
+        }
+        return guard;
+      });
+      expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        steps: {},
+      });
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('does not overwrite a state mirror tampered with while the native guard is pending', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because ^', 'One shot ^'));
+    const originalGuard = f.backend.guard;
+    let tampered = '';
+    f.backend.guard = vi.fn(async (ids) => {
+      const guard = await originalGuard(ids);
+      const source = await readPrivate(directory, '.sync/state.json');
+      tampered = source.replace('"kb"', '"xx"');
+      expect(tampered.length).toBe(source.length);
+      expect(tampered).not.toBe(source);
+      await writePrivate(directory, '.sync/state.json', tampered);
+      return guard;
+    });
+    await expect(
+      pushWorkspace(directory, async () => f.backend, { apply: true })
+    ).rejects.toThrow();
+    expect(f.calls).toEqual([]);
+    expect(await readPrivate(directory, '.sync/state.json')).toBe(tampered);
+  });
+});
 function addNodes(
   source: string,
   nodes: Record<string, 'text' | 'multiline'>,

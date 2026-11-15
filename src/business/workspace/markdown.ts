@@ -1,11 +1,12 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { toMarkdown } from 'mdast-util-to-markdown';
-import type { RootContent, PhrasingContent, List, ListItem, Paragraph, Heading } from 'mdast';
+import type { Root, RootContent, PhrasingContent, List, ListItem, Paragraph, Heading } from 'mdast';
 import { idSchema, nativeBlockId, originalPath, recordPath } from './identity.js';
 import { WorkspaceLinks } from './links.js';
 import { wikiFromMarkdown, wikiSyntax, wikiToMarkdown } from './wiki-markdown.js';
 import {
   nativeDetailsSchema,
+  metadataSchema,
   parseFrontmatter,
   renderFrontmatter,
   type NativeMetadata,
@@ -16,6 +17,7 @@ import {
   type Diagnostic,
   type OutlineNode,
   type ParsedDocument,
+  type ParsedOutline,
   type WorkspaceRem,
 } from './types.js';
 
@@ -282,13 +284,13 @@ function readonlyInline(
   });
 }
 
-export function renderDocument(
+function renderParts(
   rootId: string,
   path: string,
   byId: Map<string, WorkspaceRem>,
   documents: Map<string, string>,
   options: RenderOptions = {}
-): string {
+): { metadata: WorkspaceMetadata; body: string } {
   const root = byId.get(rootId)!;
   const metadata = documentMetadata(rootId, byId, documents, options);
   const links =
@@ -391,7 +393,27 @@ export function renderDocument(
   }
   const children = ownContent(root, true);
   if (root.children.length) children.push(list(root.children));
-  return renderFrontmatter(metadata) + toMarkdown({ type: 'root', children }, MARKDOWN_OPTIONS);
+  return { metadata, body: toMarkdown({ type: 'root', children }, MARKDOWN_OPTIONS) };
+}
+
+export function renderDocument(...args: Parameters<typeof renderParts>): string {
+  const { metadata, body } = renderParts(...args);
+  return renderFrontmatter(metadata) + body;
+}
+
+/** Native baselines use the same outline codec without serializing and reparsing generated YAML. */
+export function renderParsedDocument(
+  ...args: Parameters<typeof renderParts>
+): ReturnType<typeof parseOutline> {
+  const { metadata, body } = renderParts(...args);
+  return parseOutline(
+    {
+      path: args[1],
+      frontmatter: { metadata: metadataSchema.parse(metadata), body, bodyLine: 1, diagnostics: [] },
+      tree: fromMarkdown(body, PARSE_OPTIONS),
+    },
+    args[4]?.links
+  );
 }
 
 /** Semantic rich-text representation ignores segmentation and false formatting flags. */
@@ -413,7 +435,11 @@ export function normalizeRichText(value: unknown): unknown {
 }
 
 export function markdownHeadingTitle(body: string): string {
-  const first = fromMarkdown(body, PARSE_OPTIONS).children[0];
+  return headingTitle(fromMarkdown(body, PARSE_OPTIONS));
+}
+
+function headingTitle(tree: Root): string {
+  const first = tree.children[0];
   function plain(nodes: PhrasingContent[]): string {
     return nodes
       .map((node) =>
@@ -430,25 +456,58 @@ export function markdownHeadingTitle(body: string): string {
   return first?.type === 'heading' && first.depth === 1 ? plain(first.children) : '';
 }
 
+export interface PreparedDocument {
+  path: string;
+  fileHash: string;
+  frontmatter: ReturnType<typeof parseFrontmatter>;
+  tree: Root;
+}
+
+export function prepareDocument(path: string, source: string): PreparedDocument {
+  const frontmatter = parseFrontmatter(path, source);
+  return {
+    path,
+    fileHash: hash(source),
+    frontmatter,
+    tree: fromMarkdown(frontmatter.body, PARSE_OPTIONS),
+  };
+}
+
+export function preparedTitle(source: PreparedDocument): string {
+  return headingTitle(source.tree);
+}
+
 export function parseDocument(
   path: string,
   source: string,
   suppliedLinks?: WorkspaceLinks
 ): { document: ParsedDocument; diagnostics: Diagnostic[] } {
-  const frontmatter = parseFrontmatter(path, source),
+  return parsePreparedDocument(prepareDocument(path, source), suppliedLinks);
+}
+
+export function parsePreparedDocument(
+  source: PreparedDocument,
+  suppliedLinks?: WorkspaceLinks
+): { document: ParsedDocument; diagnostics: Diagnostic[] } {
+  const result = parseOutline(source, suppliedLinks);
+  return { ...result, document: { ...result.document, fileHash: source.fileHash } };
+}
+
+function parseOutline(
+  source: Omit<PreparedDocument, 'fileHash'>,
+  suppliedLinks?: WorkspaceLinks
+): { document: ParsedOutline; diagnostics: Diagnostic[] } {
+  const { path, frontmatter, tree } = source,
     diagnostics = [...frontmatter.diagnostics];
-  const result: ParsedDocument = {
+  const result: ParsedOutline = {
     path,
-    fileHash: hash(source),
     metadata: frontmatter.metadata,
     nodes: [],
     references: [],
   };
   const metadata = frontmatter.metadata;
   if (!metadata) return { document: result, diagnostics };
-  const body = frontmatter.body,
-    tree = fromMarkdown(body, PARSE_OPTIONS);
-  const title = markdownHeadingTitle(body);
+  const title = headingTitle(tree);
   const links = suppliedLinks ?? new WorkspaceLinks([{ path, title, metadata }]);
   const entriesByBlock = new Map(
     Object.entries(metadata.rems).map(([key, entry]) => [entry.block, { key, entry }])
