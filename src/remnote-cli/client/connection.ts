@@ -1,10 +1,13 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 import type { ConnectionConfig } from './connection-config.js';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_IN_FLIGHT_REQUESTS = 16;
+export const MAX_WAITING_REQUESTS = MAX_IN_FLIGHT_REQUESTS;
+export const MAX_OUTSTANDING_REQUESTS = MAX_IN_FLIGHT_REQUESTS + MAX_WAITING_REQUESTS;
 /** Current RemNote CLI Bridge manifest id. The previous id stays valid during the rename. */
 export const ACCEPTED_PLUGIN_IDS = ['remnote-cli-bridge', 'zeefan-remnote-sdk-bridge'] as const;
 export const ACCEPTED_PLUGIN_NAMES = ['RemNote CLI Bridge', 'RemNote SDK Bridge'] as const;
@@ -48,6 +51,13 @@ export class Connection {
   private opening?: Promise<BridgeIdentity>;
   private failure?: Error;
   private identity?: BridgeIdentity;
+  private lastRequestId = 0;
+  private outstanding = 0;
+  private inFlight = 0;
+  private readonly slotWaiters: Array<{
+    grant: () => void;
+    reject: (error: Error) => void;
+  }> = [];
   private readonly pending = new Map<
     string,
     {
@@ -140,7 +150,7 @@ export class Connection {
               const parsed = IdentitySchema.safeParse(message.identity);
               if (!parsed.success)
                 throw new Error(
-                  'Unsupported plugin handshake. Load the paired RemNote CLI Bridge using direct protocol 1.'
+                  'Unsupported plugin handshake. Load the paired RemNote CLI Bridge using direct protocol 2.'
                 );
               const identity = parsed.data;
               if (
@@ -202,14 +212,69 @@ export class Connection {
     payload: Record<string, unknown>,
     timeoutMs = 15_000
   ): Promise<unknown> {
+    if (this.outstanding >= MAX_OUTSTANDING_REQUESTS)
+      throw new Error('Too many outstanding requests; this request was not sent');
+    this.outstanding++;
+    let acquired = false;
+    try {
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
+        throw new Error('Invalid SDK timeout');
+      await this.open();
+      if (this.failure) throw this.failure;
+      await this.acquireSlot(timeoutMs);
+      acquired = true;
+      return await this.sendRequest(action, payload, timeoutMs);
+    } finally {
+      this.outstanding--;
+      if (acquired) this.releaseSlot();
+    }
+  }
+
+  private acquireSlot(timeoutMs: number): Promise<void> {
+    if (this.inFlight < MAX_IN_FLIGHT_REQUESTS && this.slotWaiters.length === 0) {
+      this.inFlight++;
+      return Promise.resolve();
+    }
+    if (this.slotWaiters.length >= MAX_WAITING_REQUESTS)
+      return Promise.reject(new Error('Too many waiting requests; this request was not sent'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.slotWaiters.splice(this.slotWaiters.indexOf(waiter), 1);
+        reject(new Error('Request expired while waiting; this request was not sent'));
+      }, timeoutMs);
+      const waiter = {
+        grant: () => {
+          clearTimeout(timer);
+          this.inFlight++;
+          resolve();
+        },
+        reject: (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      };
+      this.slotWaiters.push(waiter);
+    });
+  }
+
+  private releaseSlot(): void {
+    this.inFlight--;
+    this.slotWaiters.shift()?.grant();
+  }
+
+  private async sendRequest(
+    action: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number
+  ): Promise<unknown> {
     const identity = await this.open();
     if (this.failure) throw this.failure;
     if (!this.client || this.client.readyState !== WebSocket.OPEN)
       throw new Error('Session closed; do not replay writes');
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
-      throw new Error('Invalid SDK timeout');
+    if (this.lastRequestId >= Number.MAX_SAFE_INTEGER)
+      throw new Error('Request ID space exhausted; this request was not sent');
     const ws = this.client,
-      id = randomUUID(),
+      id = String(this.lastRequestId + 1),
       started = performance.now();
     const frame = JSON.stringify({
       id,
@@ -219,6 +284,8 @@ export class Connection {
       deadline: Date.now() + timeoutMs,
     });
     if (Buffer.byteLength(frame) > MAX_MESSAGE_BYTES) throw new Error('Request too large');
+    // No await between ID allocation and send: numeric order is actual wire order.
+    this.lastRequestId++;
     this.timings.sdkCalls++;
     try {
       return await new Promise((resolve, reject) => {
@@ -246,6 +313,7 @@ export class Connection {
   }
   private failPending(error: Error): void {
     this.failure = error;
+    for (const waiter of this.slotWaiters.splice(0)) waiter.reject(error);
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);

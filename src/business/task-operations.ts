@@ -3,6 +3,7 @@ import { RemType } from './sdk-constants.generated.js';
 import { contentHash } from './content-hash.js';
 import { plainText } from './plain-text.js';
 import { hasCardStructure } from './card-structure.js';
+import { mapReads } from './workspace/read-pool.js';
 import {
   inspectWithEvidence,
   verifyInspection,
@@ -1162,7 +1163,7 @@ export class TaskOperations {
     }
   }
   private async bindScaffold(p: FlashcardsPlan, ids: string[], j: Journal): Promise<void> {
-    const all = await Promise.all(ids.map((id) => this.rem(id))),
+    const all = await mapReads(ids, 16, (id) => this.rem(id)),
       base = scaffoldParent(p),
       roots: PluginRem[] = [];
     for (const r of all) if ((await r.getParentRem())?._id === base) roots.push(r);
@@ -1235,10 +1236,12 @@ export class TaskOperations {
     if (bound.size !== expected || ids.length !== expected || ids.some((id) => !bound.has(id)))
       throw new TaskError('conflict', 'Inconsistent scaffold bindings');
     const root = p.parentRemId ? undefined : await this.rem(j.ids.root),
-      remCards = await Promise.all(cards.map((c) => this.rem(j.ids[`card:${c.key}`]))),
-      answers = await Promise.all(
-        cards.map((c) =>
-          Promise.all(c.answer.map((_, i) => this.rem(j.ids[`answer:${c.key}:${i}`])))
+      remCards = await mapReads(cards, 16, (c) => this.rem(j.ids[`card:${c.key}`])),
+      answers = await mapReads(cards, 4, (c) =>
+        mapReads(
+          c.answer.map((_, i) => i),
+          4,
+          (i) => this.rem(j.ids[`answer:${c.key}:${i}`])
         )
       );
     const baseline = (id: string, parent: string, children: string[]) => {

@@ -22,6 +22,9 @@ Apply the connection prerequisites below to commands that contact RemNote.
 
 - RemNote desktop is open with RemNote CLI Bridge (`remnote-cli-bridge`) enabled. A plugin that still reports `zeefan-remnote-sdk-bridge` is accepted during the rename.
 - CLI and plugin are paired with a private token for the exact intended KB.
+- Both peers use protocol 2; the private file independently uses `schemaVersion: 1`.
+  Unsupported old configuration stops before connecting and stays unchanged.
+  Request explicit authorization for re-pairing or coordinated peer installation.
 - Official content and `KnowledgeBaseInfo: Read` permissions are granted.
 - Run `remnote-cli status` and verify plugin ID, KB, protocol, SDK and live write flags.
 - No MCP endpoint or business daemon is required. Local plugin loading uses a

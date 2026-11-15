@@ -285,7 +285,7 @@ describe('public SDK sync adapter', () => {
     ]);
   });
 
-  it('bounds four concurrent full batches to 16 snapshots and 192 in-flight native flags', async () => {
+  it('bounds two concurrent full batches to eight snapshots and 32 in-flight native flags', async () => {
     const f = fixture(200);
     let active = 0,
       peak = 0;
@@ -315,9 +315,9 @@ describe('public SDK sync adapter', () => {
     }
     const ids = [...f.objects.keys()];
     const batches = Array.from({ length: 4 }, (_, i) => ids.slice(i * 50, i * 50 + 50));
-    const result = await mapReads(batches, 4, (batch) => f.backend.read(batch));
+    const result = await mapReads(batches, 2, (batch) => f.backend.read(batch));
     expect(result.flat().map((rem) => rem.id)).toEqual(ids);
-    expect(peak).toBe(192);
+    expect(peak).toBe(32);
     expect(active).toBe(0);
   });
 

@@ -8,6 +8,7 @@ import { BuiltInPowerupCodes, RemType } from './sdk-constants.generated.js';
 import { contentHash } from './content-hash.js';
 import { hasCardStructure } from './card-structure.js';
 import { plainText } from './plain-text.js';
+import { mapReads } from './workspace/read-pool.js';
 export interface InspectManyParams {
   schemaVersion: 1;
   remIds?: string[];
@@ -401,9 +402,7 @@ export async function inspectWithEvidence(
       if (explicit.has(id)) {
         o.text = rem.text ?? null;
         o.title = await plainText(plugin, rem.text);
-        o.aliases = await Promise.all(
-          (await rem.getAliases()).map((a) => plainText(plugin, a.text))
-        );
+        o.aliases = await mapReads(await rem.getAliases(), 16, (a) => plainText(plugin, a.text));
         if (rem.backText !== undefined) o.backText = rem.backText;
       }
       if (inverse.has(id)) o.taggedRemIds = inverse.get(id);

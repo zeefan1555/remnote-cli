@@ -97,7 +97,7 @@ export async function flashcardsWorkflow(
     const status = await run(['status']);
     assert.equal(status.connected, true);
     assert.equal(status.acceptWriteOperations, true);
-    assert.equal(status.protocolVersion, 1);
+    assert.equal(status.protocolVersion, 2);
     assert.ok(
       (ACCEPTED_PLUGIN_IDS as readonly string[]).includes(String(status.pluginId)),
       `plugin id must be remnote-cli-bridge (or zeefan-remnote-sdk-bridge during the rename), got ${String(status.pluginId)}`

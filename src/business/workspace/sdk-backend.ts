@@ -4,7 +4,7 @@ import { BuiltInPowerupCodes, RemType } from '../sdk-constants.generated.js';
 import { builtinSlotName } from '../powerup-read.js';
 import { idSchema } from './identity.js';
 import { immutableProjection } from './snapshots.js';
-import { mapReads, settleReads } from './read-pool.js';
+import { mapReads, readTuple, settleReads } from './read-pool.js';
 import {
   hash,
   type MetadataStore,
@@ -147,20 +147,23 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       powerupProperty,
       powerupEnum,
       powerupList,
-    ] = await settleReads([
-      rem.isDocument(),
-      rem.isFolder(),
-      rem.isCardItem(),
-      rem.getPracticeDirection(),
-      rem.getEnablePractice(),
-      rem.isTable(),
-      rem.isProperty(),
-      rem.isPowerup(),
-      rem.isPowerupSlot(),
-      rem.isPowerupProperty(),
-      rem.isPowerupEnum(),
-      rem.isPowerupPropertyListItem(),
-    ]);
+    ] = await readTuple(
+      [
+        () => rem.isDocument(),
+        () => rem.isFolder(),
+        () => rem.isCardItem(),
+        () => rem.getPracticeDirection(),
+        () => rem.getEnablePractice(),
+        () => rem.isTable(),
+        () => rem.isProperty(),
+        () => rem.isPowerup(),
+        () => rem.isPowerupSlot(),
+        () => rem.isPowerupProperty(),
+        () => rem.isPowerupEnum(),
+        () => rem.isPowerupPropertyListItem(),
+      ],
+      4
+    );
     const unsupported = [
       ['table', table],
       ['property', property],
@@ -335,7 +338,8 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
         ? Object.fromEntries(
             await mapReads(
               codes,
-              4,
+              // Four probe batches x four Rems x two atomic reads = 32 outstanding.
+              2,
               async (code) =>
                 [code, boolean(await rem.hasPowerup(code), `Powerup ${code}`)] as const
             )

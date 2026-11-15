@@ -3,6 +3,21 @@
 Live tests exercise the candidate CLI directly against RemNote CLI Bridge.
 There are no MCP or stdio suites.
 
+## Synthetic Transport Check
+
+From the CLI checkout with locked dependencies installed, use Node 24:
+
+```bash
+node --import tsx scripts/verify-transport-loopback.mjs /PATH/TO/remnote-cli-bridge 200001
+```
+
+This connects both source transports over real loopback WebSocket with a synthetic
+handler: no SDK runtime, pairing files, real vaults or installation. It verifies
+exact handler/unique-ID counts, monotonic allocation, out-of-order correlation and
+constant replay state after more than 200,000 requests. Run the complete quality
+checks and builds in both repositories too. Synthetic evidence does not establish
+native performance or authorize protocol-2 installation/re-pairing.
+
 ## Prerequisites
 
 - Explicit user authorization for real test writes.

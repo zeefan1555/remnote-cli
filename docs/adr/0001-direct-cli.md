@@ -16,7 +16,11 @@ still require a plugin update; business changes do not.
 
 ## Safety Contract
 
-- Protocol version 1 and actual SDK catalog capabilities determine compatibility.
+- Protocol version 2 and actual SDK catalog capabilities determine compatibility.
+  Canonical monotonic request IDs replace a cumulative replay set; see the
+  [bounded transport contract](../architecture.md#connection-and-safety).
+  Protocol-1 peers fail before dispatch. The independent pairing schema is
+  `schemaVersion: 1`; old configuration is rejected, never converted or overwritten.
 - A 256-bit pairing secret authenticates both peers with fresh HMAC challenges.
   The listener binds only 127.0.0.1; neither peer sends the secret over WebSocket.
 - Every request is bound to the authenticated socket, exact KB and deadline.
@@ -63,7 +67,9 @@ protocol, SDK, KB and authorization failures, never the pairing token.
 Local loading uses the existing static asset host on `127.0.0.1:8090`, serving a
 verified copy under `~/.local/share/remnote-cli-bridge/`. A user LaunchAgent keeps
 this file-only host available; it is not a business daemon or an MCP endpoint.
-The existing private CLI pairing config is reused without logging its token.
+Only a validated schema-1 private CLI pairing config is reused, without logging
+its token. Re-pairing an unsupported old config requires separate authorization;
+source/build verification never changes credentials or installs either peer.
 
 Acceptance additionally requires native transaction abort/readback, CLI-only
 composition with unchanged plugin build hashes, and restart smoke checks.

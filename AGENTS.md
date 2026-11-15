@@ -30,8 +30,9 @@ Callbacks, private SDK methods and persistent SDK object handles are not support
 Handshake accepts plugin id `remnote-cli-bridge` and, during the rename, the
 previous id `zeefan-remnote-sdk-bridge`. The same transition applies to the
 display names `RemNote CLI Bridge` and `RemNote SDK Bridge` when the plugin
-sends them. Plugin version `0.25.0` is accepted. Compatibility is protocol 1
-plus the SDK catalog, not matching product versions.
+sends them. Compatibility is protocol 2 plus the SDK catalog, not matching product
+versions. Pairing uses strict `schemaVersion: 1`; old configuration is rejected
+without modification. Re-pairing and coordinated installation need explicit authorization.
 
 Task plans default to preview, require current hashes for patches and use durable
 metadata-only journals scoped to the paired KB. Unknown write outcomes must not

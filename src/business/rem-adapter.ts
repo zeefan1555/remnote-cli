@@ -37,6 +37,7 @@ import {
 } from './task-operations.js';
 import { cardDelimiterIndex } from './card-structure.js';
 import { contentHash } from './content-hash.js';
+import { mapReads } from './workspace/read-pool.js';
 
 export type ContentMode = 'none' | 'markdown' | 'structured';
 export type SearchByTagResultMode = 'context' | 'tagged';
@@ -3147,12 +3148,10 @@ export class RemAdapter {
   private async clearDirectContentChildren(rem: PluginRem): Promise<void> {
     const [children, aliases] = await Promise.all([rem.getChildrenRem(), rem.getAliases()]);
     const aliasRemIds = new Set(aliases.map((aliasRem) => aliasRem._id));
-    const classifiedChildren = await Promise.all(
-      children.map(async (child) => ({
-        child,
-        isMetadata: await this.isProtectedParentMetadataChild(child, aliasRemIds),
-      }))
-    );
+    const classifiedChildren = await mapReads(children, 16, async (child) => ({
+      child,
+      isMetadata: await this.isProtectedParentMetadataChild(child, aliasRemIds),
+    }));
 
     for (const { child, isMetadata } of classifiedChildren) {
       if (!isMetadata) await child.remove();
@@ -3166,7 +3165,7 @@ export class RemAdapter {
     rems: PluginRem[]
   ): Promise<{ remIds: string[]; titles: string[] }> {
     const remIds = rems.map((r) => r._id);
-    const titles = await Promise.all(rems.map((r) => this.extractText(r.text)));
+    const titles = await mapReads(rems, 16, (r) => this.extractText(r.text));
     return { remIds, titles };
   }
 
@@ -4169,37 +4168,35 @@ export class RemAdapter {
     }
 
     // Get property names for filtering
-    const propertyNames = await Promise.all(
-      propertyChildren.map((prop) => this.extractText(prop.text))
+    const propertyNames = await mapReads(propertyChildren, 16, (prop) =>
+      this.extractText(prop.text)
     );
 
     // Apply propertyFilter if provided (matches by property NAME)
     let columns: TableColumn[] = [];
     if (params.propertyFilter && params.propertyFilter.length > 0) {
       const filterSet = new Set(params.propertyFilter.map((f) => f.toLowerCase()));
-      columns = await Promise.all(
-        propertyChildren
-          .filter((prop, idx) => filterSet.has(propertyNames[idx].toLowerCase()))
-          .map(async (prop) => {
-            const propType = await prop.getPropertyType();
-            return {
-              propertyId: prop._id,
-              name: await this.extractText(prop.text),
-              type: propType ? String(propType) : 'unknown',
-            };
-          })
-      );
-    } else {
-      columns = await Promise.all(
-        propertyChildren.map(async (prop) => {
+      columns = await mapReads(
+        propertyChildren.filter((prop, idx) => filterSet.has(propertyNames[idx].toLowerCase())),
+        16,
+        async (prop) => {
           const propType = await prop.getPropertyType();
           return {
             propertyId: prop._id,
             name: await this.extractText(prop.text),
             type: propType ? String(propType) : 'unknown',
           };
-        })
+        }
       );
+    } else {
+      columns = await mapReads(propertyChildren, 16, async (prop) => {
+        const propType = await prop.getPropertyType();
+        return {
+          propertyId: prop._id,
+          name: await this.extractText(prop.text),
+          type: propType ? String(propType) : 'unknown',
+        };
+      });
     }
 
     // 3. Extract rows: get tagged rems
@@ -4214,23 +4211,21 @@ export class RemAdapter {
     const slicedRows = allTaggedRems.slice(offset, offset + limit);
 
     // 4. Build row data
-    const rows: TableRow[] = await Promise.all(
-      slicedRows.map(async (row) => {
-        const name = await this.extractText(row.text);
-        const values: Record<string, string> = {};
+    const rows: TableRow[] = await mapReads(slicedRows, 16, async (row) => {
+      const name = await this.extractText(row.text);
+      const values: Record<string, string> = {};
 
-        for (const column of columns) {
-          const propValue = await row.getTagPropertyValue(column.propertyId);
-          values[column.propertyId] = await this.extractText(propValue);
-        }
+      for (const column of columns) {
+        const propValue = await row.getTagPropertyValue(column.propertyId);
+        values[column.propertyId] = await this.extractText(propValue);
+      }
 
-        return {
-          remId: row._id,
-          name,
-          values,
-        };
-      })
-    );
+      return {
+        remId: row._id,
+        name,
+        values,
+      };
+    });
 
     return {
       tableId: tableRem._id,

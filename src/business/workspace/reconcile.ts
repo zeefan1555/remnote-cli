@@ -140,7 +140,8 @@ export async function readRemote(
     if (result.has(id) && context.native.get(id)!.unsupported !== 'unverified-native-flags')
       full.add(id);
   const fullIds = [...full].sort();
-  const nativeReads = await mapReads(batches(fullIds), 4, async (batch) => {
+  // Two batches x four Rems x four atomic reads = the 32-outstanding transport budget.
+  const nativeReads = await mapReads(batches(fullIds), 2, async (batch) => {
     const rems = await backend.read(batch, {
       tags: true,
       ...(powerupCodes ? { powerupCodes } : {}),

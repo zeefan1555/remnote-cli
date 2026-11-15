@@ -9,6 +9,17 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Coordinate protocol 2 with the Bridge: send monotonic safe-integer IDs, bound
+  wire concurrency/local waiters, and fail exhaustion without reuse or replay.
+  Sessions can exceed 200,000 calls without the former 20,000-ID ceiling.
+  Pairing uses independent strict `schemaVersion: 1`; old configuration is
+  rejected without mutation, secret disclosure or automatic re-pairing.
+- Bound business read producers with lazy stop-and-drain pools: nested workspace
+  reads stay within the 32-request transport budget, and data-sized scaffold,
+  alias, metadata and table reads no longer eagerly enqueue every item. Native
+  facts, ordering and serial writes are unchanged; smaller snapshots may take
+  additional read waves rather than exceeding the connection budget.
+
 - Development integration commands no longer have an implicit 70-second process
   kill timeout. Receipts retain the actual child exit code and signal, with a
   distinct stderr warning for interrupted/unknown outcomes; `--command` reports

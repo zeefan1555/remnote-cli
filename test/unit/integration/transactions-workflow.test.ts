@@ -22,13 +22,13 @@ it.each([false, true, 'unavailable'])(
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(readConnectionConfig).mockResolvedValue({
-      protocolVersion: 1,
+      schemaVersion: 1,
       token: 'a'.repeat(64),
       port: 3002,
       knowledgeBaseId: 'kb',
     });
     vi.spyOn(Connection.prototype, 'open').mockResolvedValue({
-      protocolVersion: 1,
+      protocolVersion: 2,
       pluginVersion: 'test',
       sdkVersion: '0.0.46',
       sdkCatalogHash: 'b'.repeat(64),

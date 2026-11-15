@@ -54,8 +54,10 @@ remnote-cli status --text
 
 A plugin that still reports id `zeefan-remnote-sdk-bridge` or the name
 RemNote SDK Bridge remains accepted while that build is replaced. Plugin version
-0.25.0 is compatible. Product versions do not need to match; protocol 1 and the
-SDK catalog do.
+numbers are informational. Both peers must implement protocol 2 and the verified
+SDK catalog; protocol-1 builds are rejected before SDK dispatch. Pairing files
+use `schemaVersion: 1`, independently of the wire version. Old `protocolVersion`
+configuration is rejected without modification; re-pairing needs explicit authorization.
 
 See [installation](docs/guides/installation.md) and
 [configuration](docs/guides/configuration.md).

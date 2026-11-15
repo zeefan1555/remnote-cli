@@ -4,7 +4,7 @@
 
 `remnote-cli pair --kb-id ID [--port PORT]` creates a private file with:
 
-- `protocolVersion: 1`
+- `schemaVersion: 1` (credential-file format, independent of wire protocol 2)
 - a random 256-bit `token`
 - exact `knowledgeBaseId`
 - loopback `port` (default 3002)
@@ -13,6 +13,11 @@ The default path is `$XDG_CONFIG_HOME/remnote-cli/connection.json`, or
 `~/.config/remnote-cli/connection.json`. `REMNOTE_CLI_CONFIG` selects another
 file. It must be a regular, non-symlink file, at most 8 KiB, with no group/other
 permission bits. Pairing refuses to overwrite it.
+
+Old files with `protocolVersion` and unsupported schemas fail before a listener
+opens. Reads leave their bytes unchanged and redact invalid values from errors.
+There is no automatic conversion, token rotation or fallback. Re-pairing requires
+explicit authorization; preserve the existing file until that decision is made.
 
 Enter the token only in the trusted RemNote CLI Bridge plugin. The plugin never returns
 the token through SDK calls and cannot change its own security settings over RPC.

@@ -169,13 +169,13 @@ describe('command text output', () => {
       cliVersion: TEST_CLI_VERSION,
       knowledgeBaseId: 'test-kb',
       knowledgeBaseName: 'Test',
-      protocolVersion: 1,
+      protocolVersion: 2,
     });
 
     expect(output).toContain(`Bridge: Connected (plugin v${TEST_PLUGIN_VERSION})`);
     expect(output).toContain(`CLI: v${TEST_CLI_VERSION}`);
     expect(output).toContain('KB: Test (test-kb)');
-    expect(output).toContain('Protocol: 1');
+    expect(output).toContain('Protocol: 2');
     executeSpy.mockRestore();
   });
 

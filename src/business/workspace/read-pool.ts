@@ -26,6 +26,16 @@ export async function mapReads<T, R>(
   return result;
 }
 
+/** Lazy heterogeneous reads share the same bounded, stop-and-drain scheduling. */
+export async function readTuple<const T extends readonly (() => Promise<unknown>)[]>(
+  reads: T,
+  limit: number
+): Promise<{ -readonly [P in keyof T]: Awaited<ReturnType<T[P]>> }> {
+  return (await mapReads(reads, limit, (read) => read())) as {
+    -readonly [P in keyof T]: Awaited<ReturnType<T[P]>>;
+  };
+}
+
 /** Independent SDK calls also settle before their enclosing batch may fail. */
 export async function settleReads<const T extends readonly unknown[]>(
   reads: T

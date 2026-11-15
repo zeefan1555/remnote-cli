@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,6 +60,23 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('local business dispatch', () => {
+  it('rejects old configuration before constructing a listener or invoking SDK calls', async () => {
+    const path = join(directory, 'connection.json');
+    const raw = JSON.stringify({
+      protocolVersion: 1,
+      token: 'e'.repeat(64),
+      knowledgeBaseId: 'kb',
+      port: 3002,
+    });
+    await writeFile(path, raw);
+    await expect(client.execute('get_status', {})).rejects.toThrow(
+      'Unsupported pairing configuration'
+    );
+    expect(wire.constructed).not.toHaveBeenCalled();
+    expect(wire.open).not.toHaveBeenCalled();
+    expect(wire.request).not.toHaveBeenCalled();
+    expect(await readFile(path, 'utf8')).toBe(raw);
+  });
   it('uses one command connection for status, workflows and low-level calls', async () => {
     expect(await client.execute('get_status', {})).toMatchObject({
       connected: true,

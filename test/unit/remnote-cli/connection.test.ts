@@ -5,13 +5,15 @@ import {
   ACCEPTED_PLUGIN_IDS,
   ACCEPTED_PLUGIN_NAMES,
   Connection,
+  MAX_IN_FLIGHT_REQUESTS,
+  MAX_OUTSTANDING_REQUESTS,
   proof,
   type BridgeIdentity,
 } from '../../../src/remnote-cli/client/connection.js';
 
 const token = 'a'.repeat(64);
 const identity: BridgeIdentity = {
-  protocolVersion: 1,
+  protocolVersion: 2,
   pluginVersion: 'independent-plugin',
   sdkVersion: '0.0.46',
   sdkCatalogHash: 'b'.repeat(64),
@@ -28,7 +30,7 @@ afterEach(async () => {
 });
 async function listen(timeout = 2000, port = 0) {
   const connection = new Connection(
-    { protocolVersion: 1, token, knowledgeBaseId: 'kb', port },
+    { schemaVersion: 1, token, knowledgeBaseId: 'kb', port },
     'arbitrary-cli',
     timeout
   );
@@ -58,6 +60,100 @@ async function plugin(port: number, overrides: Partial<BridgeIdentity> = {}, sec
   return ws;
 }
 describe('command-owned loopback session', () => {
+  it('bounds wire sends and local waiters and assigns IDs in send order', async () => {
+    const { connection, opened, port } = await listen();
+    const ws = await plugin(port);
+    await opened;
+    const requests: Array<{ id: string; payload: unknown }> = [];
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (frame.id) requests.push(frame);
+    });
+    const pending = Array.from({ length: MAX_OUTSTANDING_REQUESTS }, (_, n) =>
+      connection.request('synthetic', { n })
+    );
+    const settled = Promise.allSettled(pending);
+    await expect(connection.request('overload', {})).rejects.toThrow('was not sent');
+    await vi.waitFor(() => expect(requests).toHaveLength(MAX_IN_FLIGHT_REQUESTS));
+    expect(requests.map((r) => r.id)).toEqual(Array.from({ length: 16 }, (_, i) => String(i + 1)));
+    // A reverse completion order must not change allocation or payload correlation.
+    for (const request of requests.slice().reverse())
+      ws.send(JSON.stringify({ id: request.id, result: request.payload }));
+    await vi.waitFor(() => expect(requests).toHaveLength(MAX_OUTSTANDING_REQUESTS));
+    for (const request of requests.slice(16).reverse())
+      ws.send(JSON.stringify({ id: request.id, result: request.payload }));
+    expect(await settled).toEqual(
+      Array.from({ length: 32 }, (_, n) => ({ status: 'fulfilled', value: { n } }))
+    );
+    expect(requests.map((r) => r.id)).toEqual(Array.from({ length: 32 }, (_, i) => String(i + 1)));
+  });
+
+  it('rejects both sent requests and local waiters after disconnect with no replay', async () => {
+    const { connection, opened, port } = await listen();
+    const ws = await plugin(port);
+    await opened;
+    const ids: string[] = [];
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (frame.id) ids.push(frame.id);
+    });
+    const settled = Promise.allSettled(
+      Array.from({ length: 32 }, () => connection.request('write', {}))
+    );
+    await vi.waitFor(() => expect(ids).toHaveLength(16));
+    ws.close(1000, 'Command session ended');
+    expect((await settled).every((r) => r.status === 'rejected')).toBe(true);
+    await expect(connection.request('later', {})).rejects.toThrow('Connection lost');
+    expect(ids).toHaveLength(16);
+    const state = connection as unknown as {
+      outstanding: number;
+      inFlight: number;
+      slotWaiters: unknown[];
+    };
+    expect(state.outstanding).toBe(0);
+    expect(state.inFlight).toBe(0);
+    expect(state.slotWaiters).toHaveLength(0);
+  });
+
+  it('expires unsent waiting requests without assigning IDs or stopping active work', async () => {
+    const { connection, opened, port } = await listen();
+    const ws = await plugin(port);
+    await opened;
+    const ids: string[] = [];
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (frame.id) ids.push(frame.id);
+    });
+    const active = Promise.allSettled(
+      Array.from({ length: 16 }, () => connection.request('write', {}))
+    );
+    await vi.waitFor(() => expect(ids).toHaveLength(16));
+    await expect(connection.request('wait', {}, 10)).rejects.toThrow('expired while waiting');
+    expect(ids).toHaveLength(16);
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    await connection.close();
+    await active;
+  });
+
+  it('sends the maximum safe ID once and fails exhaustion without wrapping', async () => {
+    const { connection, opened, port } = await listen();
+    const ws = await plugin(port);
+    await opened;
+    (connection as unknown as { lastRequestId: number }).lastRequestId =
+      Number.MAX_SAFE_INTEGER - 1;
+    const ids: string[] = [];
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (!frame.id) return;
+      ids.push(frame.id);
+      ws.send(JSON.stringify({ id: frame.id, result: true }));
+    });
+    expect(await connection.request('last', {})).toBe(true);
+    await expect(connection.request('overflow', {})).rejects.toThrow('ID space exhausted');
+    await expect(connection.request('overflow-again', {})).rejects.toThrow('ID space exhausted');
+    expect(ids).toEqual(['9007199254740991']);
+  });
+
   it('authenticates once, correlates multiple requests and releases its port', async () => {
     const { connection, opened, port } = await listen();
     const ws = await plugin(port);
@@ -192,7 +288,7 @@ describe('command-owned loopback session', () => {
         kind === 'kb'
           ? { knowledgeBaseId: 'other' }
           : kind === 'protocol'
-            ? { protocolVersion: 2 as never }
+            ? { protocolVersion: 1 as never }
             : kind === 'schema'
               ? { acceptWriteOperations: 'true' as never }
               : {},
@@ -257,7 +353,7 @@ describe('command-owned loopback session', () => {
   it('fails closed on an occupied port without stopping the existing listener', async () => {
     const first = await listen();
     const second = new Connection(
-      { protocolVersion: 1, token, knowledgeBaseId: 'kb', port: first.port },
+      { schemaVersion: 1, token, knowledgeBaseId: 'kb', port: first.port },
       'v'
     );
     connections.push(second);

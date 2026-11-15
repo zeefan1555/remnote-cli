@@ -45,7 +45,8 @@ update the same installed command without relinking the plugin.
 
 Install **RemNote CLI Bridge** from the RemNote marketplace. The manifest id and
 npm name are `remnote-cli-bridge`; the display name is RemNote CLI Bridge.
-Plugin version 0.25.0 is compatible with this CLI. A build that still reports
+Both peers must implement protocol 2; their product versions need not match.
+A build that still reports
 `zeefan-remnote-sdk-bridge` or RemNote SDK Bridge is accepted during the rename.
 Confirm `status.pluginVersion`, `status.pluginId`, `status.sdkCatalogHash` and
 `status.nativeTransactions === false`; the installed manifest panel alone does
@@ -82,8 +83,10 @@ remnote-cli status --text
 
 Successful status must show the intended KB and protocol. Product version numbers
 are informational; they do not need to match. Confirm the new plugin ID and SDK
-version as well. Reuse an existing private pairing file instead of creating or
-printing another token; enter it only in the new plugin's settings.
+version as well. Reuse only a validated `schemaVersion: 1` private pairing file;
+old `protocolVersion` files are rejected without changes. A coordinated peer
+upgrade or re-pairing needs explicit authorization. Never print a token or
+automatically rewrite, convert, copy or rotate credentials.
 
 The maintainer separately authorized local registration after the normal two-card
 write/readback/replay test passed. Native transaction abort remains failed; local

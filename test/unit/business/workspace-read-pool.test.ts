@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mapReads, settleReads } from '../../../src/business/workspace/read-pool.js';
+import { mapReads, readTuple, settleReads } from '../../../src/business/workspace/read-pool.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -69,5 +69,36 @@ describe('workspace read pool', () => {
     slow.resolve('done');
     await rejected;
     expect(settled).toBe(true);
+  });
+
+  it('lazily reads heterogeneous tuples without losing order or scheduling past failure', async () => {
+    const slow = deferred<string>();
+    const skipped = vi.fn(async () => 42);
+    let settled = false;
+    const result = readTuple(
+      [
+        async () => {
+          throw new Error('flag unavailable');
+        },
+        () => slow.promise,
+        skipped,
+      ],
+      2
+    ).finally(() => {
+      settled = true;
+    });
+    const rejected = expect(result).rejects.toThrow('flag unavailable');
+    await Promise.resolve();
+    expect(skipped).not.toHaveBeenCalled();
+    expect(settled).toBe(false);
+    slow.resolve('done');
+    await rejected;
+    expect(skipped).not.toHaveBeenCalled();
+    expect(settled).toBe(true);
+    expect(await readTuple([async () => true, async () => 'none', async () => 42], 2)).toEqual([
+      true,
+      'none',
+      42,
+    ]);
   });
 });

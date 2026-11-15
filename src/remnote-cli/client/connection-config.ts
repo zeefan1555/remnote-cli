@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 export const ConnectionConfigSchema = z
   .object({
-    protocolVersion: z.literal(1),
+    schemaVersion: z.literal(1),
     token: z.string().regex(/^[a-f0-9]{64}$/),
     knowledgeBaseId: z.string().min(1).max(256),
     port: z.number().int().min(1024).max(65535).default(3002),
@@ -42,7 +42,18 @@ export async function readConnectionConfig(
     const stat = await file.stat();
     if (!stat.isFile() || stat.size > 8192 || (stat.mode & 0o077) !== 0)
       throw new Error('Pairing file must be a private regular file (chmod 600), at most 8 KiB');
-    return ConnectionConfigSchema.parse(JSON.parse(await file.readFile('utf8')));
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await file.readFile('utf8'));
+    } catch {
+      throw new Error('Invalid pairing file JSON; file was not changed');
+    }
+    const parsed = ConnectionConfigSchema.safeParse(raw);
+    if (!parsed.success)
+      throw new Error(
+        'Unsupported pairing configuration; schemaVersion: 1 is required. File was not changed; re-pairing requires explicit authorization.'
+      );
+    return parsed.data;
   } finally {
     await file.close();
   }
@@ -53,7 +64,7 @@ export async function createPairing(
   path = connectionConfigPath()
 ): Promise<string> {
   const config = ConnectionConfigSchema.parse({
-    protocolVersion: 1,
+    schemaVersion: 1,
     token: randomBytes(32).toString('hex'),
     knowledgeBaseId,
     port,

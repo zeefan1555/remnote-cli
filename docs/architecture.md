@@ -43,6 +43,34 @@ collection, node and text bounds. Rem/Card objects cross as value snapshots with
 IDs; callbacks and private/stateful handles do not cross. Supported RichTextBuilder
 factories are materialized with the native `value()` method within one call.
 
+Protocol 2 allocates canonical positive safe-integer decimal request IDs in actual
+send order (1 through 9007199254740991). The Bridge stores one session high-water
+ID, rejecting duplicates, decreases and noncanonical/out-of-range values before
+dispatch. Success, SDK rejection and expiry all consume the ID; exhaustion never
+wraps. This follows the monotonic non-reuse pattern of
+[RFC 9113 section 5.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-5.1.1),
+without adding HTTP/2 or a cumulative request-count ceiling.
+
+The CLI admits at most 32 requests (including connection waits): 16 wire requests
+and 16 timed local slot waiters. Excess/expired unsent requests fail without
+dispatch; disconnect rejects all pending work and never replays it. The Bridge
+separately caps outstanding work at 32, SDK execution at 16, slot waiters at 16,
+and ordered frames at 32 / 8 MiB aggregate. Overload closes the session before the
+offending request dispatches. Earlier native calls may still settle, so closing
+does not establish rollback. New sessions wait for prior native work as before.
+
+Business read producers use lazy, ordered pools that stop scheduling and drain
+started reads before reporting failure. Full workspace reconciliation uses two
+batches, four Rems per batch and four snapshot leaves per Rem; probes retain four
+batches with at most two powerup leaves per Rem. Other data-sized reads are bounded
+at their composition boundary. This preserves complete native facts within the
+transport budget; a single Rem's snapshot may require additional read waves.
+Native writes remain serial, and excessive external composition is still rejected.
+
+The pairing file's strict `schemaVersion: 1` is independent of wire protocol 2.
+Unsupported/old files fail before listener creation and are never rewritten.
+Create-only pairing, KB/port/settings and private state derivation are unchanged.
+
 SDK calls have a 15-second default deadline. Native transactions are disabled because
 SDK 0.0.46 does not acknowledge a rejected callback and can block the editor. See
 [ADR 0003](adr/0003-disable-unsafe-native-transactions.md) for the

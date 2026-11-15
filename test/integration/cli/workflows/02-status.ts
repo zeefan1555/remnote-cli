@@ -67,7 +67,7 @@ export async function statusWorkflow(
       assertHasField(r, 'cliVersion', 'status result cliVersion');
       assertTruthy(typeof r.cliVersion === 'string', 'cliVersion should be a string');
       assertTruthy(
-        r.protocolVersion === 1 &&
+        r.protocolVersion === 2 &&
           typeof r.knowledgeBaseId === 'string' &&
           typeof r.sdkCatalogHash === 'string' &&
           /^[a-f0-9]{64}$/.test(r.sdkCatalogHash),
