@@ -17,14 +17,15 @@ export function editGuard(
   const { tags: _tags, powerupStates: _powerups, ...invariant } = immutableProjection(rem);
   if (!Array.isArray(rem.cards) || rem.cards.some((card) => !Array.isArray(card.repetitionHistory)))
     throw new Error('Exact Card identities and review history are required for structural edits');
-  const cardIds = rem.cards.map((card) => card.id).sort();
+  const cards = [...rem.cards].sort((a, b) => a.id.localeCompare(b.id));
+  const cardIds = cards.map((card) => card.id).sort();
   if (new Set(cardIds).size !== cardIds.length) throw new Error('Duplicate native Card identities');
   return {
     id: rem.id,
     invariantHash: hash(invariant),
     cardIds,
     reviewHash: hash(
-      rem.cards.map(({ id, createdAt, repetitionHistory }) => ({
+      cards.map(({ id, createdAt, repetitionHistory }) => ({
         id,
         createdAt,
         repetitionHistory,
@@ -40,6 +41,29 @@ export function cardEvidence(guards: EditGuard[]) {
   return Object.fromEntries(
     guards.map(({ id, cardIds, reviewHash }) => [id, { cardIds: [...cardIds], reviewHash }])
   );
+}
+
+/** Guard the exact same fresh snapshots as the revision check, before supplemental facts merge. */
+export function snapshotEditGuards(
+  native: ReadonlyMap<string, WorkspaceRem>,
+  ids: string[],
+  codes: string[]
+): EditGuard[] {
+  return [...ids].sort().map((id) => {
+    const rem = native.get(id);
+    if (
+      !rem ||
+      !Array.isArray(rem.tags) ||
+      new Set(rem.tags).size !== rem.tags.length ||
+      codes.some((code) => typeof rem.powerupStates?.[code] !== 'boolean')
+    )
+      throw new Error(`Incomplete exact native edit relationships: ${id}`);
+    return editGuard(
+      rem,
+      rem.tags,
+      Object.fromEntries(codes.map((code) => [code, rem.powerupStates![code]!]))
+    );
+  });
 }
 
 export function relationOperations(

@@ -30,7 +30,7 @@ import {
   type ContentVersion,
   type SyncSelection,
 } from './types.js';
-import { selectPlan, type SelectionOptions } from './selection.js';
+import { mutationReadIds, selectPlan, type SelectionOptions } from './selection.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
 import {
   contentProjection,
@@ -52,6 +52,7 @@ import {
   cardEvidence,
   guardRelations,
   relationOperations,
+  snapshotEditGuards,
 } from './relations.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
 import {
@@ -983,27 +984,62 @@ async function synchronizeWorkspace(
     await store.setLocal(key, journal);
     let active: string | undefined;
     const structuralIds = folded?.structuralIds ?? new Set<string>();
+    const newPlainKeys = new Set(
+      plan.changes
+        .filter((change) => change.key.startsWith('new:') && change.kind === 'text')
+        .map((change) => change.key)
+    );
     let remoteWrites = 0;
     let checkedWriteBoundary = false;
-    async function preflight(): Promise<void> {
+    async function preflight(touched?: string[]): Promise<void> {
       await checkFiles(root, plan);
+      // The first/final checks cover the whole selected bound scope. Between them,
+      // check only the current atom's graph footprint, without adopting unrelated drift.
+      const ids = touched && checkedWriteBoundary ? touched : [...expected.keys()];
       const createdIds = resuming ? new Set(Object.values(journal!.ids)) : new Set<string>();
+      const plainIds = new Set(
+        Object.entries(journal!.ids)
+          .filter(([key]) => newPlainKeys.has(key))
+          .map(([, id]) => id)
+      );
       const fresh = await readExact(
         backend,
-        [...expected.keys()].filter((id) => !createdIds.has(id)),
+        ids.filter((id) => !createdIds.has(id)),
         editReadOptions
       );
       if (resuming) {
-        for (const [id, rem] of await readExact(backend, [...createdIds], {
-          tags: true,
-          powerups: powerupCodes,
-        }))
+        for (const [id, rem] of await readExact(
+          backend,
+          ids.filter((id) => createdIds.has(id)),
+          {
+            tags: true,
+            powerups: powerupCodes,
+          }
+        ))
           fresh.set(id, rem);
       }
-      for (const [id, rem] of expected) {
+      if (expectedEditGuards) {
+        const guards = expectedEditGuards.filter((guard) => fresh.has(guard.id));
+        if (
+          hash(
+            snapshotEditGuards(
+              fresh,
+              guards.map((guard) => guard.id),
+              powerupCodes
+            )
+          ) !== hash(guards)
+        )
+          throw new Error(
+            'Existing identities, flags, native relationships or review history changed'
+          );
+      }
+      for (const id of ids) {
+        const rem = expected.get(id)!;
         const current = withNativeSnapshot(rem, fresh.get(id)!);
         if (revisionHash(current) !== revisionHash(rem))
           throw new Error(`Concurrent remote change on ${id}`);
+        if (plainIds.has(id) && current.cards?.length !== 0)
+          throw new Error(`New plain Rem acquired independent Cards: ${id}`);
         if (
           createdIds.has(id) &&
           rem.cards?.length &&
@@ -1012,15 +1048,7 @@ async function synchronizeWorkspace(
           throw new Error(`New card identity changed after resume readback: ${id}`);
         fresh.set(id, current);
       }
-      if (expectedEditGuards) {
-        if (
-          hash(await backend.readEditGuards!(protectedIds, powerupCodes)) !==
-          hash(expectedEditGuards)
-        )
-          throw new Error(
-            'Existing identities, flags, native relationships or review history changed'
-          );
-      } else if ((await backend.guard(protectedIds)) !== guardHash)
+      if (!expectedEditGuards && (await backend.guard(protectedIds)) !== guardHash)
         throw new Error('Existing card identity or immutable flags changed');
       const identity = await backend.identity();
       if (
@@ -1042,17 +1070,23 @@ async function synchronizeWorkspace(
     async function mutate<T>(
       step: string,
       fn: () => Promise<T>,
-      after: (value: T) => Promise<void>
+      after: (value: T) => Promise<void>,
+      change?: WorkspaceChange
     ): Promise<void> {
       if (resuming && journal!.steps[step] === 'verified') return;
-      await preflight();
+      const beforeIds = change ? mutationReadIds(change, expected, journal!.ids) : undefined;
+      await preflight(beforeIds);
       active = step;
       journal!.steps[step] = 'started';
       await store.setLocal(key, journal);
       remoteWrites++;
       const value = await fn();
       await after(value);
-      await preflight();
+      await preflight(
+        change && beforeIds
+          ? [...new Set([...beforeIds, ...mutationReadIds(change, expected, journal!.ids)])].sort()
+          : undefined
+      );
       journal!.steps[step] = 'verified';
       await store.setLocal(key, journal);
       active = undefined;
@@ -1115,12 +1149,15 @@ async function synchronizeWorkspace(
                   rem.text.some(
                     (part) => part && typeof part === 'object' && 'i' in part && part.i === 's'
                   )) ||
+                (change.kind === 'text' &&
+                  (rem.backText !== null || rem.cardItem !== false || rem.cards?.length !== 0)) ||
                 (change.kind === 'multiline' &&
                   (!Array.isArray(rem.backText) || rem.backText.length !== 0 || rem.cardItem))
               )
                 throw new Error('Unexpected new Rem shape');
               expected.set(created, rem);
-            }
+            },
+            change
           );
           id = journal.ids[change.key]!;
         }
@@ -1132,7 +1169,8 @@ async function synchronizeWorkspace(
             () => backend.writeField(id, field, value),
             async () => {
               expected.set(id, { ...expected.get(id)!, [field]: value });
-            }
+            },
+            change
           );
         }
         if (isNew) {
@@ -1151,7 +1189,8 @@ async function synchronizeWorkspace(
               const children = [...p.children];
               children.splice(change.position, 0, id);
               expected.set(parent, { ...p, children });
-            }
+            },
+            change
           );
           if (expected.get(id)!.cardItem !== change.cardItem)
             await mutate(
@@ -1159,7 +1198,8 @@ async function synchronizeWorkspace(
               () => backend.setCardItem(id, change.cardItem),
               async () => {
                 expected.set(id, { ...expected.get(id)!, cardItem: change.cardItem });
-              }
+              },
+              change
             );
         }
         for (const relation of relationOperations(
@@ -1175,7 +1215,8 @@ async function synchronizeWorkspace(
             async () => {
               expected.set(id, applyRelation(expected.get(id)!, relation));
               advanceEditGuard(expectedEditGuards ?? [], id, relation);
-            }
+            },
+            change
           );
         }
       }

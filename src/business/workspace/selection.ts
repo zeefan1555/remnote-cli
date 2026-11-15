@@ -2,7 +2,7 @@ import { lstat } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import { isContentMarkdown } from './files.js';
 import type { LocalContext } from './local.js';
-import type { SyncSelection, WorkspacePlan, WorkspaceRem } from './types.js';
+import type { SyncSelection, WorkspaceChange, WorkspacePlan, WorkspaceRem } from './types.js';
 
 export interface SelectionOptions {
   scope?: 'changed' | 'all';
@@ -66,6 +66,60 @@ function referenceIds(rem: Partial<Pick<WorkspaceRem, 'text' | 'backText'>>): st
   return result;
 }
 
+/** One mutation's graph footprint; final verification still checks the full selected scope. */
+export function mutationReadIds(
+  change: WorkspaceChange,
+  native: ReadonlyMap<string, WorkspaceRem>,
+  assigned: Record<string, string> = {}
+): string[] {
+  const required = new Set<string>(),
+    structured = new Set<string>(),
+    ancestry = new Set<string>(),
+    descendants = new Set<string>();
+  const resolve = (id: string | null) => (id?.startsWith('new:') ? assigned[id] : id);
+  function structure(id: string): void {
+    if (structured.has(id)) return;
+    const rem = native.get(id);
+    if (!rem) return;
+    structured.add(id);
+    required.add(id);
+    if (rem.cardItem && rem.parent) structure(rem.parent);
+    if (Array.isArray(rem.backText) || rem.type === 6)
+      for (const child of rem.children) structure(child);
+    if (rem.type === 6)
+      for (const target of rem.portal?.directlyIncludedRemIds ?? [])
+        if (native.has(target)) required.add(target);
+  }
+  function ancestors(start: string | null | undefined): void {
+    for (let id = start; id && native.has(id) && !ancestry.has(id); id = native.get(id)!.parent) {
+      ancestry.add(id);
+      structure(id);
+    }
+  }
+  function subtree(id: string): void {
+    if (descendants.has(id)) return;
+    const rem = native.get(id);
+    if (!rem) return;
+    descendants.add(id);
+    ancestors(id);
+    for (const child of rem.children) subtree(child);
+  }
+  const id = resolve(change.key),
+    rem = id ? native.get(id) : undefined;
+  ancestors(id);
+  ancestors(resolve(change.parent));
+  for (const target of [
+    ...referenceIds(rem ?? {}),
+    ...referenceIds(change.fields),
+    ...(rem?.tags ?? []),
+    ...(change.relations?.tags ?? []),
+  ])
+    ancestors(target);
+  // A Powerup may affect descendants; an ordinary leaf edit must not reread sibling branches.
+  if (id && Object.keys(change.relations?.powerups ?? {}).length) subtree(id);
+  return sorted(required);
+}
+
 /** Structure/card helpers are checked; unrelated dependency content is never a merge candidate. */
 export function verificationClosure(
   context: LocalContext,
@@ -98,10 +152,7 @@ export function verificationClosure(
     for (const target of referenceIds(context.native.get(id)!)) include(target);
   }
   for (const change of plan.changes) {
-    ancestors(change.key);
-    ancestors(change.parent);
-    for (const target of referenceIds(change.fields)) include(target);
-    for (const target of change.relations?.tags ?? []) ancestors(target);
+    for (const id of mutationReadIds(change, context.native)) required.add(id);
   }
   return sorted(required).filter((id) => !candidates.includes(id));
 }

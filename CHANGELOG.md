@@ -28,6 +28,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   IDs and full-history digests to the exact plan and local input seal. Fresh
   guards must agree with known sealed Card IDs before writing; unknown sealed
   history can be verified in that same apply without inventing empty history.
+- Per-mutation graph readsets replace repeated full-scope native reads between
+  mandatory initial/final checks. Card/history guards share fresh snapshots with
+  content verification; missing live relationship facts fail closed. Removed Tag
+  targets remain checked, Powerups include descendants, unrelated observed drift
+  blocks final publication, and new plain answers cannot acquire independent Cards.
+  All SDK mutations remain serial, and uncertain attempts are never replayed.
 - Explicit `sync resume DIR --plan-hash HASH` reconstructs the original
   outgoing-only plan, verifies its ordered journal prefix and exact native IDs,
   reuses known created Rems and continues only unattempted steps. Uncertain

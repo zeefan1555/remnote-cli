@@ -436,6 +436,19 @@ above. Each mutation is journaled and guarded before/after; existing immutable
 facts and exact review history remain protected. Powerup observations cover
 declared and previously known codes, not an unsupported full enumeration.
 
+Initial and final checks cover the entire selected bound scope, not the entire
+vault or chapter. Between them, exact reads cover the current Rem, intended/current
+ancestors, its owning card family, and old/new reference and Tag targets. An
+explicit Powerup change also checks its descendants. The after-step footprint
+retains removed relation targets and adds any newly assigned Rem ID. Existing
+Card/history guards reuse those same fresh native snapshots before old supplemental
+facts are merged; missing live facts cannot be filled from cached observations.
+Unrelated branches may be checked only when touched or at the final full-scope
+check. Observed drift blocks publication instead of being silently adopted.
+New plain/answer leaves must not acquire independent Cards. SDK writes remain
+serial and individually journaled; no native compare-and-set or transaction is
+claimed, so check-to-write and final-read-to-publication windows still exist.
+
 Native Folder/Document changes, Powerup removal/slots, moves, new embeds/media and
 complex rich-text edits are outside this write surface. Existing native content is kept
 losslessly and displayed read-only as faithfully as supported. Portal metadata
