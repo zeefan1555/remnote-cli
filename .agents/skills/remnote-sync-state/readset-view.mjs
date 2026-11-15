@@ -8,7 +8,7 @@ export function state({ s }) {
   if (s.published && s.finalCover.length !== 3) return '错误：局部读回冒充完整证明';
   if (s.verified.includes(1) && !s.postCover[1].includes(2))
     return '错误：本步核验漏掉已移除 Tag 的目标';
-  if (s.phase === 'blocked') return '观测冲突，保留 journal 并停止';
+  if (s.phase === 'blocked') return '观测冲突后保留 journal 并停止';
   if (
     ['select', 'nextRem', 'readRevision', 'readCards', 'readTags', 'readPowerup', 'check'].includes(
       s.phase
@@ -22,7 +22,7 @@ export function state({ s }) {
     }[s.round];
   return {
     write: '本步写前检查通过',
-    reply: '一次原子写已生效，等待答复',
+    reply: '一次原子写已生效并等待答复',
     persistVerified: '本步关联范围已精确观测',
     advance: '本步核验已落盘',
     persistProof: '完整范围观测符合预期',

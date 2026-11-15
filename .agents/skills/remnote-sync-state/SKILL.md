@@ -9,7 +9,7 @@ The safety promise is that an interrupted write is not blindly replayed, persist
 
 ## Run
 
-1. Compare the covered functions below with sync commit `5b69bd018a3adb17abe0aed4259061a76b10b564`. Read changed functions before trusting the model. A green checker does not automatically establish that the model still describes changed code.
+1. Compare the covered functions below with sync commit `6b3ffbe1aecce914611338142dff94faf909f93d`. Read changed functions before trusting the model. A green checker does not automatically establish that the model still describes changed code.
 2. From this repository root, run the following command with Node dependencies installed and Java 11 or later available.
 
    ```sh
