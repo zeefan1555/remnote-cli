@@ -1,6 +1,7 @@
 import type { LocalContext } from './local.js';
 import { nodeKind } from './markdown.js';
 import {
+  cardIdentities,
   contentProjection,
   immutableProjection,
   publicRevision,
@@ -16,6 +17,7 @@ import {
   type WorkspacePlan,
   type WorkspaceRem,
   type ContentVersion,
+  type SyncConflict,
 } from './types.js';
 import { remoteVersion, usableVersion } from './versions.js';
 import { mapReads } from './read-pool.js';
@@ -23,6 +25,55 @@ import { mapReads } from './read-pool.js';
 function batches(ids: string[]): string[][] {
   return Array.from({ length: Math.ceil(ids.length / 50) }, (_, index) =>
     ids.slice(index * 50, index * 50 + 50)
+  );
+}
+
+/** Exact new IDs under an existing multiline; removals and moves are not inferred. */
+function incomingAnswerIds(
+  base: WorkspaceRem,
+  current: WorkspaceRem,
+  native: Map<string, WorkspaceRem>
+): string[] | undefined {
+  if (
+    nodeKind(base, native) !== 'multiline' ||
+    base.parent !== current.parent ||
+    base.type !== current.type ||
+    new Set(current.children).size !== current.children.length ||
+    base.children.some((id) => !current.children.includes(id))
+  )
+    return undefined;
+  const added = current.children.filter((id) => !base.children.includes(id));
+  return added.some((id) => native.has(id)) ? undefined : added;
+}
+
+function incomingAnswerStructure(
+  base: WorkspaceRem,
+  current: WorkspaceRem,
+  native: Map<string, WorkspaceRem>,
+  graph: Map<string, WorkspaceRem>
+): boolean {
+  return (
+    incomingAnswerIds(base, current, native) !== undefined &&
+    Array.isArray(base.cards) &&
+    base.cards.length > 0 &&
+    Array.isArray(current.cards) &&
+    hash(cardIdentities(base)) === hash(cardIdentities(current)) &&
+    nodeKind(current, graph) === 'multiline' &&
+    current.children.every((id) => {
+      const child = graph.get(id);
+      return (
+        child !== undefined &&
+        child.parent === current.id &&
+        child.cardItem === true &&
+        child.document === false &&
+        child.folder === false &&
+        child.backText === null &&
+        child.children.length === 0 &&
+        Array.isArray(child.cards) &&
+        child.cards.length === 0 &&
+        nodeKind(child, graph) === 'text'
+      );
+    })
   );
 }
 
@@ -72,6 +123,16 @@ export async function readRemote(
   for (const id of local.selection?.verificationIds ?? [])
     if (result.has(id) && context.native.get(id)!.unsupported !== 'unverified-native-flags')
       full.add(id);
+  for (const id of local.selection?.reconcileIds ?? context.native.keys()) {
+    const base = context.native.get(id)!,
+      current = result.get(id);
+    if (
+      current &&
+      hash(base.children) !== hash(current.children) &&
+      incomingAnswerIds(base, current, context.native) !== undefined
+    )
+      for (const child of base.children) if (result.has(child)) full.add(child);
+  }
   const fullIds = [...full].sort();
   const nativeReads = await mapReads(batches(fullIds), 4, async (batch) => {
     const rems = await backend.read(batch);
@@ -89,6 +150,39 @@ export async function readRemote(
     return batch.map((id) => withNativeSnapshot(context.native.get(id)!, byId.get(id)!));
   });
   for (const rem of nativeReads.flat()) result.set(rem.id, rem);
+  // Follow only new direct answer IDs explicitly returned by selected multiline parents.
+  // This is not a recursive discovery/import, and verification dependencies stay read-only.
+  const addedIds = [
+    ...new Set(
+      [...(local.selection?.reconcileIds ?? context.native.keys())].flatMap((id) => {
+        const current = result.get(id);
+        return current
+          ? (incomingAnswerIds(context.native.get(id)!, current, context.native) ?? [])
+          : [];
+      })
+    ),
+  ].sort();
+  const addedReads = await mapReads(batches(addedIds), 4, async (batch) => {
+    const snapshots = await backend.readPublic(batch),
+      rems = await backend.read(batch),
+      publicById = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
+    if (
+      rems.length !== batch.length ||
+      new Set(rems.map((rem) => rem.id)).size !== batch.length ||
+      snapshots.length !== batch.length ||
+      publicById.size !== batch.length ||
+      rems.some((rem) => !batch.includes(rem.id) || !publicById.has(rem.id))
+    )
+      throw new Error('Incomplete exact incoming answer read');
+    for (const rem of rems)
+      if (
+        hash(publicRevision(rem)) !==
+        hash(publicRevision(withPublicSnapshot(rem, publicById.get(rem.id)!)))
+      )
+        throw new Error(`Concurrent incoming answer change while reading ${rem.id}`);
+    return rems;
+  });
+  for (const rem of addedReads.flat()) result.set(rem.id, rem);
   return result;
 }
 
@@ -115,19 +209,7 @@ export function reconcile(
     )
   );
   const metadataChanged: string[] = [];
-  // Dependency reads are validation only: they do not become incoming changes or advance clocks.
-  for (const id of local.selection?.verificationIds ?? []) {
-    const base = context.native.get(id)!,
-      current = remote.get(id);
-    if (!current) throw new Error(`Missing verification dependency ${id}`);
-    if (
-      hash([base.parent, base.children, base.type]) !==
-        hash([current.parent, current.children, current.type]) ||
-      (base.unsupported !== 'unverified-native-flags' &&
-        hash(immutableProjection(base)) !== hash(immutableProjection(current)))
-    )
-      throw new Error(`Verification dependency structure changed: ${id}`);
-  }
+  const incomingStructures = new Map<string, SyncConflict>();
   const graph = new Map([...context.native, ...remote]);
   for (const id of local.selection?.reconcileIds ?? context.native.keys()) {
     const base = context.native.get(id)!;
@@ -165,15 +247,31 @@ export function reconcile(
     const localEdited = localHash !== baseHash || localVersion?.contentHash === localHash,
       remoteEdited = remoteHash !== baseHash || nativeVersion.sinceBaseline === true;
     if (hash(base) !== hash(current)) metadataChanged.push(id);
-    // Structural moves/additions/removals are visible conflicts, never a silent subset refresh or delete.
+    // Moves/removals remain conflicts. Read-only direct answer insertion/reordering
+    // is accepted only with the original multiline Card identity and verified leaf facts.
     if (
-      hash([base.parent, base.children, base.type]) !==
-        hash([current.parent, current.children, current.type]) ||
+      base.parent !== current.parent ||
+      base.type !== current.type ||
       (base.document !== null && base.document !== current.document) ||
       (base.folder !== null && base.folder !== current.folder)
     ) {
       conflict('remote-structure');
       continue;
+    }
+    if (hash(base.children) !== hash(current.children)) {
+      if (localEdited || !incomingAnswerStructure(base, current, context.native, graph)) {
+        conflict('remote-structure');
+        continue;
+      }
+      incomingStructures.set(id, {
+        id,
+        path,
+        reason: 'remote-structure',
+        baseHash,
+        localHash,
+        remoteHash,
+        remoteUpdatedAt: remoteEditedAt(current),
+      });
     }
     if (
       local.deletion?.ids.includes(id) &&
@@ -236,6 +334,32 @@ export function reconcile(
       plan.changes.push({ ...localChange, fields });
     }
   }
+  const writesRemote = plan.changes.length > 0 || Boolean(plan.deletion);
+  if (writesRemote) plan.conflicts.push(...incomingStructures.values());
+  else
+    for (const id of incomingStructures.keys()) {
+      plan.incoming.push(id);
+      for (const childId of remote.get(id)!.children)
+        if (!context.native.has(childId)) {
+          plan.incoming.push(childId);
+          remoteVersions[childId] = remoteVersion(remote.get(childId)!);
+        }
+    }
+  // A read-only incoming plan may observe a dependency's changed child list without
+  // importing it. The final operation set decides this; any native write keeps the
+  // sealed structure guard. Identity, flags, existence and concurrent-change checks remain.
+  for (const id of local.selection?.verificationIds ?? []) {
+    const base = context.native.get(id)!,
+      current = remote.get(id);
+    if (!current) throw new Error(`Missing verification dependency ${id}`);
+    if (
+      hash([base.parent, base.type]) !== hash([current.parent, current.type]) ||
+      (writesRemote && hash(base.children) !== hash(current.children)) ||
+      (base.unsupported !== 'unverified-native-flags' &&
+        hash(immutableProjection(base)) !== hash(immutableProjection(current)))
+    )
+      throw new Error(`Verification dependency structure changed: ${id}`);
+  }
   for (const [id, rem] of remote) plan.remoteHashes[id] = publicationRevisionHash(rem);
   if (plan.selection)
     plan.selection = {
@@ -243,7 +367,8 @@ export function reconcile(
       outgoingKeys: plan.changes.map((change) => change.key).sort(),
     };
   plan.resolutions.sort((a, b) => a.id.localeCompare(b.id));
-  for (const list of [plan.incoming, plan.converged, metadataChanged]) list.sort();
+  plan.incoming = [...new Set(plan.incoming)].sort();
+  for (const list of [plan.converged, metadataChanged]) list.sort();
   return { plan, metadataChanged, remoteVersions };
 }
 

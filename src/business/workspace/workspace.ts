@@ -539,7 +539,11 @@ function publicationRems(
   verifiedIds: string[] = []
 ) {
   const result = new Map(context.native);
-  for (const id of [...selection.reconcileIds, ...Object.values(assigned)])
+  for (const id of [
+    ...selection.reconcileIds,
+    ...Object.values(assigned),
+    ...[...remote.keys()].filter((id) => !context.native.has(id)),
+  ])
     if (remote.has(id)) result.set(id, remote.get(id)!);
   for (const id of verifiedIds) {
     const before = context.native.get(id),
@@ -823,6 +827,8 @@ async function synchronizeWorkspace(
       planHash = hash(plan);
     const selection = plan.selection!;
     coverage.selection = selection;
+    coverage.checkedIds = [...remote.keys()].sort();
+    coverage.checkedCount = coverage.checkedIds.length;
     if (
       options.planHash !== undefined &&
       (state.pending!.planHash !== planHash || options.planHash !== planHash)
@@ -1038,6 +1044,8 @@ async function synchronizeWorkspace(
         const current = withNativeSnapshot(rem, fresh.get(id)!);
         if (revisionHash(current) !== revisionHash(rem))
           throw new Error(`Concurrent remote change on ${id}`);
+        if (!writesRemote && hash(cardIdentities(current)) !== hash(cardIdentities(rem)))
+          throw new Error(`Incoming Card identity changed on ${id}`);
         if (plainIds.has(id) && current.cards?.length !== 0)
           throw new Error(`New plain Rem acquired independent Cards: ${id}`);
         if (
