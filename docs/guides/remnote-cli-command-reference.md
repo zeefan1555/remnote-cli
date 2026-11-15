@@ -84,7 +84,8 @@ below is the authorized private vault's absolute path.
 | Explicit deletion | `remnote-cli sync delete DIR --id ID --scope-root ID` previews; execution additionally requires `--apply --plan-hash HASH`, destructive authorization and live gates |
 | Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
-| Recovery / uncertain result | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs after conflict/unknown, never replay uncertain writes |
+| Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
+| Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
 
 ### Scope and path selection
 
@@ -522,6 +523,44 @@ writes followed by validation or publication failure are not a zero-write failur
 and must be reconciled. A recovered local publication reports `status: "recovered"`,
 `complete: true`, `remoteWrites: 0` and the existing `ids`; it does not mean the
 original operation had zero remote writes.
+
+`sync resume DIR --plan-hash HASH` is a separate, explicit write entry point,
+not an automatic retry by `apply`. Ensure the original CLI writer has stopped;
+keep the source files, sealed baseline and original journal unchanged. Resume:
+
+1. Reconstructs the original plan offline from its bound local files, baseline
+   and selectors, requiring the same complete plan hash. Current remote edits
+   cannot silently turn this into a new plan.
+2. Folds the contiguous verified journal prefix and at most one final uncertain
+   step into its expected graph. It verifies the original immutable/Card guard,
+   exact native IDs, fields, flags, tags and both sides of ordered parent links.
+3. Recognizes an uncertain step only when its complete intended effect already
+   exists. Known creation IDs are reused; an unknown creation without an ID or a
+   setter still showing its before-state is refused, never replayed. A delayed
+   old SDK request cannot be ruled out merely by reading a before-state.
+4. Continues only never-attempted steps under the same journal, then uses normal
+   native verification and staged publication. A second interruption retains
+   those same identities. Repeating a published plan returns `already-complete`
+   with zero native calls/writes while its published baseline still matches.
+
+The bounded resume implementation accepts outgoing-only plans that reconstruct
+exactly; it does not resume deletion, incoming/converged or LWW-resolution plans.
+Different source bytes, malformed/noncontiguous steps or concurrent native edits
+require reconciliation outside this command. Do not delete state to bypass a
+refusal. A verified remote journal delegates to local-only recovery.
+
+Old journals do not record the creation-time Card identities of newly made Rems.
+Resume therefore validates their constructor/default shape plus recorded effects,
+including explicitly collected empty tags, and establishes their Card identity
+baseline at this exact readback. It does **not** prove those new Card IDs are the
+same as at the original creation; use any independent original receipt to check
+that history. The resumed receipt reports `resumed: true`, `recognizedSteps`,
+`existingCardsPreserved: true`, `newCardIdentityBaseline: "resume-readback"`, and
+`remoteWrites` counting mutation attempts in this invocation only. Already
+verified or recognized steps do not inflate that count. Newly observed Card IDs
+are protected during continuation. Review/scheduling metadata remains native-owned.
+All writes remain `atomic: false`: optimistic read-before/read-after checks are
+not server-side compare-and-set or an exactly-once promise.
 
 Development acceptance needs a frozen candidate, exclusive live ownership and
 the guarded integration wrapper. Exercise `scripts/sync-agent-acceptance.mjs`
