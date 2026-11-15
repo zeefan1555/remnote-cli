@@ -209,7 +209,12 @@ export const attributesSchema = z
     rems: z
       .record(
         shortBlockSchema,
-        z.object({ content: z.enum(['text', 'multiline']).optional() }).strict()
+        z
+          .object({
+            content: z.enum(['text', 'multiline']).optional(),
+            cardCluster: z.literal(true).optional(),
+          })
+          .strict()
       )
       .optional(),
   })

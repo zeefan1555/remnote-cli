@@ -12,6 +12,8 @@ import {
 } from './identity.js';
 import { WorkspaceLinks } from './links.js';
 import { wikiFromMarkdown, wikiSyntax, wikiToMarkdown } from './wiki-markdown.js';
+import { tagFromMarkdown, tagSyntax, tagToMarkdown } from './tag-markdown.js';
+import { renderTags, resolveTags, type TagIds } from './tags.js';
 import {
   nativeDetailsSchema,
   metadataSchema,
@@ -46,7 +48,7 @@ const MARKDOWN_OPTIONS: Options = {
   bullet: '-' as const,
   emphasis: '*' as const,
   strong: '*' as const,
-  extensions: [wikiToMarkdown],
+  extensions: [wikiToMarkdown, tagToMarkdown],
   handlers: {
     paragraph(node: Paragraph, parent, state, info) {
       const body = defaultHandlers.paragraph(node, parent, state, info),
@@ -58,7 +60,10 @@ const MARKDOWN_OPTIONS: Options = {
     },
   },
 };
-const PARSE_OPTIONS = { extensions: [wikiSyntax], mdastExtensions: [wikiFromMarkdown] };
+const PARSE_OPTIONS = {
+  extensions: [wikiSyntax, tagSyntax],
+  mdastExtensions: [wikiFromMarkdown, tagFromMarkdown],
+};
 
 function inline(
   value: unknown,
@@ -249,6 +254,7 @@ export function nativeMetadata(rem: WorkspaceRem): NativeMetadata {
 }
 
 export interface RenderOptions {
+  tagIds?: TagIds;
   blocks?: Map<string, string>;
   display?: Pick<WorkspaceMetadata, 'title' | 'aliases' | 'tags'>;
   attributes?: DocumentAttributes;
@@ -390,6 +396,9 @@ function renderParts(
       });
     // Empty rich-text segments are not visible content before an Obsidian block ID.
     front.children = front.children.filter((node) => node.type !== 'text' || node.value !== '');
+    if (!heading && options.tagIds)
+      for (const token of renderTags(rem.tags, options.tagIds))
+        front.children.push({ type: 'text', value: ' ' }, { type: 'obsidianTag', value: token });
     return [
       {
         type: heading ? 'heading' : 'paragraph',
@@ -431,8 +440,14 @@ function renderParts(
 
 export function renderDocument(...args: Parameters<typeof renderParts>): string {
   const { metadata, body } = renderParts(...args);
+  const attributes = { ...args[4]?.attributes };
+  if (args[4]?.tagIds) {
+    const tags = renderTags(args[2].get(args[0])!.tags, args[4].tagIds);
+    if (tags.length) attributes.tags = tags;
+    else delete attributes.tags;
+  }
   return (
-    renderFrontmatter(args[4]?.attributes) +
+    renderFrontmatter(attributes) +
     `<!-- remnote:${metadata.rems[metadata.root]!.block} -->\n\n` +
     body
   );
@@ -443,19 +458,22 @@ export function renderParsedDocument(
   ...args: Parameters<typeof renderParts>
 ): ReturnType<typeof parseOutline> {
   const { metadata, body } = renderParts(...args);
+  const attributes = { ...args[4]?.attributes };
+  if (args[4]?.tagIds) attributes.tags = renderTags(args[2].get(args[0])!.tags, args[4].tagIds);
   return parseOutline(
     {
       path: args[1],
       frontmatter: {
         metadata: metadataSchema.parse(metadata),
-        attributes: args[4]?.attributes ?? {},
+        attributes,
         body,
         bodyLine: 1,
         diagnostics: [],
       },
       tree: fromMarkdown(body, PARSE_OPTIONS),
     },
-    args[4]?.links
+    args[4]?.links,
+    args[4]?.tagIds
   );
 }
 
@@ -545,6 +563,14 @@ export function bindPreparedDocument(
   };
   for (const [block, attrs] of Object.entries(frontmatter.attributes.rems ?? {})) {
     const entry = Object.values(frontmatter.metadata.rems).find((entry) => entry.block === block);
+    if (entry && attrs.cardCluster)
+      frontmatter.diagnostics.push({
+        path: source.path,
+        line: 1,
+        code: 'IMMUTABLE_STRUCTURE',
+        message:
+          'cardCluster is a creation-only intent; existing native capabilities cannot be changed',
+      });
     if (entry && attrs.content !== undefined && attrs.content !== entry.content)
       frontmatter.diagnostics.push({
         path: source.path,
@@ -560,7 +586,8 @@ export function parseDocument(
   path: string,
   source: string,
   metadata?: WorkspaceMetadata,
-  suppliedLinks?: WorkspaceLinks
+  suppliedLinks?: WorkspaceLinks,
+  tagIds: TagIds = {}
 ): { document: ParsedDocument; diagnostics: Diagnostic[] } {
   const prepared = prepareDocument(path, source);
   if (!metadata) {
@@ -570,22 +597,26 @@ export function parseDocument(
       code: 'IDENTITY',
       message: 'Parsing requires the sealed document identity and native baseline',
     });
-    return parsePreparedDocument(prepared, suppliedLinks);
+    return parsePreparedDocument(prepared, suppliedLinks, tagIds);
   }
-  return parsePreparedDocument(bindPreparedDocument(prepared, metadata), suppliedLinks);
+  return parsePreparedDocument(bindPreparedDocument(prepared, metadata), suppliedLinks, tagIds);
 }
 
 export function parsePreparedDocument(
   source: PreparedDocument,
-  suppliedLinks?: WorkspaceLinks
+  suppliedLinks?: WorkspaceLinks,
+  tagIds: TagIds = {},
+  native?: Map<string, WorkspaceRem>
 ): { document: ParsedDocument; diagnostics: Diagnostic[] } {
-  const result = parseOutline(source, suppliedLinks);
+  const result = parseOutline(source, suppliedLinks, tagIds, native);
   return { ...result, document: { ...result.document, fileHash: source.fileHash } };
 }
 
 function parseOutline(
   source: Omit<PreparedDocument, 'fileHash'>,
-  suppliedLinks?: WorkspaceLinks
+  suppliedLinks?: WorkspaceLinks,
+  tagIds: TagIds = {},
+  native?: Map<string, WorkspaceRem>
 ): { document: ParsedOutline; diagnostics: Diagnostic[] } {
   const { path, frontmatter, tree } = source,
     diagnostics = [...frontmatter.diagnostics];
@@ -744,13 +775,39 @@ function parseOutline(
         metadata!.rems[key] = { id: null, block: blockId, content: kind as 'text' | 'multiline' };
     }
     const extra = blocks.slice(1).filter((node) => node.type !== 'list');
+    const tokens: string[] = heading ? [...(frontmatter.attributes?.tags ?? [])] : [];
+    function extractTags(nodes: PhrasingContent[]): PhrasingContent[] {
+      const kept: PhrasingContent[] = [];
+      for (const child of nodes) {
+        if (child.type === 'obsidianTag') {
+          tokens.push(child.value);
+          const prior = kept.at(-1);
+          if (prior?.type === 'text') prior.value = prior.value.replace(/ $/, '');
+        } else {
+          if (child.type === 'strong' || child.type === 'emphasis')
+            child.children = extractTags(child.children);
+          kept.push(child);
+        }
+      }
+      return kept.filter((node) => node.type !== 'text' || node.value !== '');
+    }
+    const contentChildren = extractTags(children);
+    let tags: string[] | undefined;
+    try {
+      tags = resolveTags(tokens, tagIds, native);
+    } catch (error) {
+      fail(line, 'TAG', error instanceof Error ? error.message : String(error));
+    }
+    const knownTags = metadata!.rems[key];
+    if (!tokens.length && knownTags?.id !== null && knownTags?.native.tags === null)
+      tags = undefined;
     let text: unknown[] = [],
       backText: unknown[] = [];
     if (kind !== 'opaque' && kind !== 'mount') {
       if (
         extra.length === 1 &&
         extra[0]?.type === 'code' &&
-        !children.length &&
+        !contentChildren.length &&
         kind === 'text' &&
         !heading &&
         !extra[0].meta &&
@@ -765,7 +822,7 @@ function parseOutline(
           },
         ];
       else {
-        text = readInline(children);
+        text = readInline(contentChildren);
         if (
           kind === 'basic' &&
           extra.length === 1 &&
@@ -781,12 +838,33 @@ function parseOutline(
             'A Rem is one paragraph, one fenced code block, or an existing basic front plus blockquote back'
           );
       }
-      if ((kind === 'multiline' || kind === 'basic' || key.startsWith('new:')) && !text.length)
+      const emptyAnswer =
+        key.startsWith('new:') &&
+        kind === 'text' &&
+        parent &&
+        metadata!.rems[parent]?.content === 'multiline';
+      if (
+        (kind === 'multiline' || kind === 'basic' || (key.startsWith('new:') && !emptyAnswer)) &&
+        !text.length
+      )
         fail(line, 'EMPTY_QUESTION', 'New notes and card questions cannot be empty');
       if (kind === 'basic' && !backText.length)
         fail(line, 'EMPTY_ANSWER', 'Basic card answer cannot be empty');
     }
     const own = blocks.filter((node) => node.type !== 'list');
+    const cardCluster = frontmatter.attributes?.rems?.[blockId]?.cardCluster;
+    if (
+      cardCluster &&
+      (!key.startsWith('new:') ||
+        kind !== 'text' ||
+        !parent ||
+        metadata!.rems[parent]?.content === 'multiline')
+    )
+      fail(
+        line,
+        'CARD_CLUSTER',
+        'cardCluster:true is only supported on a new ordinary text topic, not a root or card item'
+      );
     const node: OutlineNode = {
       key,
       blockId,
@@ -795,6 +873,8 @@ function parseOutline(
       kind,
       text,
       backText,
+      ...(tags === undefined ? {} : { tags }),
+      ...(cardCluster ? { cardCluster } : {}),
       children: [],
       contentHash:
         kind === 'mount'

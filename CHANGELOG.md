@@ -9,6 +9,24 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Standard Obsidian direct-tag projection: document YAML tags and per-bullet inline
+  tags bind one-to-one to native Tag RemIDs. Independent membership deltas merge
+  separately from body clocks; removal preserves properties and obeys the existing
+  explicit destructive capability gate before any write. Old unbound projection
+  requires explicit clean format; unknown/ambiguous tokens fail closed.
+- Default changed sync probes all selected bound IDs for remote-only content/tag
+  edits without a full history read for clean Rems. Per-mutation verification uses
+  its bounded target/card closure with full boundaries retained before/finally.
+- `sync read` includes a structured local/native outline. Exact-file
+  `sync apply --expected-file-hash` returns full same-invocation native evidence,
+  including zero-write audits, CardIDs/history hashes and checked Powerup codes.
+  Ordinary probe-only no-op receipts make no full-history claim.
+- New topics can request `rems.<anchor>.cardCluster: true` in the same sync as
+  their cards; native cc is journaled, checked and the creation intent consumed.
+  Unused existing tags resolve only through unique complete sealed native paths.
+  Guarded resume retains original input/nativeBefore proof and validates it before
+  exact-ID recovery; missing acknowledgments never cause automatic mutation replay.
+
 - Offline `sync relocate OLD NEW` moves a private vault and rebinds its authoritative
   manifest without touching notes, identities, history or native RemNote. Exact
   inode-bound receipts preserve recoverability through local failure windows;

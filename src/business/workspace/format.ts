@@ -11,12 +11,14 @@ import {
 } from './markdown.js';
 import {
   metadataSchema,
+  parseFrontmatter,
   readMetadataYaml,
   type DocumentAttributes,
   type WorkspaceMetadata,
 } from './metadata.js';
 import { requireNoPublication, stageSnapshot } from './publication.js';
 import { hash, type ParsedDocument, type ParsedOutline, type WorkspaceState } from './types.js';
+import { registerTags } from './tags.js';
 
 /** Explicit offline canonical rendering of a sealed publication. Daily sync has no legacy fallback. */
 export async function formatWorkspace(directory: string) {
@@ -36,7 +38,35 @@ export async function formatWorkspace(directory: string) {
       attributes = new Map<string, DocumentAttributes>(),
       blocks = new Map<string, string>();
     let sources: Map<string, ParsedDocument> | undefined;
-    if (human) {
+    if (human && !previous.tagIds) {
+      if (hash(JSON.parse(await input.inputs.read(IDENTITY))) !== hash(workspaceIdentity(previous)))
+        throw new Error('Format refuses a modified identity projection');
+      const files = input.inputs.paths.filter(isContentMarkdown);
+      if (files.length !== Object.keys(previous.documents).length)
+        throw new Error('Format refuses missing or untracked documents');
+      for (const path of files) {
+        const source = await input.inputs.read(path),
+          document = previous.documents[path];
+        if (!document || hash(source) !== document.fileHash)
+          throw new Error(
+            'Format refuses locally edited source; preserve and reconcile edits first'
+          );
+        const header = parseFrontmatter(path, source);
+        if (
+          header.diagnostics.length ||
+          !header.attributes ||
+          header.documentKey !== previous.entries[document.rootId]!.blockId
+        )
+          throw new Error('Format refuses an inconsistent document binding');
+        if (header.attributes.tags?.length)
+          throw new Error(
+            'Unbound display-only YAML tags require an explicit user decision before native tag projection'
+          );
+        paths.set(document.rootId, path);
+        attributes.set(document.rootId, header.attributes);
+      }
+      for (const [id, entry] of Object.entries(previous.entries)) blocks.set(id, entry.blockId);
+    } else if (human) {
       const local = await inspectLocal(root, previous, new Map(), input.inputs);
       if (local.diagnostics.length)
         throw new Error(`Format refused: ${local.diagnostics[0]!.code}`);
@@ -58,6 +88,10 @@ export async function formatWorkspace(directory: string) {
         const yaml = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
         if (!yaml) throw new Error(`Format requires a sealed legacy YAML document: ${path}`);
         const metadata = metadataSchema.parse(readMetadataYaml(yaml[1]!));
+        if (metadata.tags.length)
+          throw new Error(
+            'Unbound display-only YAML tags require an explicit user decision before native tag projection'
+          );
         const old = expected.get(metadata.root);
         if (!old || paths.has(metadata.root) || old.fileHash !== hash(source))
           throw new Error(
@@ -107,7 +141,11 @@ export async function formatWorkspace(directory: string) {
         }),
       }))
     );
-    const next: WorkspaceState = { ...structuredClone(previous), documents: {} };
+    const next: WorkspaceState = {
+      ...structuredClone(previous),
+      documents: {},
+      tagIds: registerTags(input.native, previous.tagIds),
+    };
     const writes = new Map<string, string | null>();
     for (const [id, path] of paths) {
       const options = {
@@ -116,6 +154,7 @@ export async function formatWorkspace(directory: string) {
         links,
         display: display(id),
         attributes: attributes.get(id),
+        tagIds: next.tagIds,
       };
       const result = renderParsedDocument(id, path, input.native, paths, options);
       if (result.diagnostics.length)

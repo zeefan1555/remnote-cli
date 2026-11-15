@@ -38,6 +38,10 @@ function fixture(count = 2) {
       getPortalType: vi.fn(async () => 0),
       getPortalDirectlyIncludedRem: vi.fn(async () => []),
       getTagRems: vi.fn(async () => []),
+      addTag: vi.fn(async () => {}),
+      removeTag: vi.fn(async () => {}),
+      addPowerup: vi.fn(async () => {}),
+      hasPowerup: vi.fn(async () => false),
       setText: vi.fn(async (value) => {
         object.text = value;
       }),
@@ -88,6 +92,46 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('uses exact tag IDs and preserves properties on removal behind both existing destructive gates', async () => {
+    const f = fixture();
+    await f.backend.addTag('r1', 'r0');
+    expect(f.flags.get('r1')!.addTag).toHaveBeenCalledWith('r0');
+    await f.backend.removeTag('r1', 'r0');
+    expect(f.flags.get('r1')!.removeTag).toHaveBeenCalledWith('r0', false);
+    f.status.mockResolvedValue({ kbId: 'kb', writable: true, destructive: false });
+    await expect(f.backend.removeTag('r1', 'r0')).rejects.toThrow(/destructive|gate/i);
+    expect(f.flags.get('r1')!.removeTag).toHaveBeenCalledTimes(1);
+  });
+  it('uses cc SDK capability and reads explicit hasPowerup facts even on the cheap probe path', async () => {
+    const f = fixture();
+    await f.backend.setCardCluster('r1');
+    expect(f.flags.get('r1')!.addPowerup).toHaveBeenCalledWith('cc');
+    f.flags.get('r1')!.hasPowerup!.mockResolvedValue(true);
+    expect(await f.backend.readProbe(['r1'], { powerupCodes: { r1: ['cc'] } })).toMatchObject([
+      { powerupPresence: { cc: true } },
+    ]);
+    expect(f.flags.get('r1')!.getCards).not.toHaveBeenCalled();
+    expect((await f.backend.read(['r1'], { powerupCodes: { r1: ['cc'] } }))[0]).toMatchObject({
+      powerupPresence: { cc: true },
+    });
+    f.flags.get('r1')!.hasPowerup!.mockResolvedValue(undefined);
+    await expect(f.backend.readProbe(['r1'], { powerupCodes: { r1: ['cc'] } })).rejects.toThrow();
+  });
+  it('probes exact public content and direct tags without native flags or cards', async () => {
+    const f = fixture();
+    f.flags.get('r1')!.getTagRems!.mockResolvedValue([{ _id: 'tag' }]);
+    const result = await f.backend.readProbe(['r0', 'r1']);
+    expect(result.map((row) => [row.snapshot.id, row.tags])).toEqual([
+      ['r0', []],
+      ['r1', ['tag']],
+    ]);
+    expect(f.findMany).toHaveBeenCalledTimes(1);
+    for (const methods of f.flags.values()) {
+      expect(methods.getCards).not.toHaveBeenCalled();
+      expect(methods.isDocument).not.toHaveBeenCalled();
+      expect(methods.getTagRems).toHaveBeenCalledTimes(1);
+    }
+  });
   it('collects exact tags only when requested for resume verification', async () => {
     const f = fixture(),
       tags = f.flags.get('r1')!.getTagRems!;

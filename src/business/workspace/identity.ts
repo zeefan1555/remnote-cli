@@ -12,6 +12,7 @@ export const identitySchema = z
   .object({
     schema: z.literal('remnote-identity/1'),
     kbId: z.string().min(1),
+    tagIds: z.record(z.string(), idSchema).optional(),
     documents: z.record(
       shortBlockSchema,
       z
@@ -68,7 +69,12 @@ export function workspaceIdentity(state: WorkspaceState): z.infer<typeof identit
   }
   if (mapped.size !== Object.keys(state.entries).length)
     throw new Error('Identity map does not cover the native baseline');
-  return identitySchema.parse({ schema: 'remnote-identity/1', kbId: state.kbId, documents });
+  return identitySchema.parse({
+    schema: 'remnote-identity/1',
+    kbId: state.kbId,
+    documents,
+    ...(state.tagIds ? { tagIds: state.tagIds } : {}),
+  });
 }
 
 export function recordPath(id: string): string {

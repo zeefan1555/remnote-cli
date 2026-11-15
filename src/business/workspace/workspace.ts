@@ -43,8 +43,15 @@ import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
-import { foldResume, verifyResumeReadback, type Journal } from './resume.js';
+import { foldResume, guardedBinding, verifyResumeReadback, type Journal } from './resume.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
+import {
+  knownPowerupCodes,
+  nativeOutline,
+  nativeProof,
+  outlineIds,
+  workspaceOutline,
+} from './outline.js';
 import {
   readPublication,
   requireNoPublication,
@@ -81,6 +88,7 @@ export async function readWorkspace(directory: string, path: string) {
       path,
       content,
       fileHash: hash(content),
+      outline: workspaceOutline(local, path),
       remoteWrites: 0,
     };
   });
@@ -360,6 +368,10 @@ export async function statusWorkspace(directory: string): Promise<unknown> {
 export function planLocal(context: LocalContext, options: DeleteOptions = {}): WorkspacePlan {
   if (!context.state.complete)
     throw new Error('Workspace is incomplete; its declared scope must be reconciled before sync');
+  if (!context.state.tagIds)
+    throw new Error(
+      'Tag projection is not initialized; run explicit sync format on a clean sealed vault before syncing'
+    );
   if (context.diagnostics.length)
     throw new Error(
       context.diagnostics.map((d) => `${d.path}:${d.line} / ${d.code} / ${d.message}`).join('\n')
@@ -382,11 +394,21 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
         native = context.native.get(node.key),
         parent = node.parent ? nodes.get(node.parent) : undefined;
       const fields: WorkspaceChange['fields'] = {};
+      const beforeTags = before?.tags;
+      const tags =
+        node.tags && hash(beforeTags ?? []) !== hash(node.tags)
+          ? { before: beforeTags ?? [], after: node.tags }
+          : undefined;
+      if (tags && native && !Array.isArray(native.tags))
+        throw new Error(
+          `${path}:${node.line} / TAG_BASELINE / Native direct tags have not been collected`
+        );
       if (!before || hash(before.text) !== hash(node.text)) fields.text = node.text;
       if (node.kind === 'basic' && (!before || hash(before.backText) !== hash(node.backText)))
         fields.backText = node.backText;
       if (
         !Object.keys(fields).length &&
+        !tags &&
         context.state.localVersions?.[node.key]?.contentHash !== hash(nodeContent(node, native))
       )
         continue;
@@ -397,8 +419,10 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
         position: parent ? parent.children.indexOf(node.key) : 0,
         kind: node.kind,
         cardItem: before ? native!.cardItem === true : parent?.kind === 'multiline',
+        ...(node.cardCluster ? { cardCluster: true } : {}),
         ...(native ? { beforeHash: hash(native) } : {}),
         fields,
+        ...(tags ? { tags } : {}),
       });
     }
   }
@@ -442,12 +466,12 @@ export async function diffWorkspace(
 async function readExact(
   backend: WorkspaceBackend,
   ids: string[],
-  options?: { tags?: boolean }
+  options?: Parameters<WorkspaceBackend['read']>[1]
 ): Promise<Map<string, WorkspaceRem>> {
   const result = new Map<string, WorkspaceRem>();
   for (let start = 0; start < ids.length; start += 50) {
     const batch = ids.slice(start, start + 50),
-      rems = options ? await backend.read(batch, options) : await backend.read(batch);
+      rems = await backend.read(batch, { tags: true, ...options });
     if (rems.length !== batch.length) throw new Error('Incomplete exact-ID native read');
     for (const rem of rems) {
       if (!batch.includes(rem.id) || result.has(rem.id))
@@ -459,7 +483,11 @@ async function readExact(
   return result;
 }
 
-function affectedIds(plan: SyncPlan, native: Map<string, WorkspaceRem>): string[] {
+function affectedIds(
+  plan: SyncPlan,
+  native: Map<string, WorkspaceRem>,
+  metadataIds: string[] = []
+): string[] {
   const ids = new Set<string>();
   if (plan.deletion) {
     for (const id of plan.deletion.ids) ids.add(id);
@@ -494,7 +522,7 @@ function affectedIds(plan: SyncPlan, native: Map<string, WorkspaceRem>): string[
       }
     }
   for (const id of [
-    ...(plan.selection?.reconcileIds ?? []),
+    ...(plan.selection?.scope === 'all' ? plan.selection.reconcileIds : metadataIds),
     ...(plan.selection?.verificationIds ?? []),
   ])
     if (native.has(id) && native.get(id)!.unsupported !== 'unverified-native-flags') ids.add(id);
@@ -538,7 +566,8 @@ async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
 export async function pushWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: DeleteOptions & SelectionOptions & { apply?: boolean; planHash?: string } = {}
+  options: DeleteOptions &
+    SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string } = {}
 ): Promise<unknown> {
   return synchronizeWorkspace(directory, backendFactory, options);
 }
@@ -553,10 +582,69 @@ export async function resumeWorkspace(
     throw new Error('Resume requires the exact original --plan-hash');
   const root = await workspaceDirectory(directory),
     state = await authoritativeState(root);
-  if (state.pending?.planHash === planHash) {
-    const journal = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
-    if (journal?.state === 'verified' && journal.final)
-      return recoverWorkspace(root, backendFactory);
+  const key = `workspace-v2:${state.kbId}:${hash(root)}:${planHash}`;
+  const journal = await localStore(state.kbId).getLocal<Journal>(key);
+  if (journal?.state === 'verified' && journal.final) {
+    const binding = guardedBinding(journal);
+    if (state.pending?.planHash === planHash || (await readPublication(root))) {
+      const result = await recoverWorkspace(root, backendFactory);
+      if (!binding) return result;
+    }
+    if (binding)
+      return withWorkspaceLock(root, async () => {
+        await requireNoPublication(root);
+        const context = await inspectLocal(root);
+        if (context.diagnostics.length || context.dirty.length || context.state.pending)
+          throw new Error(
+            'Guarded resume receipt requires the unchanged successfully published baseline'
+          );
+        const frozen = await context.inputs.freeze(),
+          backend = await backendFactory();
+        if ((await backend.identity()).kbId !== context.state.kbId)
+          throw new Error('Resume receipt KB mismatch');
+        const remote = await readExact(backend, Object.keys(journal.final!.hashes), {
+          powerupCodes: knownPowerupCodes(context.native),
+        });
+        for (const [id, rem] of remote) {
+          const baseline = context.native.get(id);
+          const current = baseline ? withNativeSnapshot(baseline, rem) : rem;
+          if (
+            !baseline ||
+            publicationRevisionHash(current) !== journal.final!.hashes[id] ||
+            Object.entries(baseline.powerupPresence ?? {}).some(
+              ([code, present]) => rem.powerupPresence?.[code] !== present
+            )
+          )
+            throw new Error(`Native state changed after guarded publication: ${id}`);
+          remote.set(id, current);
+        }
+        await frozen.check();
+        return {
+          status: 'verified',
+          complete: true,
+          resumed: true,
+          existingCardsPreserved: true,
+          planHash,
+          ids: journal.ids,
+          remoteWrites: 0,
+          verification: {
+            fileHash: binding.fileHash,
+            planHash,
+            nativeBefore: journal.proof!.nativeBefore,
+            nativeAfter: Object.fromEntries([...remote].map(([id, rem]) => [id, nativeProof(rem)])),
+            observedHashes: Object.fromEntries(
+              [...remote].map(([id, rem]) => [
+                id,
+                nativeOutline(rem, new Map([...context.native, ...remote])).revisionHash,
+              ])
+            ),
+          },
+          outline: workspaceOutline(
+            { ...context, native: new Map([...context.native, ...remote]) },
+            binding.path
+          ),
+        };
+      });
   }
   return synchronizeWorkspace(root, backendFactory, { apply: true, planHash }, planHash);
 }
@@ -564,7 +652,8 @@ export async function resumeWorkspace(
 async function synchronizeWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: DeleteOptions & SelectionOptions & { apply?: boolean; planHash?: string },
+  options: DeleteOptions &
+    SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string },
   resumeHash?: string
 ): Promise<unknown> {
   if (options.deleteId || options.scopeRoot) {
@@ -616,9 +705,38 @@ async function synchronizeWorkspace(
         planHash: resumeHash,
         scope: resuming.selection.scope,
         paths: resuming.selection.paths,
+        ...(guardedBinding(resuming)
+          ? { expectedFileHash: guardedBinding(resuming)!.fileHash }
+          : {}),
       };
     }
+    const proofPath = options.expectedFileHash === undefined ? undefined : options.paths?.[0];
+    if (options.expectedFileHash !== undefined) {
+      if (
+        !options.apply ||
+        options.deleteId ||
+        options.scopeRoot ||
+        options.paths?.length !== 1 ||
+        !proofPath ||
+        !/^[a-f0-9]{64}$/.test(options.expectedFileHash) ||
+        context.parsed.get(proofPath)?.fileHash !== options.expectedFileHash
+      )
+        throw new Error(
+          'Guarded apply requires one exact --path and its current --expected-file-hash from sync read; no native calls were made'
+        );
+      options = { ...options, scope: 'all' };
+    }
     const localPlan = await selectPlan(context, planLocal(context, options), options);
+    if (resuming?.proof) localPlan.guarded = guardedBinding(resuming);
+    if (proofPath)
+      localPlan.selection.verificationIds = [
+        ...new Set([
+          ...localPlan.selection.verificationIds,
+          ...outlineIds(context, proofPath).filter(
+            (id) => !localPlan.selection.reconcileIds.includes(id)
+          ),
+        ]),
+      ].sort();
     if (localPlan.changes.length > 100)
       throw new Error('One sync is limited to 100 changed/new nodes; narrow --path or split edits');
     let stateHash = hash(state);
@@ -744,12 +862,35 @@ async function synchronizeWorkspace(
       identity = await backend.identity();
     if (identity.kbId !== state.kbId)
       throw new Error('Connected KB does not match workspace binding');
-    const remote = rebuiltRemote ?? (await readRemote(context, localPlan, backend)),
-      { plan, metadataChanged, remoteVersions } =
+    const remote =
+      rebuiltRemote ??
+      (await readRemote(context, localPlan, backend, knownPowerupCodes(context.native)));
+    const nativeBefore = proofPath
+      ? (resuming?.proof?.nativeBefore ??
+        Object.fromEntries([...remote].map(([id, rem]) => [id, nativeProof(rem)])))
+      : undefined;
+    if (proofPath && !resuming)
+      localPlan.guarded = {
+        path: proofPath,
+        fileHash: options.expectedFileHash!,
+        beforeHash: hash(nativeBefore),
+      };
+    const { plan, metadataChanged, remoteVersions } =
         reconstructed ?? reconcile(context, localPlan, remote),
       planHash = hash(plan);
     const selection = plan.selection!;
+    const removesTags = plan.changes.some((change) =>
+      change.tags?.before.some((tag) => !change.tags!.after.includes(tag))
+    );
+    if (options.apply && removesTags && !identity.destructive)
+      throw new Error(
+        'Removing native tag associations requires explicit --allow-destructive and the existing plugin replace gate; no writes were started. Properties and Rem entities are never deleted by tag sync'
+      );
     coverage.selection = selection;
+    coverage.checkedIds = [
+      ...new Set([...selection.reconcileIds, ...selection.verificationIds]),
+    ].sort();
+    coverage.checkedCount = coverage.checkedIds.length;
     if (
       options.planHash !== undefined &&
       (state.pending!.planHash !== planHash || options.planHash !== planHash)
@@ -801,6 +942,7 @@ async function synchronizeWorkspace(
       !plan.incoming.length &&
       !plan.converged.length &&
       !metadataChanged.length &&
+      !proofPath &&
       !context.dirty.some((path) => selection.files.includes(path))
     )
       return { status: 'unchanged', complete: true, changes: 0, remoteWrites: 0, ...coverage };
@@ -818,16 +960,21 @@ async function synchronizeWorkspace(
       throw new Error(
         'Prior write outcome requires exact-ID reconciliation; automatic replay is forbidden'
       );
-    const existingIds = affectedIds(plan, remote);
+    const existingIds = affectedIds(plan, remote, metadataChanged);
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     const protectedIds = existingIds.filter((id) => !plan.deletion?.ids.includes(id));
     const guardHash = await backend.guard(protectedIds);
     if (journal && journal.guardHash !== guardHash)
       throw new Error('Native card identity or immutable flags changed since preview');
     if (folded) {
-      const fresh = await readExact(backend, existingIds);
+      const fresh = await readExact(backend, existingIds, {
+        powerupCodes: knownPowerupCodes(expected),
+      });
       const createdIds = Object.values(resuming!.ids);
-      for (const [id, rem] of await readExact(backend, createdIds, { tags: true }))
+      for (const [id, rem] of await readExact(backend, createdIds, {
+        tags: true,
+        powerupCodes: knownPowerupCodes(expected),
+      }))
         fresh.set(id, rem);
       expected = verifyResumeReadback(expected, fresh, new Set(createdIds));
       // Only exact-after is recognized. Exact-before cannot rule out a delayed old SDK write.
@@ -844,6 +991,7 @@ async function synchronizeWorkspace(
       steps: {},
       ids: {},
       selection,
+      ...(nativeBefore ? { proof: { plan: structuredClone(plan), nativeBefore } } : {}),
     };
     await store.setLocal(key, journal);
     state.pending = { planHash, journalKey: key };
@@ -861,6 +1009,12 @@ async function synchronizeWorkspace(
         metadataRefresh: metadataChanged,
         resolutions,
         deletion: plan.deletion,
+        tagChanges: plan.changes
+          .filter((change) => change.tags)
+          .map((change) => ({ key: change.key, ...change.tags! })),
+        requiredPermissions: removesTags
+          ? ['allow-destructive', 'plugin.acceptReplaceOperation']
+          : [],
         atomic: false,
         remoteWrites: 0,
         ...coverage,
@@ -877,36 +1031,76 @@ async function synchronizeWorkspace(
     const structuralIds = folded?.structuralIds ?? new Set<string>();
     let remoteWrites = 0;
     let checkedWriteBoundary = false;
-    async function preflight(): Promise<void> {
+    function boundaryIds(step?: string): string[] {
+      if (!step) return [...expected.keys()];
+      const change = plan.changes.find((item) => step.startsWith(`${item.key}:`));
+      if (!change) return [...expected.keys()];
+      const id = journal!.ids[change.key] ?? change.key,
+        ids = new Set<string>();
+      const include = (key: string | null | undefined) => {
+        if (!key || !expected.has(key)) return;
+        const rem = expected.get(key)!;
+        ids.add(key);
+        if (rem.cardItem && rem.parent) ids.add(rem.parent);
+        if (Array.isArray(rem.backText))
+          for (const child of rem.children) if (expected.has(child)) ids.add(child);
+      };
+      include(id);
+      for (const tag of change.tags?.after ?? []) {
+        for (
+          let ancestor: string | null = tag;
+          ancestor && expected.has(ancestor);
+          ancestor = expected.get(ancestor)!.parent
+        )
+          include(ancestor);
+      }
+      if (change.key.startsWith('new:'))
+        include(change.parent?.startsWith('new:') ? journal!.ids[change.parent] : change.parent);
+      return [...ids];
+    }
+    async function preflight(step?: string): Promise<void> {
       await checkFiles(root, plan);
       const createdIds = resuming ? new Set(Object.values(journal!.ids)) : new Set<string>();
+      const scopedIds = boundaryIds(step);
       const fresh = await readExact(
         backend,
-        [...expected.keys()].filter((id) => !createdIds.has(id))
+        scopedIds.filter((id) => !createdIds.has(id)),
+        { powerupCodes: knownPowerupCodes(expected) }
       );
       if (resuming) {
-        for (const [id, rem] of await readExact(backend, [...createdIds], { tags: true }))
+        for (const [id, rem] of await readExact(
+          backend,
+          scopedIds.filter((id) => createdIds.has(id)),
+          { tags: true, powerupCodes: knownPowerupCodes(expected) }
+        ))
           fresh.set(id, rem);
       }
-      for (const [id, rem] of expected) {
+      for (const id of scopedIds) {
+        const rem = expected.get(id)!;
         const current = withNativeSnapshot(rem, fresh.get(id)!);
         if (revisionHash(current) !== revisionHash(rem))
           throw new Error(`Concurrent remote change on ${id}`);
         if (
-          createdIds.has(id) &&
-          rem.cards?.length &&
+          Object.keys(rem.powerupPresence ?? {}).some(
+            (code) => fresh.get(id)!.powerupPresence?.[code] !== rem.powerupPresence![code]
+          )
+        )
+          throw new Error(`Concurrent native Powerup change on ${id}`);
+        if (
+          !plan.deletion?.ids.includes(id) &&
+          (context.native.has(id) || (createdIds.has(id) && rem.cards?.length)) &&
           hash(cardIdentities(current)) !== hash(cardIdentities(rem))
         )
           throw new Error(`New card identity changed after resume readback: ${id}`);
         fresh.set(id, current);
       }
-      if ((await backend.guard(protectedIds)) !== guardHash)
+      if (!step && (await backend.guard(protectedIds)) !== guardHash)
         throw new Error('Existing card identity or immutable flags changed');
       const identity = await backend.identity();
       if (
         identity.kbId !== state.kbId ||
         (writesRemote && !identity.writable) ||
-        (plan.deletion && !identity.destructive)
+        ((plan.deletion || removesTags) && !identity.destructive)
       )
         throw new Error('Live KB/write permission changed');
       if (!checkedWriteBoundary) {
@@ -925,19 +1119,20 @@ async function synchronizeWorkspace(
       after: (value: T) => Promise<void>
     ): Promise<void> {
       if (resuming && journal!.steps[step] === 'verified') return;
-      await preflight();
+      await preflight(step);
       active = step;
       journal!.steps[step] = 'started';
       await store.setLocal(key, journal);
       remoteWrites++;
       const value = await fn();
       await after(value);
-      await preflight();
+      await preflight(step);
       journal!.steps[step] = 'verified';
       await store.setLocal(key, journal);
       active = undefined;
     }
     try {
+      await preflight();
       await checkPublicRevision(backend, remote);
       for (const id of plan.deletion?.ids ?? []) {
         await mutate(
@@ -978,7 +1173,10 @@ async function synchronizeWorkspace(
               journal!.ids[change.key] = created;
               await store.setLocal(key, journal);
               const rem = (
-                await readExact(backend, [created], resuming ? { tags: true } : undefined)
+                await readExact(backend, [created], {
+                  tags: true,
+                  ...(change.cardCluster ? { powerupCodes: { [created]: ['cc'] } } : {}),
+                })
               ).get(created)!;
               if (
                 rem.parent !== null ||
@@ -987,6 +1185,7 @@ async function synchronizeWorkspace(
                 rem.folder ||
                 rem.type !== null ||
                 rem.unsupported ||
+                (change.cardCluster && rem.powerupPresence?.cc !== false) ||
                 (Array.isArray(rem.text) &&
                   rem.text.some(
                     (part) => part && typeof part === 'object' && 'i' in part && part.i === 's'
@@ -1011,7 +1210,40 @@ async function synchronizeWorkspace(
             }
           );
         }
+        if (change.tags) {
+          for (const [operation, tags] of [
+            ['remove', change.tags.before.filter((tag) => !change.tags!.after.includes(tag))],
+            ['add', change.tags.after.filter((tag) => !change.tags!.before.includes(tag))],
+          ] as const) {
+            for (const tag of tags)
+              await mutate(
+                `${change.key}:tag:${operation}:${tag}`,
+                () => (operation === 'add' ? backend.addTag(id, tag) : backend.removeTag(id, tag)),
+                async () => {
+                  const current = expected.get(id)!;
+                  if (!Array.isArray(current.tags))
+                    throw new Error('Native tags must be known before a relationship write');
+                  expected.set(id, {
+                    ...current,
+                    tags:
+                      operation === 'add'
+                        ? [...new Set([...current.tags, tag])].sort()
+                        : current.tags.filter((value) => value !== tag),
+                  });
+                }
+              );
+          }
+        }
         if (isNew) {
+          if (change.cardCluster)
+            await mutate(
+              `${change.key}:cardCluster`,
+              () => backend.setCardCluster(id),
+              async () => {
+                const rem = expected.get(id)!;
+                expected.set(id, { ...rem, powerupPresence: { ...rem.powerupPresence, cc: true } });
+              }
+            );
           const parent = change.parent?.startsWith('new:')
             ? journal.ids[change.parent]
             : change.parent;
@@ -1093,11 +1325,32 @@ async function synchronizeWorkspace(
         journal.ids,
         selection
       );
+      const verification = proofPath
+        ? {
+            fileHash: options.expectedFileHash!,
+            planHash,
+            nativeBefore,
+            nativeAfter: Object.fromEntries([...remote].map(([id, rem]) => [id, nativeProof(rem)])),
+            observedHashes: Object.fromEntries(
+              [...remote].map(([id, rem]) => [
+                id,
+                nativeOutline(rem, new Map([...context.native, ...remote])).revisionHash,
+              ])
+            ),
+          }
+        : undefined;
+      const outline = proofPath
+        ? workspaceOutline(
+            { ...(await inspectLocal(root)), native: new Map([...context.native, ...remote]) },
+            proofPath
+          )
+        : undefined;
       return {
         status: 'verified',
         complete: true,
         planHash,
         ids: journal.ids,
+        ...(verification ? { verification, outline } : {}),
         updated: plan.changes
           .filter((change) => !change.key.startsWith('new:'))
           .map((change) => change.key),
@@ -1191,13 +1444,18 @@ export async function recoverWorkspace(
       journal.selection.outgoingKeys.includes(change.key)
     );
     localPlan.selection = journal.selection;
-    const rems = await readRemote(local, localPlan, backend);
-    for (const [id, rem] of await readExact(
-      backend,
-      Object.values(journal.ids),
-      journal.resumed ? { tags: true } : undefined
-    ))
+    const codes = knownPowerupCodes(local.native);
+    for (const change of localPlan.changes)
+      if (change.cardCluster && journal.ids[change.key]) codes[journal.ids[change.key]!] = ['cc'];
+    const rems = await readRemote(local, localPlan, backend, codes);
+    for (const [id, rem] of await readExact(backend, Object.values(journal.ids), {
+      tags: true,
+      powerupCodes: codes,
+    }))
       rems.set(id, rem);
+    for (const change of localPlan.changes)
+      if (change.cardCluster && rems.get(journal.ids[change.key]!)?.powerupPresence?.cc !== true)
+        throw new Error('Created Card Cluster changed after verification');
     if (rems.size !== Object.keys(journal.final.hashes).length)
       throw new Error('Remote ID set changed after verified sync');
     for (const [id, rem] of rems)

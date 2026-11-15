@@ -211,11 +211,19 @@ limits: RemNote `updatedAt` is not a text-only clock. Inspect both archived vers
 and the selected winner in `resolutions` before applying within the user's scope.
 Edit supported list nodes only within the supported surface.
 Keep the single hidden `<!-- remnote:document-key -->` before H1 and existing short
-block anchors. No user attributes means no YAML. Optional title/aliases/tags are
-display-only; only new multiline questions need `rems.<short-key>.content: multiline`
+block anchors. No user attributes means no YAML. Optional title/aliases are
+display-only. YAML tags map only document/root memberships; bullet inline tags map
+only that Rem's direct memberships through sealed exact-ID `tagIds`. An unused
+existing tag resolves only by a complete unique sealed native ancestor path:
+no basename guesses or tag creation. Candidate bindings join the frozen plan;
+their native targets/ancestors are checked before any write and the registry is
+updated only on successful publication. Unknown or colliding tokens fail before connection.
+New multiline questions need `rems.<short-key>.content: multiline`
 and a matching question anchor with direct leaf answer bullets. Existing types
-come from identity-bound native records. Ordinary new bullets need no manual YAML
-or anchors. Tracked `.remnote/identity.json` holds only KB/document/block identity;
+come from identity-bound native records. A direct text answer leaf may be empty
+with a stable anchor; it is a cardItem, never an empty topic/question or standalone card.
+Ordinary new bullets need no manual YAML
+or anchors. Tracked `.remnote/identity.json` holds KB/document/block and tag-token identity;
 native records, originals and card/history facts stay hidden and read-only.
 Unknown YAML fields fail lint; unmappable native fields remain preserved sidecars.
 Generated links use full paths; unique basenames and the named document's current H1 fragments resolve, while
@@ -230,22 +238,41 @@ input is validated and canonically re-rendered while preserving attributes, anch
 native records and clocks; `already-formatted` means no publication was needed.
 Dirty input and damaged identity are refused, not recreated. This is not a
 daily-sync fallback or a way to discard local edits.
+Missing `tagIds` requires this explicit clean format step; old nonempty display-only
+YAML tags require a user decision rather than automatic reinterpretation.
 
 Run `sync apply DIR` once within the user's write scope; it performs whole-vault
 lint, fresh planning, guarded apply and verification. Plan/apply default to
-`--scope changed` for locally dirty Rems and necessary dependencies. Repeat
+`--scope changed` probes every selected bound Rem's public content and direct tags,
+then reads full native detail only where needed. Repeat
 `--path PATH` to filter vault-relative files/directories, not globs or patches;
 confirm existing edits in a selected file are authorized too. `--scope all`
-reconciles all bound IDs in the selected paths; no path means the entire vault.
+also audits full native flags/cards in the selected paths; no path means the entire vault.
 Scope and path are independent, out-of-scope edits remain intact, and full-vault
 local lint/identity/freeze still run. Changed scope is not a remote changes-since
 feed. Offline `sync diff DIR` supports path filtering; status/lint stay full-vault.
 Verification-only dependencies do not advance their native baseline or clocks;
 later all-scope reconciliation must still discover their remote-only edits.
-Clean changed/empty selections make no native calls. Layout-only apply may publish
-selected files offline (`localPublished: true`, `remoteChecked: false`) while
-preserving unselected bytes, all native records/clocks and a separate pending plan.
-This receipt does not establish remote freshness.
+Only empty selections make no native calls. A clean changed result establishes
+public/tag probing, not fresh card/history proof. For a shared checker that needs
+input-bound native evidence, use `sync read DIR PATH` and then exactly one
+`sync apply DIR --path PATH --expected-file-hash HASH`. This audits the exact file
+and direct-tag ancestors and returns the outline plus same-invocation native
+before/after proofs described in the reference. Unknown facts remain unknown.
+For a new ordinary text topic only, declare `rems.<short-key>.cardCluster: true`.
+The same sync journal calls `addPowerup('cc')`, verifies `hasPowerup` and consumes
+the creation intent after publication. Root/cardItem/question and existing-object
+capability changes are refused. Before apply, outline `intent.cardCluster` denotes
+intent and `observed` remains null; after apply cc must be a native observation.
+Never pretend that a tag named cc is the Powerup. Normal probes verify known cc too.
+Guarded journals preserve original nativeBefore and input binding before writes;
+exact-plan resume returns that original proof plus fresh nativeAfter, never
+fabricating a before-history from recovery-time values.
+
+Tag deltas merge separately from body clocks. Tag removal keeps native properties
+via `removeTag(id, false)`, but the existing Bridge still requires the explicit
+destructive capability gate. Check `plan.tagChanges` and `requiredPermissions`;
+missing permission refuses all writes, including prior text/add operations.
 
 `sync apply DIR --plan-hash HASH` requires a previously reviewed frozen plan with
 matching normalized selectors, selected documents/IDs and all frozen vault files;

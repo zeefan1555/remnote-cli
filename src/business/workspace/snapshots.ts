@@ -90,7 +90,6 @@ export function immutableProjection(rem: WorkspaceRem): Record<string, unknown> 
     enablePractice: rem.enablePractice,
     unsupported: rem.unsupported ?? '',
     facts,
-    tags: rem.tags ?? null,
     powerups: rem.powerups ?? null,
     propertyValues: rem.propertyValues ?? null,
     portal: rem.portal ?? null,
@@ -100,7 +99,7 @@ export function immutableProjection(rem: WorkspaceRem): Record<string, unknown> 
 
 export function revisionHash(rem: WorkspaceRem): string {
   const { cards: _cards, ...immutable } = immutableProjection(rem);
-  return hash({ public: publicRevision(rem), immutable });
+  return hash({ public: publicRevision(rem), immutable, tags: rem.tags ?? null });
 }
 
 export function publicationRevisionHash(rem: WorkspaceRem): string {

@@ -83,6 +83,7 @@ below is the authorized private vault's absolute path.
 | Offline inspection | `remnote-cli sync diff DIR --path 'Folder'`; `sync lint DIR` and `sync status DIR` remain whole-vault |
 | Explicit deletion | `remnote-cli sync delete DIR --id ID --scope-root ID` previews; execution additionally requires `--apply --plan-hash HASH`, destructive authorization and live gates |
 | Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
+| Input-bound native audit | `remnote-cli sync apply DIR --path PATH --expected-file-hash HASH`; exactly one file, full native proof and output outline from this invocation |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
 | Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
 | Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
@@ -90,11 +91,13 @@ below is the authorized private vault's absolute path.
 ### Scope and path selection
 
 Plan and apply share `--scope changed|all` (default `changed`) and repeatable
-`--path PATH`. These are independent dimensions: scope chooses changed Rems or
-all bound IDs, while path chooses the files/directories containing them. With no
-path filter, the selection is the entire vault. Changed scope reads locally dirty
-Rems plus necessary dependencies; all scope reconciles every bound ID in selected
-documents, including remote-only edits. Neither is a remote changes-since API.
+`--path PATH`. Path selects files/directories; no path means the entire vault.
+Both scopes reconcile every bound ID in selected documents, including remote-only
+content and direct-tag edits. Changed scope first probes public snapshots and
+`getTagRems` in bounded batches, reading full flags/cards only for changed Rems and
+write dependencies. All scope additionally audits full native snapshots for every
+selected Rem. A clean changed invocation performs no full card/history reads.
+Neither scope is a remote changes-since API or discovers unbound roots.
 
 Paths are vault-relative Markdown files or directories, not globs or native IDs.
 Repeated/equivalent paths such as `Folder` and `./Folder` are normalized and
@@ -211,6 +214,36 @@ are offline and report `remoteWrites: 0`; read returns `status: "read"`, and sav
 returns `status: "saved"` or `"unchanged"`, the resulting `fileHash` and changed
 Rem keys. Copy the returned hash verbatim rather than substituting a file mtime.
 
+Read also returns `outline: {schema: "remnote-outline/1", path, nodes}`. Each node
+is keyed by exact native ID or local key, with effective local text/kind/parent/
+children/tags and an `observed` sealed native baseline (or null for a new Rem).
+Direct tag ancestors are included. `observed` is not a fresh remote claim.
+
+For an input-bound full native audit, pass that unchanged read hash to
+`sync apply DIR --path PATH --expected-file-hash HASH`. This accepts exactly one
+tracked file and validates its bytes before connecting. It implies full native
+verification of that file and direct-tag ancestry, including cards, complete
+available review histories and previously known Powerup codes. It is deliberately
+more expensive than ordinary changed-scope probing; it introduces no learning-specific
+policy. A fresh zero-write audit returns `verified`, not an
+offline success. The returned `outline` and `verification` bind the same invocation:
+
+- `fileHash` is the original input hash; `planHash` is the exact applied plan.
+- `nativeBefore` / `nativeAfter` map IDs to `cardIds` and `reviewHash`. The latter
+  hashes CardID, owner, type, createdAt and full repetition history, sorted by ID;
+  unknown history stays null. Scheduling timestamps are not history conservation.
+- `observedHashes` contains only freshly verified IDs and binds their projected
+  native observations, never sealed-only dependencies. Powerup values cover only
+  explicitly known codes; absent facts and pinned status remain unknown.
+
+Consumers compare those proofs themselves. No `reviewHistoryPreserved` boolean is
+asserted. Before the first mutation, guarded apply seals the original plan and
+`nativeBefore` in its journal. Preserve failure receipts and original inputs;
+`sync resume DIR --plan-hash HASH` validates that binding and exact-ID journal
+effects, then returns the same original file/plan proof with fresh nativeAfter.
+It never replaces original nativeBefore with recovery-time history. Tampered or
+unreconstructible proof/journals fail closed, without replaying uncertain writes.
+
 Save validates the entire workspace and rejects a stale hash before publication.
 Only Rems whose semantic front/back content changed receive a millisecond local
 version timestamp bound to their content hash. New Rems use engine-generated temporary keys in the same
@@ -255,7 +288,7 @@ existing short key. Renaming a file preserves native identities rather than
 deleting and recreating them; it does not authorize native movement or reparenting,
 which remains unsupported and is rejected.
 
-Optional frontmatter accepts a display-only `title` string, `aliases` and `tags` arrays,
+Optional frontmatter accepts display-only `title` and `aliases`, a native-mapped `tags` array,
 plus `rems[shortKey].content` (`text` or `multiline`) when a new node needs an
 explicit content kind. Ordinary text is the default; only a new multiline
 question needs the explicit `multiline` declaration. Existing node/card kinds
@@ -263,6 +296,15 @@ come from identity-bound records and flags: edit their body directly, without
 restating native metadata. Existing identity and native facts cannot be replaced
 through YAML. H1 is the sole root-text authority; optional `title` is not a
 second source of native text. Publication preserves display attributes.
+
+One creation-only intent is also accepted: `rems[shortKey].cardCluster: true`
+on a new ordinary text topic (not a root, cardItem or question). It adds native
+`cc` within the same journal before parenting, verifies `hasPowerup('cc')` and
+consumes the attribute after publication. Existing objects and false/removal
+intents are refused. `sync read` exposes `intent.cardCluster: true` and effective
+`powerups.cc: true` while `observed` stays null; only native readback supplies
+the published observed Powerup. Normal cheap probes also verify previously
+observed cc; they do not silently assume it is still enabled.
 
 The following native facts are retained in hidden records and hydrated metadata,
 not accepted as user frontmatter:
@@ -300,6 +342,10 @@ unsupported. Engine-generated `new:key` values in receipts are temporary keys,
 not frontmatter users must type. References to unpublished targets are rejected
 until native identity exists.
 
+A direct text leaf under a multiline question may be genuinely empty (for an
+answer separator). Give it a stable short anchor; it becomes a native cardItem,
+not a separate card. Empty ordinary notes, topics and questions remain invalid.
+
 This synthetic note needs no YAML; preserve its real imported document binding
 and existing anchors when editing:
 
@@ -336,8 +382,11 @@ rems:
 | --- | --- |
 | `[[path/note|label]]` | Full vault-relative note path resolves to its document/root Rem |
 | `[[path/note#^short-key|label]]` | That note's tracked identity mapping resolves to an ordinary Rem |
-| Top-level YAML `aliases` / `tags`, or `#tag` | Obsidian display/search metadata; no automatic native Alias/Tag change |
-| Hidden native Tag/reference metadata | Read-only exact Rem ID relationships, never inferred from display labels |
+| Top-level YAML `aliases` | Obsidian display/search metadata; no native Alias mutation |
+| Top-level YAML `tags` | This file's document/root direct native Tag memberships only |
+| Bullet inline `#HOME/...` or `#Term/...` | That bullet's direct native Tag memberships only; no promotion to page tags |
+| `.remnote/identity.json` `tagIds` | Sealed one-to-one Obsidian token → exact native Tag RemID binding |
+| Hidden native reference metadata | Exact Rem ID relationships; ordinary wiki links use the same native IDs |
 | `![[path/note]]` | An Obsidian embed, not automatically a RemNote reference or Portal |
 
 Generated links use full vault paths. Input resolves exact paths first, then a
@@ -359,6 +408,27 @@ These conventions use Obsidian's documented [links](https://help.obsidian.md/lin
 [aliases](https://help.obsidian.md/aliases). Obsidian readability is not proof of
 RemNote semantic acceptance.
 
+Tags use Obsidian's case-insensitive, hierarchical token syntax (letters, digits,
+underscore, hyphen and slash; not numbers alone). Registry names derive from the
+native plain-text ancestor path and retain their exact-ID binding. For a never-used
+existing tag, an exact complete sealed ancestor path can establish a unique candidate
+binding. The plan includes its ID; fresh native target/ancestor verification precedes
+all writes, and only successful publication seals the mapping. Basename matching
+is not a fallback. Unknown tokens,
+case-folded/native-path collisions and missing tag ancestors fail closed; sync does
+not create or guess a tag entity. Literal hashtags are escaped; inline code, escaped
+hashes and URL fragments are not memberships. Tags of opaque Rems remain read-only.
+Membership deltas merge independently from the body's edit clock:
+`(remote − locally removed baseline tags) ∪ locally added tags`.
+
+Removal always calls `removeTag(tagId, false)`, retaining properties, Tag Rems,
+CardIDs and history. The existing Bridge marks this atomic method destructive:
+apply therefore requires explicit `--allow-destructive` plus its native replace
+gate even for association-only removal. `plan` lists exact `tagChanges` and
+`requiredPermissions`. Without that gate the entire apply refuses before text,
+add-tag or other writes; it never changes plugin settings. Ordinary tag additions
+require only the normal write gate.
+
 ### Explicit format conversion
 
 `sync format DIR` is an explicit offline conversion of a clean, sealed legacy
@@ -369,6 +439,10 @@ coverage and intact native records. It preserves native/original record bytes,
 publishes short anchors and tracked identity through staged local publication,
 then validates the resulting vault. It makes zero backend calls and performs no
 remote write. There is no legacy parse fallback in daily sync.
+
+A vault without sealed `tagIds` refuses ordinary sync until explicit format enables
+the projection on a clean baseline. Existing nonempty display-only YAML tags are
+refused for an explicit user decision, not silently reinterpreted or discarded.
 
 Success returns `status: "formatted"`, `complete: true`, `remoteWrites: 0`,
 document/Rem counts, `identityPath`, previous/current manifest hashes and
@@ -390,7 +464,7 @@ Auxiliary Portal/reference children are not answer items. For a basic card, the 
 the same list item is the back, not a new Rem. Literal `===` and `>>` in ordinary
 text do not declare cards.
 
-Native Folder/Document/Tag/Power-up changes, moves, new embeds/media and complex
+Native Folder/Document/Tag entity changes, existing Power-up changes, moves, new embeds/media and complex
 rich-text edits are outside this write surface. Existing native content is kept
 losslessly and displayed read-only as faithfully as supported. Portal metadata
 records its native type and directly included Rem IDs; it does not grant Portal
@@ -485,10 +559,9 @@ Current receipt fields (arrays contain exact Rem IDs unless noted):
 | `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `resolutions`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
 | `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
 | planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `resolutions`, `remoteWrites: 0`; no apply is authorized by this receipt |
-| offline layout `preview` / `verified` | `remoteChecked: false`, `remoteWrites: 0`, `planHash`, empty direction arrays; `localPublished` is false for preview and true after apply |
 
 Read `remoteChecked` as actual remote-read evidence, not a constant: an empty
-selection or changed scope with no candidates can return offline `unchanged`
+selection can return offline `unchanged`
 with `remoteChecked: false` and no checked IDs. Bound-ID planning reports
 `discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`; even an all-scope
 success cannot establish global discovery. `diff` is local-only and reports
@@ -562,14 +635,17 @@ keep the source files, sealed baseline and original journal unchanged. Resume:
    old SDK request cannot be ruled out merely by reading a before-state.
 4. Continues only never-attempted steps under the same journal, then uses normal
    native verification and staged publication. A second interruption retains
-   those same identities. Repeating a published plan returns `already-complete`
+   those same identities. Repeating an ordinary published plan returns `already-complete`
    with zero native calls/writes while its published baseline still matches.
+   A guarded plan instead makes fresh exact-ID proof reads and returns `verified`
+   with the original input/nativeBefore binding, never duplicate writes.
 
 The bounded resume implementation accepts outgoing-only plans that reconstruct
 exactly; it does not resume deletion, incoming/converged or LWW-resolution plans.
 Different source bytes, malformed/noncontiguous steps or concurrent native edits
 require reconciliation outside this command. Do not delete state to bypass a
-refusal. A verified remote journal delegates to local-only recovery.
+refusal. A verified remote journal delegates to publication recovery; guarded
+resume then refreshes exact native proof without replaying mutations.
 
 Old journals do not record the creation-time Card identities of newly made Rems.
 Resume therefore validates their constructor/default shape plus recorded effects,

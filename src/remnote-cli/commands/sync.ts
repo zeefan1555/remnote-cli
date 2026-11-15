@@ -36,6 +36,7 @@ interface SelectionOptions {
   scope: 'changed' | 'all';
   path: string[];
   planHash?: string;
+  expectedFileHash?: string;
 }
 
 function pathOptions(command: Command): Command {
@@ -137,7 +138,12 @@ export function registerSyncCommands(program: Command): void {
           .default('changed')
       );
     if (name === 'apply')
-      command.option('--plan-hash <sha256>', 'Require this exact previous preview when applying');
+      command
+        .option('--plan-hash <sha256>', 'Require this exact previous preview when applying')
+        .option(
+          '--expected-file-hash <sha256>',
+          'Guard one exact --path from sync read and return full native file verification (includes cards/history and known Powerup codes; slower than the default probe)'
+        );
     command.action(async (directory: string, { path, ...options }: SelectionOptions) =>
       execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })
     );

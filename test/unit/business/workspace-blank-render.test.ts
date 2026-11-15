@@ -156,7 +156,7 @@ async function sealedHuman(text?: unknown) {
   }
   source = source.replace(/(^\s*- )(?:&#x20;)?\^(custom-(?:blank|nested))$/gm, '$1&#x20;^$2');
   if (text !== undefined) source = source.replace(' ^custom-blank\n', '&#x20;^custom-blank\n');
-  const attributes = { title: 'My title', aliases: ['An alias'], tags: ['reading'], rems: {} };
+  const attributes = { title: 'My title', aliases: ['An alias'], rems: {} };
   const frontmatter = parseFrontmatter(path, source);
   source = renderFrontmatter(attributes) + `<!-- remnote:custom-root -->\n\n` + frontmatter.body;
   state.documents[path]!.fileHash = hash(source);

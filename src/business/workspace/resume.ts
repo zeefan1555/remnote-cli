@@ -11,6 +11,7 @@ import {
   type WorkspaceChange,
   type WorkspaceRem,
 } from './types.js';
+import { nativeProof } from './outline.js';
 
 export interface Journal {
   version: 2;
@@ -22,12 +23,29 @@ export interface Journal {
   selection: SyncSelection;
   /** Exact-ID resume collected tags on created Rems; recovery must use the same projection. */
   resumed?: true;
+  /** Original input-bound proof is sealed by planHash before the first SDK mutation. */
+  proof?: { plan: SyncPlan; nativeBefore: Record<string, ReturnType<typeof nativeProof>> };
   final?: {
     hashes: Record<string, string>;
     inputHash: string;
     deleted: string[];
     structuralIds: string[];
   };
+}
+
+export function guardedBinding(journal: Journal) {
+  if (!journal.proof) return undefined;
+  const binding = journal.proof.plan.guarded;
+  if (
+    !binding ||
+    hash(journal.proof.plan) !== journal.planHash ||
+    hash(journal.proof.nativeBefore) !== binding.beforeHash ||
+    hash(journal.proof.plan.selection) !== hash(journal.selection)
+  )
+    throw new Error(
+      'Original guarded proof binding was modified; preserve the journal without replay'
+    );
+  return binding;
 }
 
 /** Fold the one attempted prefix, never infer a new plan from the current remote state. */
@@ -47,14 +65,35 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
   const sequence: Array<{
     key: string;
     change: WorkspaceChange;
-    operation: 'create' | 'text' | 'backText' | 'parent' | 'cardItem';
+    operation: 'create' | 'text' | 'backText' | 'parent' | 'cardItem' | 'tag' | 'cardCluster';
+    tag?: { id: string; add: boolean };
   }> = [];
   for (const change of plan.changes) {
     const operations: Array<(typeof sequence)[number]['operation']> = [];
     if (change.key.startsWith('new:')) operations.push('create');
     for (const field of ['text', 'backText'] as const)
       if (change.fields[field] !== undefined) operations.push(field);
+    for (const operation of operations)
+      sequence.push({ key: `${change.key}:${operation}`, change, operation });
+    operations.length = 0;
+    if (change.tags) {
+      for (const id of change.tags.before.filter((id) => !change.tags!.after.includes(id)))
+        sequence.push({
+          key: `${change.key}:tag:remove:${id}`,
+          change,
+          operation: 'tag',
+          tag: { id, add: false },
+        });
+      for (const id of change.tags.after.filter((id) => !change.tags!.before.includes(id)))
+        sequence.push({
+          key: `${change.key}:tag:add:${id}`,
+          change,
+          operation: 'tag',
+          tag: { id, add: true },
+        });
+    }
     if (change.key.startsWith('new:')) {
+      if (change.cardCluster) operations.push('cardCluster');
       operations.push('parent');
       if (change.cardItem) operations.push('cardItem');
     }
@@ -96,6 +135,8 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
         cardItem: false,
         practice: 'forward',
         enablePractice: true,
+        tags: [],
+        ...(change.cardCluster ? { powerupPresence: { cc: false } } : {}),
       });
     } else {
       const rem = expected.get(id);
@@ -118,7 +159,18 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
         expected.set(id, { ...rem, parent });
         expected.set(parent, { ...p, children });
         structuralIds.add(parent);
-      } else if (operation === 'cardItem') expected.set(id, { ...rem, cardItem: change.cardItem });
+      } else if (operation === 'tag') {
+        if (!Array.isArray(rem.tags) || !step.tag)
+          throw new Error('Resume requires exact direct tag baseline');
+        expected.set(id, {
+          ...rem,
+          tags: step.tag.add
+            ? [...new Set([...rem.tags, step.tag.id])].sort()
+            : rem.tags.filter((tag) => tag !== step.tag!.id),
+        });
+      } else if (operation === 'cardCluster')
+        expected.set(id, { ...rem, powerupPresence: { ...rem.powerupPresence, cc: true } });
+      else if (operation === 'cardItem') expected.set(id, { ...rem, cardItem: change.cardItem });
       else expected.set(id, { ...rem, [operation]: change.fields[operation] });
     }
   }
@@ -176,7 +228,10 @@ export function verifyResumeReadback(
       changedFacts.length ||
       actual.unsupported ||
       !Array.isArray(actual.tags) ||
-      actual.tags.length ||
+      hash(actual.tags) !== hash(intended.tags ?? []) ||
+      Object.entries(intended.powerupPresence ?? {}).some(
+        ([code, present]) => actual.powerupPresence?.[code] !== present
+      ) ||
       (actual.powerups?.length ?? 0) ||
       (actual.propertyValues?.length ?? 0) ||
       actual.portal ||

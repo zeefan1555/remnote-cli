@@ -3,6 +3,7 @@ import { join, posix } from 'node:path';
 import { isContentMarkdown } from './files.js';
 import type { LocalContext } from './local.js';
 import type { SyncSelection, WorkspacePlan, WorkspaceRem } from './types.js';
+import { registerTagIds } from './tags.js';
 
 export interface SelectionOptions {
   scope?: 'changed' | 'all';
@@ -100,6 +101,7 @@ export function verificationClosure(
     ancestors(change.key);
     ancestors(change.parent);
     for (const target of referenceIds(change.fields)) include(target);
+    for (const tag of change.tags?.after ?? []) ancestors(tag);
   }
   return sorted(required).filter((id) => !candidates.includes(id));
 }
@@ -115,15 +117,13 @@ export async function selectPlan(
   const changes = plan.changes.filter((change) => selected.files.includes(change.path));
   const candidates =
     plan.deletion?.ids ??
-    (options.scope === 'all'
-      ? [...context.parsed]
-          .filter(([path]) => selected.files.includes(path))
-          .flatMap(([, doc]) =>
-            doc.nodes
-              .filter((node) => node.kind !== 'mount' && !node.key.startsWith('new:'))
-              .map((node) => node.key)
-          )
-      : changes.filter((change) => !change.key.startsWith('new:')).map((change) => change.key));
+    [...context.parsed]
+      .filter(([path]) => selected.files.includes(path))
+      .flatMap(([, doc]) =>
+        doc.nodes
+          .filter((node) => node.kind !== 'mount' && !node.key.startsWith('new:'))
+          .map((node) => node.key)
+      );
   const reconcileIds = sorted(candidates);
   const selection: SyncSelection = {
     scope: plan.deletion ? 'delete' : (options.scope ?? 'changed'),
@@ -139,7 +139,13 @@ export async function selectPlan(
       : selected.files,
     outgoingKeys: sorted(changes.map((change) => change.key)),
     reconcileIds,
-    verificationIds: verificationClosure(context, { ...plan, changes }, reconcileIds),
+    verificationIds: verificationClosure(
+      context,
+      { ...plan, changes },
+      plan.deletion
+        ? reconcileIds
+        : changes.filter((change) => !change.key.startsWith('new:')).map((change) => change.key)
+    ).filter((id) => !reconcileIds.includes(id)),
   };
   for (const [path, document] of context.parsed)
     if (
@@ -147,5 +153,15 @@ export async function selectPlan(
       selection.files.includes(context.state.entries[document.metadata!.root]!.path)
     )
       throw new Error('Select every document involved in a path swap');
-  return { ...plan, changes, selection };
+  const registered = registerTagIds(
+    context.native,
+    changes.flatMap((change) => change.tags?.after ?? []),
+    context.state.tagIds
+  );
+  const tagIds = Object.fromEntries(
+    Object.entries(registered).filter(
+      ([token]) => !Object.hasOwn(context.state.tagIds ?? {}, token)
+    )
+  );
+  return { ...plan, changes, selection, ...(Object.keys(tagIds).length ? { tagIds } : {}) };
 }

@@ -43,6 +43,7 @@ import { remoteVersion } from './versions.js';
 import { cardMetadataSchema, nativeDetailsSchema, nativeSchema } from './metadata.js';
 import { mapReads } from './read-pool.js';
 import { pathKey, WorkspaceLinks } from './links.js';
+import { registerTags, tagIdsSchema } from './tags.js';
 import {
   hash,
   type Diagnostic,
@@ -79,6 +80,7 @@ const remSchema = z
     tags: z.array(idSchema).nullable().optional(),
     references: z.array(idSchema).nullable().optional(),
     powerups: nativeSchema.shape.powerups.optional(),
+    powerupPresence: z.record(z.string(), z.boolean()).optional(),
     propertyValues: nativeSchema.shape.propertyValues.optional(),
     portal: z
       .object({ type: z.json().nullable(), directlyIncludedRemIds: z.array(idSchema).nullable() })
@@ -100,6 +102,7 @@ const stateSchema = z
     scope: z.enum(['library', 'subtree']),
     rootIds: z.array(idSchema),
     globalDiscoveryComplete: z.boolean(),
+    tagIds: tagIdsSchema.optional(),
     official: z
       .object({
         archiveSha256: digest,
@@ -350,7 +353,13 @@ export async function writeSnapshot(
     [...sources.values()]
       .filter((source) => source.metadata)
       .map((source) => {
-        const value = source.attributes ?? {};
+        const value = structuredClone(source.attributes ?? {});
+        for (const node of source.nodes) {
+          if (assignedIds[node.key] && value.rems?.[node.blockId]?.cardCluster) {
+            delete value.rems[node.blockId]!.cardCluster;
+            if (!Object.keys(value.rems[node.blockId]!).length) delete value.rems[node.blockId];
+          }
+        }
         if (!value.rems || !removed.size) return [source.metadata!.root, value];
         // Attributes belong to document-local blocks, not globally unique block names.
         const deletedBlocks = new Set(
@@ -400,6 +409,7 @@ export async function writeSnapshot(
     scope: coverage.scope,
     rootIds: coverage.rootIds,
     globalDiscoveryComplete: coverage.globalDiscoveryComplete,
+    tagIds: registerTags(byId, previous?.tagIds),
     ...(official ? { official } : {}),
     errors: ['Snapshot write in progress'],
     entries: {},
@@ -432,6 +442,7 @@ export async function writeSnapshot(
       attributes: attributes.get(id),
       originalIds,
       links,
+      tagIds: state.tagIds,
     };
     const parsed = renderParsedDocument(id, path, byId, paths, options);
     if (parsed.diagnostics.length)
@@ -448,6 +459,7 @@ export async function writeSnapshot(
           children: node.children,
           text: node.text,
           backText: node.backText,
+          tags: node.tags,
           ...(node.kind === 'opaque' ? { projection: node.contentHash } : {}),
         })),
       });
@@ -714,7 +726,7 @@ export async function inspectLocal(
     const doc = expectedRoots.get(rootId)!.doc;
     const { source, prepared } = currentFiles.get(path)!;
     const frontmatter = prepared.frontmatter;
-    const current = parsePreparedDocument(prepared, links);
+    const current = parsePreparedDocument(prepared, links, state.tagIds, native);
     parsed.set(path, current.document);
     diagnostics.push(...current.diagnostics);
     if (hash(source) !== doc.fileHash || expectedRoots.get(rootId)!.path !== path) dirty.push(path);
@@ -727,6 +739,7 @@ export async function inspectLocal(
       display,
       links,
       attributes: frontmatter.attributes,
+      tagIds: state.tagIds,
     }).document;
     baseline.set(path, old);
     if (current.document.nodes[0]?.key !== doc.rootId)
@@ -765,10 +778,7 @@ export async function inspectLocal(
             'NESTING',
             'Cannot insert beneath an opaque, mount or basic-card node'
           );
-        if (
-          parent?.kind === 'multiline' &&
-          (node.kind !== 'text' || node.children.length || !node.text.length)
-        )
+        if (parent?.kind === 'multiline' && (node.kind !== 'text' || node.children.length))
           fail(
             path,
             node.line,

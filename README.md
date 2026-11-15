@@ -105,11 +105,13 @@ Use `sync plan DIR` for a preview with zero native writes, or add
 command group; `apply` has no `--apply` flag. Neither apply form retries uncertain
 writes automatically.
 
-Plan/apply default to `--scope changed`, reading locally dirty Rems and necessary
-dependencies. Repeat `--path 'Folder/Note.md'` or `--path 'Folder'` to select
+Plan/apply default to `--scope changed`: every bound Rem in the selected files
+gets a lightweight public-content/direct-tag probe, so remote-only edits are
+detected in the same command. Only changed Rems and write dependencies need full
+native snapshots. Repeat `--path 'Folder/Note.md'` or `--path 'Folder'` to select
 vault-relative files/directories, not globs or individual patches. `--scope all`
-reconciles every bound ID in those selected paths; omit `--path` to select the
-entire vault. Scope and path are independent selectors. Out-of-scope local edits
+also audits full native flags/cards for every selected ID; omit `--path` to select
+the entire vault. Out-of-scope local edits
 are preserved, while local lint, identity validation and freezing still cover the
 whole vault. Changed scope is not a remote changes-since feed or proof of global
 freshness. `sync diff DIR` is offline and accepts `--path`; status/lint stay
@@ -117,9 +119,9 @@ whole-vault. Frozen plan hashes bind the normalized selectors, actual selection
 and full-vault frozen inputs, so a materially changed selection cannot reuse one.
 Dependencies are checked for safety, not merged as incoming content or given new
 baseline clocks. A later all-scope sync still sees their remote-only edits.
-Clean changed/empty selections make no remote calls. Selected layout-only edits
-can publish offline, with `localPublished: true` and `remoteChecked: false`;
-unselected source bytes, native records and clocks stay unchanged.
+Only empty selections stay offline. A clean nonempty changed selection reports
+`unchanged` after probing, not a fresh review-history audit. Unselected source
+bytes, native records and clocks stay unchanged.
 
 The current candidate reports `incoming`, `outgoing`,
 `converged` and conflict receipts; native acceptance is separate. The offline
@@ -138,14 +140,24 @@ import does not prove continuous whole-library coverage.
 
 Ordinary nested Markdown lists use short, stable Obsidian anchors; a single
 hidden `<!-- remnote:document-key -->` before H1 binds each imported document.
-There is no YAML when no user attributes are needed. Optional `title`, `aliases`
-and `tags` are display metadata; only a new multiline question needs an explicit
+There is no YAML when no user attributes are needed. Optional `title` and
+`aliases` are display metadata. YAML `tags` maps only the document/root's
+direct native tags; bullet inline tags map only that Rem's direct tags. Exact
+token-to-RemID bindings live in the sealed identity registry. An unused native tag
+can be selected by its complete unique sealed ancestor path; new bindings are
+verified remotely and published only after success. Missing or ambiguous tokens fail.
+A new multiline question needs an explicit
 `rems.<short-key>.content: multiline` attribute. Existing card types are recovered
 through identity-bound native records. New ordinary bullets need no hand-written
 YAML or anchor; verified publication assigns identity.
 
+For a new ordinary topic only, `rems.<short-key>.cardCluster: true` requests native
+`addPowerup('cc')` in that same sync journal. It is checked with `hasPowerup`, not
+inferred from a name or tag, and consumed after publication. Existing capabilities
+cannot be changed this way.
+
 Tracked `.remnote/identity.json` maps KB, document and short block keys to Rem IDs;
-native records, originals, card identity and history stay in hidden read-only
+the one-to-one `tagIds` registry is included. Native records, originals, card identity and history stay in hidden read-only
 sidecars, not user YAML. Generated links use full vault paths; unique basenames and
 the named document's current H1 fragment also resolve on input. Broken or ambiguous links, invalid
 identity and unknown YAML fields fail lint before remote writes. Local file moves

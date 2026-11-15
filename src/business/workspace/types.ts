@@ -39,6 +39,8 @@ export interface WorkspaceRem {
   tags?: NativeMetadata['tags'];
   references?: NativeMetadata['references'];
   powerups?: NativeMetadata['powerups'];
+  /** Explicitly checked codes, not a claim to enumerate all native Powerups. */
+  powerupPresence?: Record<string, boolean>;
   propertyValues?: NativeMetadata['propertyValues'];
   portal?: NativeMetadata['portal'];
   cards?: NativeMetadata['cards'];
@@ -77,6 +79,7 @@ export interface WorkspaceState {
   scope: 'library' | 'subtree';
   rootIds: string[];
   globalDiscoveryComplete: boolean;
+  tagIds?: Record<string, string>;
   official?: {
     archiveSha256: string;
     exportDate: string;
@@ -107,6 +110,8 @@ export interface OutlineNode {
   kind: NodeKind;
   text: unknown[];
   backText: unknown[];
+  tags?: string[];
+  cardCluster?: true;
   children: string[];
   contentHash: string;
 }
@@ -127,8 +132,10 @@ export interface WorkspaceChange {
   position: number;
   kind: NodeKind;
   cardItem: boolean;
+  cardCluster?: true;
   beforeHash?: string;
   fields: Partial<Record<'text' | 'backText', unknown[]>>;
+  tags?: { before: string[]; after: string[] };
 }
 export interface WorkspacePlan {
   version: 1;
@@ -137,6 +144,9 @@ export interface WorkspacePlan {
   baseHash: string;
   /** Whole-vault byte seal, including verification-only records and excluded owned guides. */
   inputHash?: string;
+  /** New token bindings are candidates until native verification and publication succeed. */
+  tagIds?: Record<string, string>;
+  guarded?: { path: string; fileHash: string; beforeHash: string };
   files: Record<string, string>;
   changes: WorkspaceChange[];
   deletion?: { rootId: string; scopeRoot: string; ids: string[] };
@@ -211,12 +221,28 @@ export interface WorkspaceBackend {
   subtree(rootIds: string[]): Promise<WorkspaceRem[]>;
   discover(ids: string[]): Promise<PublicDiscovery>;
   readPublic(ids: string[]): Promise<Record<string, unknown>[]>;
-  read(ids: string[], options?: { tags?: boolean }): Promise<WorkspaceRem[]>;
+  readProbe(
+    ids: string[],
+    options?: { powerupCodes?: Record<string, string[]> }
+  ): Promise<
+    Array<{
+      snapshot: Record<string, unknown>;
+      tags: string[];
+      powerupPresence?: Record<string, boolean>;
+    }>
+  >;
+  read(
+    ids: string[],
+    options?: { tags?: boolean; powerupCodes?: Record<string, string[]> }
+  ): Promise<WorkspaceRem[]>;
   guard(ids: string[]): Promise<string>;
   create(markdown?: string): Promise<string>;
   writeField(id: string, field: 'text' | 'backText', value: unknown[]): Promise<void>;
+  addTag(id: string, tagId: string): Promise<void>;
+  removeTag(id: string, tagId: string): Promise<void>;
   setParent(id: string, parent: string, position: number): Promise<void>;
   setCardItem(id: string, value: boolean): Promise<void>;
+  setCardCluster(id: string): Promise<void>;
   cardFacts(id: string): Promise<Array<{ id: string; hash: string }>>;
   remove(id: string): Promise<void>;
   existingIds(ids: string[]): Promise<string[]>;

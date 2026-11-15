@@ -202,10 +202,24 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     // Official global enumeration. Transport errors remain incomplete: no search/known-root fallback.
     const rems = await this.plugin.rem.getAll();
     if (!Array.isArray(rems)) throw new Error('Full-library enumeration did not return an array');
-    return mapReads(rems, 4, (rem) => this.snapshot(rem));
+    return mapReads(rems, 4, async (rem) => ({
+      ...(await this.snapshot(rem)),
+      tags: await this.tags(rem),
+    }));
   }
 
-  async read(ids: string[], options: { tags?: boolean } = {}): Promise<WorkspaceRem[]> {
+  private async tags(rem: PluginRem): Promise<string[]> {
+    const observed = await rem.getTagRems();
+    if (!Array.isArray(observed)) throw new Error('Incomplete native tags');
+    const tags = observed.map((tag) => idSchema.parse(tag?._id)).sort();
+    if (new Set(tags).size !== tags.length) throw new Error('Duplicate native tags');
+    return tags;
+  }
+
+  async read(
+    ids: string[],
+    options: { tags?: boolean; powerupCodes?: Record<string, string[]> } = {}
+  ): Promise<WorkspaceRem[]> {
     if (ids.length > 50) throw new Error('Exact-ID native read batch exceeds 50');
     const rems = await this.plugin.rem.findMany(ids);
     if (
@@ -219,12 +233,14 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     return mapReads(ids, 4, async (id) => {
       const rem = byId.get(id)!,
         snapshot = await this.snapshot(rem);
-      if (options.tags) {
-        const tags = await rem.getTagRems();
-        if (!Array.isArray(tags)) throw new Error('Incomplete native tags');
-        snapshot.tags = tags.map((tag) => idSchema.parse(tag?._id)).sort();
-        if (new Set(snapshot.tags).size !== snapshot.tags.length)
-          throw new Error('Duplicate native tags');
+      if (options.tags) snapshot.tags = await this.tags(rem);
+      if (options.powerupCodes?.[id]?.length) {
+        const values = await mapReads(
+          [...new Set(options.powerupCodes[id])],
+          4,
+          async (code) => [code, boolean(await rem.hasPowerup(code), `Powerup ${code}`)] as const
+        );
+        snapshot.powerupPresence = Object.fromEntries(values);
       }
       return snapshot;
     });
@@ -244,6 +260,45 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     return ids.flatMap((id) => (byId.has(id) ? [publicSnapshot(byId.get(id)!)] : []));
   }
 
+  async readProbe(
+    ids: string[],
+    options: { powerupCodes?: Record<string, string[]> } = {}
+  ): Promise<
+    Array<{
+      snapshot: Record<string, unknown>;
+      tags: string[];
+      powerupPresence?: Record<string, boolean>;
+    }>
+  > {
+    if (ids.length > 50 || new Set(ids).size !== ids.length)
+      throw new Error('Exact probe batch exceeds 50 or repeats IDs');
+    const rems = await this.plugin.rem.findMany(ids);
+    if (
+      !Array.isArray(rems) ||
+      new Set(rems.map((rem) => rem._id)).size !== rems.length ||
+      rems.some((rem) => !ids.includes(rem._id))
+    )
+      throw new Error('Malformed exact probe');
+    return mapReads(rems, 4, async (rem) => {
+      const codes = options.powerupCodes?.[rem._id] ?? [];
+      const powerupPresence = codes.length
+        ? Object.fromEntries(
+            await mapReads(
+              codes,
+              4,
+              async (code) =>
+                [code, boolean(await rem.hasPowerup(code), `Powerup ${code}`)] as const
+            )
+          )
+        : undefined;
+      return {
+        snapshot: publicSnapshot(rem),
+        tags: await this.tags(rem),
+        ...(powerupPresence ? { powerupPresence } : {}),
+      };
+    });
+  }
+
   async subtree(rootIds: string[]): Promise<WorkspaceRem[]> {
     if (!rootIds.length || new Set(rootIds).size !== rootIds.length)
       throw new Error('Subtree requires unique exact root IDs');
@@ -255,7 +310,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       if (ids.some((id) => seen.has(id))) throw new Error('Duplicate/cyclic subtree reference');
       ids.forEach((id) => seen.add(id));
       if (seen.size > 100000) throw new Error('Subtree exceeds 100000 Rem bound');
-      const rems = await this.read(ids);
+      const rems = await this.read(ids, { tags: true });
       if (
         new Set(rems.map((rem) => rem.id)).size !== ids.length ||
         rems.some((rem) => !ids.includes(rem.id))
@@ -327,13 +382,13 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   async guard(ids: string[]): Promise<string> {
     const facts = await mapReads([...ids].sort(), 4, async (id) => {
       const rem = await this.rem(id),
-        snapshot = await this.snapshot(rem),
-        tags = await rem.getTagRems();
-      if (!Array.isArray(tags)) throw new Error('Incomplete native tags');
+        snapshot = await this.snapshot(rem);
       return {
         ...immutableProjection(snapshot),
-        tags: tags.map((tag) => tag._id).sort(),
-        cards: await this.cardFacts(id),
+        cards: snapshot.cards!.map(({ id, remId, type }) => ({
+          id,
+          hash: hash({ id, remId, type }),
+        })),
       };
     });
     return hash(facts);
@@ -341,6 +396,21 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
 
   private async writable(): Promise<void> {
     if (!(await this.identity()).writable) throw new Error('Live workspace write gate is disabled');
+  }
+
+  async addTag(id: string, tagId: string): Promise<void> {
+    await this.writable();
+    await (await this.rem(id)).addTag(idSchema.parse(tagId));
+  }
+
+  async removeTag(id: string, tagId: string): Promise<void> {
+    const identity = await this.identity();
+    if (!identity.writable || !identity.destructive)
+      throw new Error(
+        'Native removeTag requires the existing explicit destructive capability gate'
+      );
+    // Retain property Rems: removing an association is not authorization to delete data.
+    await (await this.rem(id)).removeTag(idSchema.parse(tagId), false);
   }
 
   async create(markdown?: string): Promise<string> {
@@ -365,6 +435,10 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   async setCardItem(id: string, value: boolean): Promise<void> {
     await this.writable();
     await (await this.rem(id)).setIsCardItem(value);
+  }
+  async setCardCluster(id: string): Promise<void> {
+    await this.writable();
+    await (await this.rem(id)).addPowerup('cc');
   }
   async remove(id: string): Promise<void> {
     const live = await this.identity();
