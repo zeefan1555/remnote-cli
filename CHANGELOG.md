@@ -17,6 +17,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   closed. Optional SDK tag collection checks created Rems; receipts distinguish
   original-card protection from new Card identities first observed at resume.
   Repeated completion and local publication recovery perform no native writes.
+  Empty plain constructors use the native `text: []` default without conflating
+  it with `backText: null`; rejected shapes name fields without exposing values.
 - Human-readable sync Markdown uses one hidden document-root binding and short
   stable block anchors; ordinary new bullets need no anchor or YAML. Optional
   sparse attributes accept display `title`/`aliases`/`tags` and explicit new

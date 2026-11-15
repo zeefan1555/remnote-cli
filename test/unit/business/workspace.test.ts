@@ -201,7 +201,7 @@ function fixture() {
         id,
         native(
           id,
-          markdown ? ['Workspace question'] : null,
+          markdown ? ['Workspace question'] : [],
           markdown ? { cardItem: false, backText: [], practice: 'forward' } : {}
         )
       );
@@ -1515,7 +1515,30 @@ describe('explicit interrupted sync resume', () => {
   it('reuses a known empty orphan, finishes the same plan and makes repeat resume a no-op', async () => {
     const f = await interruptedCreate();
     const writes = f.calls.length;
-    expect(f.rems.get('created_2')!.parent).toBeNull();
+    // Anonymous shape observed through SdkWorkspaceBackend.read, not the CLI inspect projection.
+    Object.assign(f.rems.get('created_2')!, {
+      facts: {
+        isTable: false,
+        isProperty: false,
+        isPowerup: false,
+        isPowerupSlot: false,
+        isPowerupProperty: false,
+        isPowerupEnum: false,
+        isPowerupPropertyListItem: false,
+      },
+    });
+    expect(f.rems.get('created_2')).toMatchObject({
+      text: [],
+      backText: null,
+      type: null,
+      parent: null,
+      children: [],
+      practice: 'forward',
+      enablePractice: true,
+      document: false,
+      folder: false,
+      cardItem: false,
+    });
     const result = await resumeWorkspace(directory, async () => f.backend, f.result.planHash);
     expect(result).toMatchObject({
       status: 'verified',
@@ -1540,6 +1563,34 @@ describe('explicit interrupted sync resume', () => {
     expect(factory).not.toHaveBeenCalled();
     expect(f.backend.create).toHaveBeenCalledTimes(3);
   });
+
+  it.each([
+    ['text', { text: ['External private text'] }],
+    ['backText', { backText: [] }],
+    ['parent', { parent: 'external-parent' }],
+    ['children', { children: ['external-child'] }],
+    ['tags', { tags: ['external-tag'] }],
+    ['practice', { practice: 'backward' }],
+    ['enablePractice', { enablePractice: false }],
+    ['facts.isTable', { facts: { isTable: true } }],
+  ] as const)(
+    'rejects a changed constructor %s before writes and names only its field path',
+    async (field, change) => {
+      const f = await interruptedCreate(),
+        before = [...f.calls];
+      Object.assign(f.rems.get('created_2')!, change);
+      const error = await resumeWorkspace(
+        directory,
+        async () => f.backend,
+        f.result.planHash
+      ).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(`fields: ${field}`);
+      expect((error as Error).message).not.toContain('External private text');
+      expect((error as Error).message).not.toContain('external-');
+      expect(f.calls).toEqual(before);
+    }
+  );
 
   it('recognizes an already-applied uncertain setter without replaying it', async () => {
     const f = await prepare();

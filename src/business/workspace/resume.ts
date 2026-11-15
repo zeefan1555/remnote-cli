@@ -89,7 +89,7 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
         parent: null,
         children: [],
         type: null,
-        text: change.kind === 'multiline' ? ['Workspace question'] : null,
+        text: change.kind === 'multiline' ? ['Workspace question'] : [],
         backText: change.kind === 'multiline' ? [] : null,
         document: false,
         folder: false,
@@ -154,22 +154,26 @@ export function verifyResumeReadback(
       continue;
     }
     // Read tags explicitly: ordinary native snapshots do not collect them. Do not bless current metadata.
-    const defaultFacts = Object.entries(actual.facts ?? {}).every(
-      ([key, value]) =>
-        ['createdAt', 'localUpdatedAt', 'updatedAt'].includes(key) ||
-        value === false ||
-        value === null ||
-        (['aliasRemIds', 'sourceRemIds'].includes(key) &&
-          Array.isArray(value) &&
-          value.length === 0)
-    );
+    const changedFacts = Object.entries(actual.facts ?? {})
+      .filter(
+        ([key, value]) =>
+          !(
+            ['createdAt', 'localUpdatedAt', 'updatedAt'].includes(key) ||
+            value === false ||
+            value === null ||
+            (['aliasRemIds', 'sourceRemIds'].includes(key) &&
+              Array.isArray(value) &&
+              value.length === 0)
+          )
+      )
+      .map(([key]) => `facts.${key}`);
     const forward =
       Array.isArray(intended.backText) &&
       (intended.backText.length > 0 ||
         intended.children.some((child) => expected.get(child)?.cardItem));
     const cards = actual.cards;
     if (
-      !defaultFacts ||
+      changedFacts.length ||
       actual.unsupported ||
       !Array.isArray(actual.tags) ||
       actual.tags.length ||
@@ -181,10 +185,30 @@ export function verifyResumeReadback(
       cards.some((card) => card.remId !== id || card.type !== 'forward') ||
       hash(contentProjection(actual)) !== hash(contentProjection(intended)) ||
       revisionHash(actual) !== revisionHash({ ...actual, ...intended })
-    )
+    ) {
+      const observed = { ...actual, ...contentProjection(actual) },
+        wanted = { ...intended, ...contentProjection(intended) };
+      const fields = [
+        ...Object.entries(wanted)
+          .filter(([key, value]) => hash(observed[key as keyof WorkspaceRem]) !== hash(value))
+          .map(([key]) => key),
+        ...changedFacts,
+        ...(actual.unsupported ? ['unsupported'] : []),
+        ...(!Array.isArray(actual.tags) || actual.tags.length ? ['tags'] : []),
+        ...(actual.powerups?.length ? ['powerups'] : []),
+        ...(actual.propertyValues?.length ? ['propertyValues'] : []),
+        ...(actual.portal ? ['portal'] : []),
+        ...(!Array.isArray(cards) ||
+        cards.length !== (forward ? 1 : 0) ||
+        cards.some((card) => card.remId !== id || card.type !== 'forward')
+          ? ['cards']
+          : []),
+      ];
       throw new Error(
-        `Resume created Rem differs from its proven default shape and journal effects: ${id}`
+        `Resume created Rem differs from its proven default shape and journal effects: ${id} ` +
+          `(fields: ${[...new Set(fields)].join(', ') || 'nativeRevision'})`
       );
+    }
     // New card identities are first observed here, not claimed to be a historical checkpoint.
     result.set(id, actual);
   }
