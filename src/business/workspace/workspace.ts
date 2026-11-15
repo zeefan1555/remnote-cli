@@ -49,6 +49,7 @@ import { projectOutline } from './outline.js';
 import {
   advanceEditGuard,
   applyRelation,
+  cardEvidence,
   guardRelations,
   relationOperations,
 } from './relations.js';
@@ -910,6 +911,11 @@ async function synchronizeWorkspace(
         hash(observedEditGuards.map((guard) => guard.id).sort()) !== hash([...protectedIds].sort()))
     )
       throw new Error('Incomplete exact native edit guard');
+    for (const guard of observedEditGuards ?? []) {
+      const cards = context.native.get(guard.id)?.cards;
+      if (Array.isArray(cards) && hash(cards.map((card) => card.id).sort()) !== hash(guard.cardIds))
+        throw new Error(`Sealed Card identities changed before native edit: ${guard.id}`);
+    }
     const initialEditGuards = journal?.editGuards ?? observedEditGuards;
     const expectedEditGuards =
       folded?.editGuards ?? (initialEditGuards ? structuredClone(initialEditGuards) : undefined);
@@ -1256,6 +1262,9 @@ async function synchronizeWorkspace(
               reviewHistoryPreserved: true,
               verification: {
                 planHash,
+                localHash: plan.inputHash!,
+                nativeBefore: cardEvidence(initialEditGuards!),
+                nativeAfter: cardEvidence(expectedEditGuards),
                 observedHashes: Object.fromEntries(
                   [...expected].map(([id, rem]) => [id, publicationRevisionHash(rem)])
                 ),
@@ -1403,7 +1412,13 @@ export async function recoverWorkspace(
         ? {
             editGuardsVerified: true,
             reviewHistoryPreserved: true,
-            verification: { planHash: journal.planHash, observedHashes: journal.final.hashes },
+            verification: {
+              planHash: journal.planHash,
+              localHash: journal.final.inputHash,
+              nativeBefore: cardEvidence(journal.editGuards!),
+              nativeAfter: cardEvidence(journal.final.editGuards),
+              observedHashes: journal.final.hashes,
+            },
           }
         : {}),
     };

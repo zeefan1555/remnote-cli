@@ -17,9 +17,12 @@ export function editGuard(
   const { tags: _tags, powerupStates: _powerups, ...invariant } = immutableProjection(rem);
   if (!Array.isArray(rem.cards) || rem.cards.some((card) => !Array.isArray(card.repetitionHistory)))
     throw new Error('Exact Card identities and review history are required for structural edits');
+  const cardIds = rem.cards.map((card) => card.id).sort();
+  if (new Set(cardIds).size !== cardIds.length) throw new Error('Duplicate native Card identities');
   return {
     id: rem.id,
     invariantHash: hash(invariant),
+    cardIds,
     reviewHash: hash(
       rem.cards.map(({ id, createdAt, repetitionHistory }) => ({
         id,
@@ -30,6 +33,13 @@ export function editGuard(
     tags: [...tags].sort(),
     powerups: { ...powerups },
   };
+}
+
+/** Compact evidence of complete live history; never copy private history bodies to a receipt. */
+export function cardEvidence(guards: EditGuard[]) {
+  return Object.fromEntries(
+    guards.map(({ id, cardIds, reviewHash }) => [id, { cardIds: [...cardIds], reviewHash }])
+  );
 }
 
 export function relationOperations(

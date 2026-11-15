@@ -24,6 +24,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   retaining `isCardItem` without independent Cards. New nested children beneath
   existing answers fail offline. Outline exposes actual/intent `cardItem`
   separately from unknown pre-publication native observations.
+- Guarded apply/resume/recovery receipts bind compact native-before/after Card
+  IDs and full-history digests to the exact plan and local input seal. Fresh
+  guards must agree with known sealed Card IDs before writing; unknown sealed
+  history can be verified in that same apply without inventing empty history.
 - Explicit `sync resume DIR --plan-hash HASH` reconstructs the original
   outgoing-only plan, verifies its ordered journal prefix and exact native IDs,
   reuses known created Rems and continues only unattempted steps. Uncertain

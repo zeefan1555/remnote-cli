@@ -300,6 +300,85 @@ const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =
   });
 
 describe('identity-preserving outline relationships', () => {
+  it('binds same-apply native Card evidence without replacing unknown sealed history with empty history', async () => {
+    const f = fixture();
+    const cards = (await f.backend.read(['question']))[0]!.cards!;
+    f.rems.get('question')!.cards = cards.map((card) => ({ ...card, repetitionHistory: null }));
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    await edit(
+      path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+          },
+        }) + source
+    );
+    const before = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(before.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toBeNull();
+    f.rems.get('question')!.cards = cards.map((card) => ({
+      ...card,
+      repetitionHistory: [{ score: 3 }],
+    }));
+    const reviewHash = hash(
+      f.rems
+        .get('question')!
+        .cards!.map(({ id, createdAt, repetitionHistory }) => ({
+          id,
+          createdAt,
+          repetitionHistory,
+        }))
+    );
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [path],
+      expectedLocalHash: before.localHash,
+    })) as {
+      planHash: string;
+      verification: {
+        planHash: string;
+        localHash: string;
+        nativeBefore: Record<string, { cardIds: string[]; reviewHash: string }>;
+        nativeAfter: Record<string, { cardIds: string[]; reviewHash: string }>;
+      };
+    };
+    expect(result).toMatchObject({ status: 'verified', complete: true, remoteWrites: 1 });
+    expect(result.verification.planHash).toBe(result.planHash);
+    expect(result.verification.localHash).toBe(before.localHash);
+    expect(result.verification.nativeBefore.question).toEqual({
+      cardIds: cards.map((card) => card.id),
+      reviewHash,
+    });
+    expect(result.verification.nativeAfter.question).toEqual(
+      result.verification.nativeBefore.question
+    );
+    const after = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(after.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toEqual([
+      { score: 3 },
+    ]);
+  });
+
+  it('rejects changed known sealed Card IDs before native-before evidence can bless a replacement', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+          },
+        }) + source
+    );
+    const cards = (await f.backend.read(['question']))[0]!.cards!;
+    f.rems.get('question')!.cards = cards.map((card) => ({ ...card, id: 'replacement-card' }));
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Sealed Card identities changed');
+    expect(f.calls).toEqual([]);
+  });
+
   it('creates an explicit empty direct answer without inventing a question or independent card', async () => {
     const f = await prepare();
     await edit(f.path, (source) =>
@@ -589,6 +668,14 @@ describe('identity-preserving outline relationships', () => {
   it('resumes a confirmed-after uncertain tag write without repeating any relationship operation', async () => {
     const f = await prepare();
     await relationships(f);
+    const before = await workspace.readWorkspace(directory, f.path, { outline: true });
+    const cards = before.outline!.nodes.question!.observed.cards!;
+    const proof = {
+      cardIds: cards.map((card) => card.id),
+      reviewHash: hash(
+        cards.map(({ id, createdAt, repetitionHistory }) => ({ id, createdAt, repetitionHistory }))
+      ),
+    };
     const original = f.backend.setTag!;
     f.backend.setTag = vi.fn(async (...args) => {
       await original(...args);
@@ -602,7 +689,17 @@ describe('identity-preserving outline relationships', () => {
     const count = f.calls.length;
     f.backend.setTag = original;
     expect(await resumeWorkspace(directory, async () => f.backend, stopped.planHash)).toMatchObject(
-      { status: 'verified', complete: true, editGuardsVerified: true }
+      {
+        status: 'verified',
+        complete: true,
+        editGuardsVerified: true,
+        verification: {
+          planHash: stopped.planHash,
+          localHash: before.localHash,
+          nativeBefore: { question: proof },
+          nativeAfter: { question: proof },
+        },
+      }
     );
     expect(f.calls).toHaveLength(count);
   });
@@ -661,6 +758,18 @@ describe('identity-preserving outline relationships', () => {
       await edit(f.path, (source) =>
         source.replace('    - Because', '    - Label ^insert-label\n    - Because')
       );
+      const before = await workspace.readWorkspace(directory, f.path, { outline: true });
+      const questionCards = before.outline!.nodes.question!.observed.cards!;
+      const proof = {
+        cardIds: questionCards.map((card) => card.id),
+        reviewHash: hash(
+          questionCards.map(({ id, createdAt, repetitionHistory }) => ({
+            id,
+            createdAt,
+            repetitionHistory,
+          }))
+        ),
+      };
       const original = LocalState.prototype.setLocal;
       const spy = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
         this: LocalState,
@@ -688,6 +797,11 @@ describe('identity-preserving outline relationships', () => {
           status: 'recovered',
           complete: true,
           remoteWrites: 0,
+          verification: {
+            localHash: before.localHash,
+            nativeBefore: { question: proof },
+            nativeAfter: { question: proof },
+          },
         });
         const read = await workspace.readWorkspace(directory, f.path, { outline: true });
         expect(read.outline!.nodes.question!.observed.tags).toEqual(['home']);

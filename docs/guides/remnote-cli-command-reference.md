@@ -219,7 +219,19 @@ verified native publication; a new question's future Card IDs remain unknown.
 External policy checkers can validate this parsed intent before passing
 `--expected-local-hash` to apply. A stale/malformed seal fails before backend
 creation. Guarded verified apply returns `editGuardsVerified`,
-`reviewHistoryPreserved`, and `verification: {planHash, observedHashes}`. Match
+`reviewHistoryPreserved`, and `verification: {planHash, localHash, nativeBefore,
+nativeAfter, observedHashes}`. `localHash` is this apply's frozen input seal;
+both native evidence maps cover the exact protected existing Rem IDs. Each value
+contains sorted unique `cardIds` and `reviewHash`: SHA-256 of canonical JSON for
+the ID-ordered `cards.map(({id, createdAt, repetitionHistory}) =>
+({id, createdAt, repetitionHistory}))`, with object keys recursively sorted.
+Live `cards` and every `repetitionHistory` must be arrays; null/missing history
+fails. Known sealed Card IDs must match the fresh native IDs before any mutation.
+Unknown sealed history remains unknown until this same apply reads live facts;
+there is no preliminary refresh and no null-to-empty conversion. Before/after
+Card IDs and history digests must match. Resume preserves the original before
+evidence and input seal; verified-publication recovery returns the same shape.
+No private history bodies are copied into the journal or receipt. Match
 required nodes against the subsequent outline's `observed.revisionHash`; an
 effective local property alone does not prove the native write. No learning-card
 policy or plugin registry is part of this generic sync interface.
