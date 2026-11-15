@@ -3715,6 +3715,424 @@ describe('controlled RemNote workspace', () => {
     expect(await f.backend.cardFacts('question')).toEqual(cards);
     expect(f.calls).toEqual([]);
   });
+  it('imports bounded new empty descendants and preserves their identities on the next sync', async () => {
+    const f = await prepare();
+    f.rems.get('chapter')!.children.unshift('incoming');
+    f.rems.set('incoming', native('incoming', [], { parent: 'chapter', children: ['leaf'] }));
+    f.rems.set('leaf', native('leaf', ['Native leaf'], { parent: 'incoming', tags: ['home'] }));
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+      incoming: ['incoming', 'leaf'],
+      remoteWrites: 0,
+      selection: { addedIds: ['incoming', 'leaf'] },
+    });
+    const state = await loadState(directory);
+    expect(state.entries.incoming?.path).toBe(f.path);
+    expect(state.entries.leaf?.path).toBe(f.path);
+    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+    expect(await readPrivate(directory, state.entries.incoming!.rawPath)).toContain('"leaf"');
+    const identity = await readPrivate(directory, IDENTITY);
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'unchanged',
+      remoteWrites: 0,
+    });
+    expect(await readPrivate(directory, IDENTITY)).toBe(identity);
+    expect(f.backend.enumerate).toHaveBeenCalledTimes(1);
+    expect(f.calls).toEqual([]);
+  });
+  it('merges incoming nested native documents with a local body edit in the selected document', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+    f.rems.get('daily')!.children.push('incoming-doc');
+    f.rems.set(
+      'incoming-doc',
+      native('incoming-doc', ['New native document'], {
+        parent: 'daily',
+        document: true,
+        children: ['incoming-note'],
+      })
+    );
+    f.rems.set(
+      'incoming-note',
+      native('incoming-note', ['A remote note'], { parent: 'incoming-doc' })
+    );
+    expect(
+      await pushWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({
+      status: 'verified',
+      incoming: ['incoming-doc', 'incoming-note'],
+      updated: ['answer'],
+    });
+    const state = await loadState(directory),
+      newPath = state.entries['incoming-doc']!.path;
+    expect(newPath).not.toBe(f.path);
+    expect(await readPrivate(directory, newPath)).toContain('A remote note');
+    expect(await readPrivate(directory, f.path)).toContain('Local answer');
+    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+    expect(f.calls).toEqual(['answer:text']);
+  });
+  it('rejects same-parent local and incoming insertions before any native write', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => addNodes(source, { n: 'text' }, '\n- Local note ^local-n\n'));
+    f.rems.get('daily')!.children.push('incoming');
+    f.rems.set('incoming', native('incoming', [], { parent: 'daily' }));
+    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'conflict',
+      remoteWrites: 0,
+      conflicts: expect.arrayContaining([
+        expect.objectContaining({ id: 'daily', reason: 'remote-structure' }),
+      ]),
+    });
+    expect(f.calls).toEqual([]);
+    expect((await loadState(directory)).entries).toEqual(f.state.entries);
+  });
+  it('preserves both incoming Portal identities, query facts and an unselected membership target', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Local revised answer'));
+    f.rems.get('question')!.children.push('incoming-portal');
+    f.rems.set(
+      'incoming-portal',
+      native('incoming-portal', [], {
+        parent: 'question',
+        type: 6,
+        children: ['incoming-wrapper'],
+        portal: {
+          type: 4,
+          directlyIncludedRemIds: ['incoming-wrapper'],
+          query: null,
+          filter: null,
+        },
+      })
+    );
+    f.rems.set(
+      'incoming-wrapper',
+      native('incoming-wrapper', [], {
+        parent: 'incoming-portal',
+        type: 6,
+        portal: { type: null, directlyIncludedRemIds: ['subdoc'], query: null, filter: null },
+      })
+    );
+    const targetRaw = await readPrivate(directory, f.state.entries.subdoc!.rawPath);
+    const beforeCards = await f.backend.cardFacts('question');
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({
+      status: 'verified',
+      incoming: ['incoming-portal', 'incoming-wrapper'],
+      updated: ['answer'],
+      selection: { verificationIds: expect.arrayContaining(['subdoc']) },
+    });
+    const state = await loadState(directory);
+    expect(state.entries.question!.editable).toBe(true);
+    for (const id of ['incoming-portal', 'incoming-wrapper']) {
+      expect(state.entries[id]!.editable).toBe(false);
+      expect(JSON.parse(await readPrivate(directory, state.entries[id]!.rawPath))).toMatchObject({
+        id,
+        cards: [],
+        portal: { query: null, filter: null },
+      });
+    }
+    expect(await f.backend.cardFacts('question')).toEqual(beforeCards);
+    expect(await readPrivate(directory, state.entries.subdoc!.rawPath)).toBe(targetRaw);
+    expect(state.remoteVersions!.subdoc).toEqual(f.state.remoteVersions!.subdoc);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({
+      status: 'unchanged',
+      remoteWrites: 0,
+    });
+    expect(f.calls).toEqual(['answer:text']);
+  });
+  it.each(['query', 'missing', 'duplicate', 'parent', 'cycle', 'graft', 'tag'] as const)(
+    'rejects incomplete or unsafe incoming %s before an unrelated local edit writes',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
+      const added = f.rems.get('incoming')!;
+      if (kind === 'query')
+        Object.assign(added, { type: 6, portal: { type: 4, directlyIncludedRemIds: [] } });
+      if (kind === 'missing') f.rems.delete('incoming');
+      if (kind === 'duplicate') added.children = ['leaf', 'leaf'];
+      if (kind === 'parent') added.parent = 'daily';
+      if (kind === 'cycle') added.children = ['incoming'];
+      if (kind === 'graft') added.children = ['basic'];
+      if (kind === 'tag') added.tags = ['unbound-tag'];
+      const bytes = await readPrivate(directory, f.path);
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { apply: true })
+      ).rejects.toThrow();
+      expect(f.calls).toEqual([]);
+      expect(await readPrivate(directory, f.path)).toBe(bytes);
+      expect((await loadState(directory)).entries).toEqual(f.state.entries);
+    }
+  );
+  it('keeps additions in unselected documents outside discovery', async () => {
+    const f = await prepare();
+    f.rems.get('subdoc')!.children.push('incoming');
+    f.rems.set('incoming', native('incoming', [], { parent: 'subdoc' }));
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({
+      status: 'unchanged',
+      remoteWrites: 0,
+    });
+    expect((await loadState(directory)).entries).toEqual(f.state.entries);
+    expect(f.backend.read).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['incoming']),
+      expect.anything()
+    );
+  });
+  it.each(['remove', 'move', 'reorder'] as const)(
+    'retains an explicit remote %s conflict even alongside a valid incoming branch',
+    async (kind) => {
+      const f = await prepare();
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
+      if (kind === 'remove') {
+        f.rems.delete('answer');
+        f.rems.get('question')!.children = [];
+      }
+      if (kind === 'move') {
+        f.rems.get('basic')!.parent = 'subdoc';
+        f.rems.get('daily')!.children = f.rems
+          .get('daily')!
+          .children.filter((id) => id !== 'basic');
+        f.rems.get('subdoc')!.children = ['basic'];
+      }
+      if (kind === 'reorder') f.rems.get('daily')!.children.reverse();
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'conflict',
+        remoteWrites: 0,
+        conflicts: expect.any(Array),
+      });
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('binds incoming contents and the exact added ID set to a frozen preview', async () => {
+    const f = await prepare();
+    f.rems.get('chapter')!.children.push('incoming');
+    f.rems.set('incoming', native('incoming', ['Before'], { parent: 'chapter' }));
+    const plan = (await syncWorkspace(directory, async () => f.backend)) as { planHash: string };
+    f.rems.get('incoming')!.text = ['After'];
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, planHash: plan.planHash })
+    ).rejects.toThrow('exact frozen');
+    expect((await loadState(directory)).entries).toEqual(f.state.entries);
+    expect(f.calls).toEqual([]);
+  });
+  it('imports native card history and tags without creating or replacing native cards', async () => {
+    const f = await prepare();
+    f.rems.get('chapter')!.children.push('incoming-card');
+    const cards: WorkspaceRem['cards'] = [
+      {
+        id: 'existing-native-card',
+        remId: 'incoming-card',
+        type: 'backward',
+        createdAt: 2,
+        repetitionHistory: [{ time: 17, score: 1 }],
+        nextRepetitionTime: 23,
+        lastRepetitionTime: 17,
+        timesWrongInRow: 0,
+      },
+    ];
+    f.rems.set(
+      'incoming-card',
+      native('incoming-card', ['Native front'], {
+        parent: 'chapter',
+        backText: ['Native back'],
+        cards,
+        tags: ['home'],
+      })
+    );
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+      remoteWrites: 0,
+      incoming: ['incoming-card'],
+    });
+    const state = await loadState(directory);
+    expect(
+      JSON.parse(await readPrivate(directory, state.entries['incoming-card']!.rawPath))
+    ).toMatchObject({ cards, tags: ['home'] });
+    expect(await readPrivate(directory, f.path)).toContain('Native back');
+    expect(f.calls).toEqual([]);
+  });
+  it('rejects an unpublishable incoming document before a mixed native edit', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+    f.rems.get('chapter')!.children.push('incoming');
+    f.rems.set(
+      'incoming',
+      native('incoming', ['x'.repeat(4 * 1024 * 1024)], { parent: 'chapter' })
+    );
+    await expect(syncWorkspace(directory, async () => f.backend, { apply: true })).rejects.toThrow(
+      /exceeds|MiB|large|size/i
+    );
+    expect(f.calls).toEqual([]);
+    expect((await loadState(directory)).entries).toEqual(f.state.entries);
+  });
+  it('checks the complete incoming publication ledger before a mixed native edit', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+    f.rems.get('chapter')!.children.push('incoming');
+    f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
+    const bytes = Buffer.byteLength;
+    vi.spyOn(Buffer, 'byteLength').mockImplementation((value, encoding) =>
+      typeof value === 'string' && value.includes('"previousHash":') && value.includes('"writes":')
+        ? fileOps.MAX_METADATA_BYTES + 1
+        : bytes(value, encoding)
+    );
+    await expect(syncWorkspace(directory, async () => f.backend, { apply: true })).rejects.toThrow(
+      'publication metadata exceeds 32 MiB'
+    );
+    expect(f.calls).toEqual([]);
+    expect((await loadState(directory)).entries).toEqual(f.state.entries);
+  });
+  it.each(['child', 'query', 'card'] as const)(
+    'rejects an incoming %s race at the first write boundary',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set(
+        'incoming',
+        native('incoming', [], {
+          parent: 'chapter',
+          type: 6,
+          portal: { type: 4, directlyIncludedRemIds: [], query: null, filter: null },
+          cards: [],
+        })
+      );
+      const guard = f.backend.guard;
+      f.backend.guard = vi.fn(async (ids) => {
+        const digest = await guard(ids);
+        if (kind === 'child') f.rems.get('incoming')!.children = ['late'];
+        if (kind === 'query') f.rems.get('incoming')!.portal!.query = 'changed';
+        if (kind === 'card')
+          f.rems.get('incoming')!.cards = [
+            {
+              id: 'late-card',
+              remId: 'incoming',
+              type: 'forward',
+              createdAt: 1,
+              repetitionHistory: [],
+              nextRepetitionTime: null,
+              lastRepetitionTime: null,
+              timesWrongInRow: null,
+            },
+          ];
+        return digest;
+      });
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'conflict',
+        complete: false,
+        remoteWrites: 0,
+      });
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it.each(['publication', 'staging'] as const)(
+    'recovers incoming identity and a mixed local creation after %s failure without replay',
+    async (point) => {
+      const f = await prepare();
+      await edit(f.path, (source) =>
+        addNodes(source, { n: 'text' }, '\n- New local note ^local-n\n')
+      );
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
+      const original = LocalState.prototype.setLocal,
+        link = fileOps.linkPrivate;
+      const stateSpy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (key, value) {
+          if (point === 'publication' && key.startsWith('publication:') && value !== null)
+            throw new Error('Injected incoming publication failure');
+          return original.call(this, key, value);
+        });
+      const fileSpy = vi
+        .spyOn(fileOps, 'linkPrivate')
+        .mockImplementation(async (root, from, to) => {
+          if (point === 'staging' && to === f.path)
+            throw new Error('Injected incoming staging failure');
+          return link(root, from, to);
+        });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({
+        status: 'publication-incomplete',
+        ids: expect.any(Object),
+      });
+      stateSpy.mockRestore();
+      fileSpy.mockRestore();
+      const calls = [...f.calls];
+      expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+        status: 'recovered',
+        remoteWrites: 0,
+      });
+      expect(f.calls).toEqual(calls);
+      const state = await loadState(directory);
+      expect(state.entries.incoming).toBeDefined();
+      expect(state.entries.created_1).toBeDefined();
+      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({
+        status: 'unchanged',
+        remoteWrites: 0,
+      });
+    }
+  );
+  it.each(['identity', 'query', 'card'] as const)(
+    'refuses changed incoming %s during verified-publication recovery without replay',
+    async (kind) => {
+      const f = await prepare();
+      f.rems.get('chapter')!.children.push('incoming');
+      f.rems.set(
+        'incoming',
+        native('incoming', [], {
+          parent: 'chapter',
+          type: 6,
+          cards: [],
+          portal: { type: 4, directlyIncludedRemIds: [], query: null, filter: null },
+        })
+      );
+      const original = LocalState.prototype.setLocal;
+      const spy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (key, value) {
+          if (key.startsWith('publication:') && value !== null)
+            throw new Error('Injected publication failure');
+          return original.call(this, key, value);
+        });
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'publication-incomplete',
+        remoteWrites: 0,
+      });
+      spy.mockRestore();
+      if (kind === 'identity') {
+        f.rems.get('incoming')!.children.push('late');
+        f.rems.set('late', native('late', [], { parent: 'incoming' }));
+      }
+      if (kind === 'query') f.rems.get('incoming')!.portal!.query = 'late query';
+      if (kind === 'card')
+        f.rems.get('incoming')!.cards = [
+          {
+            id: 'late-card',
+            remId: 'incoming',
+            type: 'forward',
+            createdAt: 1,
+            repetitionHistory: [],
+            nextRepetitionTime: null,
+            lastRepetitionTime: null,
+            timesWrongInRow: null,
+          },
+        ];
+      await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(/changed/i);
+      expect(f.calls).toEqual([]);
+      expect((await loadState(directory)).entries).toEqual(f.state.entries);
+    }
+  );
   it('treats an untouched softbreak node as incoming rather than a fabricated local conflict', async () => {
     const f = fixture();
     f.rems.get('answer')!.text = ['First line\nSecond line'];
@@ -3913,16 +4331,13 @@ describe('controlled RemNote workspace', () => {
     expect(f.calls).toEqual([]);
     expect((await loadState(directory)).entries).toEqual(f.state.entries);
   });
-  it.each(['missing', 'new-child', 'move'] as const)(
+  it.each(['missing', 'move'] as const)(
     'reports remote %s without silently claiming global discovery or deleting content',
     async (kind) => {
       const f = await prepare();
       const before = await readPrivate(directory, f.path);
       if (kind === 'missing') f.rems.delete('answer');
-      else if (kind === 'new-child') {
-        f.rems.get('chapter')!.children.push('unbound');
-        f.rems.set('unbound', native('unbound', ['Remote new child'], { parent: 'chapter' }));
-      } else {
+      else {
         f.rems.get('answer')!.parent = 'chapter';
         f.rems.get('question')!.children = [];
         f.rems.get('chapter')!.children.push('answer');

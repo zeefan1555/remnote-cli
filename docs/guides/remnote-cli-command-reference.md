@@ -137,11 +137,13 @@ raw short codes do not certify writable semantics. The import receipt reports
 limited to the declared scope and snapshot time. Subtree or known-ID inspection
 cannot discover new top-level roots or prove current global completeness.
 
-Continuous sync reads bound IDs only, using public `findMany` batches of at most
-50. Its receipts always report `discoveryScope: "bound-ids"` and
-`globalDiscoveryComplete: false`; this is distinct from the historic initial
-import receipt. Unknown children, missing objects and reparenting are explicit
-failures or conflicts, not silently omitted content. New top-level roots are not
+Continuous sync probes bound IDs using public `findMany` batches of at most 50,
+then fully reads new descendants reached through selected Rems' exact child lists.
+Receipts report `discoveryScope: "bound-descendants"` when new IDs are found,
+otherwise `"bound-ids"`, and always `globalDiscoveryComplete: false`; this is
+distinct from the historic initial import receipt. Incomplete reads, missing
+objects and reparenting are explicit failures or conflicts, not silently omitted
+content. New top-level roots are not
 discoverable in this scope. Public `getAll` exceeds the current Bridge serializer's
 1,000-item limit, and empty siblings on parentless anchors do not enumerate roots.
 Global discovery needs a separately authorized Bridge change, release and device
@@ -314,7 +316,10 @@ practice direction/enabled state, tags and references. Structured facts use:
 
 - `powerups`: `{code, slots: [{slot, valueRemId, valueRichText}]}` entries.
 - `propertyValues`: `{propertyId, valueRemId, valueRichText}` entries (not `properties`).
-- `portal`: `{type, directlyIncludedRemIds}`, or `null`.
+- `portal`: `{type, directlyIncludedRemIds, query?, filter?}`, or `null`. Query and
+  Filter are opaque, read-only values from public search-Portal slots. An absent
+  field means uncollected, while an observed empty property is `null`. New incoming
+  Portals require both reads (or verified absence of the search-Portal Powerup).
 - `cards`: exact `id`, `remId`, forward/backward or `{clozeId}` type, `createdAt`,
   `repetitionHistory`, `nextRepetitionTime`, `lastRepetitionTime`, `timesWrongInRow`.
   History and scheduling fields are read-only.
@@ -471,6 +476,20 @@ records its native type and directly included Rem IDs; it does not grant Portal
 write support. Raw-record preservation, metadata mapping, writable support and
 live/UI verification are separate coverage claims.
 
+Incoming structure has a separate bounded surface: new branches below already
+bound, selected Rems are imported, including empty text Rems, native cards,
+nested Folder/Document boundaries and opaque Portal children. Existing child IDs
+must remain an ordered subsequence with unchanged parents; moves, removal and
+reordering stay conflicts. Local creation and remote insertion beneath the same
+parent conflict rather than guessing sibling positions. Other supported local
+edits/creates can share the batch. The complete planned graph, new file paths,
+identity coverage and rendered sizes are checked before the first native write.
+Portal membership and references never authorize discovering new roots. Known
+targets are verified without absorbing unselected content/clocks; incoming tags
+require exact, already-sealed native ancestor paths, never automatic Tag creation.
+All collected raw facts/Card histories and both Portal identities are retained,
+even when the established read-only rendering folds an empty reference wrapper.
+
 ### Common baseline and convergence
 
 Compare semantic content for each stable Rem across baseline, local and remote.
@@ -550,9 +569,11 @@ guards and discovery, reads the public SDK `getChildrenRem()` entity list. The
 optional public `children` field is not proof of emptiness: when present, it must
 be a complete ordered subsequence of that list. Entity IDs must be valid, unique
 and owned by the requested parent. Unknown, malformed or failed entity reads are
-errors, never an empty-list fallback. All entity types are retained; native
-additions or reordering still stop sync as structural conflicts, even for queries
-or portals. This read correction does not import or rebase unknown structure.
+errors, never an empty-list fallback. All entity types are retained. New descendants
+are read in bounded exact-ID batches (at most 100000 new Rems), with complete
+parent/child ownership and query/Card/tag observations; they are not ignored as
+SDK noise. Additions after the plan is frozen are concurrent changes, not an
+invitation to expand an in-progress write or replay an uncertain operation.
 Cheap probes still omit Card/history and full native-flag reads.
 Read results retain input order; failures stop their pool and drain in-flight
 work before returning, without passing partial reads into writes. Parsed source
@@ -572,13 +593,16 @@ Current receipt fields (arrays contain exact Rem IDs unless noted):
 Read `remoteChecked` as actual remote-read evidence, not a constant: an empty
 selection can return offline `unchanged`
 with `remoteChecked: false` and no checked IDs. Bound-ID planning reports
-`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`; even an all-scope
+`discoveryScope: "bound-ids"` (or `"bound-descendants"` for new descendants),
+`globalDiscoveryComplete: false`; even an all-scope
 success cannot establish global discovery. `diff` is local-only and reports
 `remoteChecked: false`; it cannot establish remote freshness or convergence.
-`checkedIds` / `checkedCount` describe the initial bound-ID verification set,
+`checkedIds` / `checkedCount` describe the bound IDs, discovered descendants and verification set,
 not the number of SDK calls or repeated reads. Created IDs have separate `ids`
 and readback receipts. `selection` records canonical `paths`, selected `files`,
-actual local-key `outgoingKeys`, `reconcileIds` and disjoint `verificationIds`.
+actual local-key `outgoingKeys`, `reconcileIds`, disjoint `verificationIds`, and
+optional `addedIds` for fully observed incoming descendants. New native descendants
+also appear in `incoming`; they do not use the outgoing `new:key` assignment map.
 Verification-only dependencies do not advance their shared native baseline or
 content clocks. Unselected bytes and unassigned bullets remain intact. Selected
 layout-only apply advances only local layout/file hashes and display attributes;
@@ -627,6 +651,9 @@ writes followed by validation or publication failure are not a zero-write failur
 and must be reconciled. A recovered local publication reports `status: "recovered"`,
 `complete: true`, `remoteWrites: 0` and the existing `ids`; it does not mean the
 original operation had zero remote writes.
+The original incoming ID set remains sealed in the journal. Recovery verifies
+those identities and final hashes, distinguishes recorded outgoing creations,
+and refuses additional descendants or changed query/card/structure facts.
 
 `sync resume DIR --plan-hash HASH` is a separate, explicit write entry point,
 not an automatic retry by `apply`. Ensure the original CLI writer has stopped;

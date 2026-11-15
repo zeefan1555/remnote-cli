@@ -13,10 +13,21 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   list consistently in cheap probes, full reads, guards and discovery. Optional or
   incomplete public `children` fields no longer create false emptiness. Entity IDs,
   uniqueness, parent ownership and declared-child completeness/order are validated;
-  read errors and inconsistent lists fail closed. Native additions (including
-  portals/queries) and reordering remain structural conflicts, not implicit imports.
+  read errors and inconsistent lists fail closed. Reordering, moves and removals
+  remain structural conflicts; new descendants use the bounded incoming plan below.
 
 ### Added
+
+- Bidirectional sync discovers complete new native branches only below selected,
+  already-bound Rems, including empty Rems, nested documents/folders and read-only
+  Portal/query nodes. Old child IDs retain their order; same-parent local creation
+  races, incomplete facts, duplicate/cyclic identities and missing tag ancestors
+  fail before native writes. Stable new IDs, complete Card snapshots and opaque
+  Query/Filter values are sealed into the plan, optimistic checks and recoverable
+  publication. Portal members remain verification dependencies, not discovery roots.
+  New files and the whole intended publication are validated before mixed writes;
+  unrelated documents and dependency clocks remain untouched. No top-level-root
+  discovery, automatic deletion or uncertain-write replay is introduced.
 
 - Standard Obsidian direct-tag projection: document YAML tags and per-bullet inline
   tags bind one-to-one to native Tag RemIDs. Independent membership deltas merge

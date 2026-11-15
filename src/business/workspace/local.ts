@@ -14,7 +14,7 @@ import {
   writePrivate,
 } from './files.js';
 import { FrozenFiles } from './frozen-files.js';
-import { stageSnapshot } from './publication.js';
+import { preparePublication, stageSnapshot } from './publication.js';
 import {
   documentMetadata,
   bindPreparedDocument,
@@ -82,11 +82,7 @@ const remSchema = z
     powerups: nativeSchema.shape.powerups.optional(),
     powerupPresence: z.record(z.string(), z.boolean()).optional(),
     propertyValues: nativeSchema.shape.propertyValues.optional(),
-    portal: z
-      .object({ type: z.json().nullable(), directlyIncludedRemIds: z.array(idSchema).nullable() })
-      .strict()
-      .nullable()
-      .optional(),
+    portal: nativeSchema.shape.portal.optional(),
     cards: z.array(cardMetadataSchema).nullable().optional(),
     facts: nativeDetailsSchema.partial().optional(),
     collected: z.array(z.string()).optional(),
@@ -286,7 +282,7 @@ export function documentPaths(
 }
 
 /** Only caller-checked clean files may be replaced. Raw objects are retained separately, never rendered lossily. */
-export async function writeSnapshot(
+export async function prepareSnapshot(
   root: string,
   kbId: string,
   rems: WorkspaceRem[],
@@ -303,7 +299,7 @@ export async function writeSnapshot(
   sources: Map<string, ParsedDocument> = new Map(),
   assignedIds: Record<string, string> = {},
   selection?: SyncSelection
-): Promise<WorkspaceState> {
+) {
   const errors = validateGraph(rems, coverage.rootIds);
   if (errors.length) throw new Error(`Incomplete native graph: ${errors.slice(0, 10).join('; ')}`);
   const byId = new Map(rems.map((rem) => [rem.id, rem]));
@@ -390,7 +386,9 @@ export async function writeSnapshot(
   const files = frozen ?? (await FrozenFiles.capture(root));
   await files.check();
   const reconciled = new Set(
-    selection ? [...selection.reconcileIds, ...Object.values(assignedIds)] : byId.keys()
+    selection
+      ? [...selection.reconcileIds, ...(selection.addedIds ?? []), ...Object.values(assignedIds)]
+      : byId.keys()
   );
   const localVersions = { ...previous?.localVersions },
     remoteVersions = { ...previous?.remoteVersions };
@@ -426,7 +424,7 @@ export async function writeSnapshot(
   };
   const writes = new Map<string, string | null>(originals);
   for (const [id, path] of paths) {
-    if (selection && !selection.files.includes(path)) {
+    if (selection && !selection.files.includes(path) && !selection.addedIds?.includes(id)) {
       const prior = Object.entries(previous?.documents ?? {}).find(([, doc]) => doc.rootId === id);
       if (!prior) throw new Error('Unselected document has no shared baseline');
       const [priorPath, document] = prior;
@@ -513,7 +511,15 @@ export async function writeSnapshot(
   const frozenHashes = files.hashes();
   for (const [path, content] of writes)
     if (content !== null && frozenHashes[path] === hash(content)) writes.delete(path);
-  await stageSnapshot(root, state, previous, writes, files);
+  preparePublication(root, state, previous, writes, files);
+  return { state, writes, files };
+}
+
+export async function writeSnapshot(
+  ...args: Parameters<typeof prepareSnapshot>
+): Promise<WorkspaceState> {
+  const { state, writes, files } = await prepareSnapshot(...args);
+  await stageSnapshot(args[0], state, args[3], writes, files);
   return state;
 }
 

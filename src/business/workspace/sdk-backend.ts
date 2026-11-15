@@ -1,6 +1,7 @@
 import type { ReactRNPlugin, PluginRem, RichTextInterface } from '@remnote/plugin-sdk';
 import { cardMetadataSchema } from './metadata.js';
-import { RemType } from '../sdk-constants.generated.js';
+import { BuiltInPowerupCodes, RemType } from '../sdk-constants.generated.js';
+import { builtinSlotName } from '../powerup-read.js';
 import { idSchema } from './identity.js';
 import { immutableProjection } from './snapshots.js';
 import { mapReads, settleReads } from './read-pool.js';
@@ -176,6 +177,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       throw new Error('Incomplete native practice direction');
     const cards = cardsSnapshot(await rem.getCards(), rem._id);
     let portal: WorkspaceRem['portal'];
+    let searchPortal: boolean | undefined;
     if (rem.type === RemType.PORTAL) {
       const [rawType, members] = await settleReads([
         rem.getPortalType(),
@@ -194,7 +196,24 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
         );
       const ids = members.map((member) => idSchema.parse(member?._id));
       if (new Set(ids).size !== ids.length) throw new Error('Ambiguous native portal membership');
-      portal = { type, directlyIncludedRemIds: ids };
+      searchPortal = boolean(
+        await rem.hasPowerup(BuiltInPowerupCodes.SearchPortal),
+        'search Portal'
+      );
+      const [query, filter] = searchPortal
+        ? await settleReads(
+            ['q', 'f'].map((slot) =>
+              rem.getPowerupProperty(
+                BuiltInPowerupCodes.SearchPortal,
+                builtinSlotName(BuiltInPowerupCodes.SearchPortal, slot)
+              )
+            )
+          )
+        : [null, null];
+      // The SDK's string representation is opaque native data, never parsed or written back.
+      if ([query, filter].some((value) => value != null && typeof value !== 'string'))
+        throw new Error('Incomplete native Portal query/filter value');
+      portal = { type, directlyIncludedRemIds: ids, query: query ?? null, filter: filter ?? null };
     }
     return {
       id: rem._id,
@@ -211,6 +230,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       public: observed,
       cards,
       ...(portal === undefined ? {} : { portal }),
+      ...(searchPortal === undefined ? {} : { powerupPresence: { sp: searchPortal } }),
       facts: {
         isTable: boolean(table, 'table'),
         isProperty: boolean(property, 'property'),
@@ -266,7 +286,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
           4,
           async (code) => [code, boolean(await rem.hasPowerup(code), `Powerup ${code}`)] as const
         );
-        snapshot.powerupPresence = Object.fromEntries(values);
+        snapshot.powerupPresence = { ...snapshot.powerupPresence, ...Object.fromEntries(values) };
       }
       return snapshot;
     });

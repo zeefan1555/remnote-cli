@@ -195,10 +195,16 @@ import is not a merge. `sync` is a pure command group: use `sync plan DIR` for a
 zero-native-write preview and `sync apply DIR` for execution, with no `--apply`
 flag on apply. Do not restore root actions or `pull`/`push` aliases.
 Preview/apply reports `incoming`, `outgoing`,
-`converged`, `metadataRefresh` and archived `resolutions`. Continuous reads cover bound IDs only (batches
-of at most 50), with `globalDiscoveryComplete: false`; new top-level roots are
-outside scope. Missing objects, unknown children and reparenting must fail or
-conflict. Direct Markdown edits followed by one `sync apply DIR` are the daily
+`converged`, `metadataRefresh` and archived `resolutions`. Continuous reads follow
+selected bound Rems' native children (batches of at most 50), including fully
+observed new empty Rems, nested Documents/Folders and Portal/query descendants.
+Check `selection.addedIds` in the frozen plan; these are native identities, not
+local creations. Receipts report `bound-descendants` when additions are found,
+otherwise `bound-ids`, always with `globalDiscoveryComplete: false`; new top-level
+roots and children of unselected Rems remain outside scope. Missing old objects,
+movement, reordering and same-parent local/remote insertion fail or conflict.
+See the command reference for discovery, raw-fact and recovery guarantees.
+Direct Markdown edits followed by one `sync apply DIR` are the daily
 path; no manual read/save/lint/diff/preview pipeline is required. When controlled
 Agent edit clocks are needed, optionally use `sync read DIR PATH`, then
 `sync save DIR PATH --content-file FILE --expected-file-hash HASH` with the same

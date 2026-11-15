@@ -72,7 +72,8 @@ export function verificationClosure(
   plan: WorkspacePlan,
   candidates: string[]
 ): string[] {
-  const required = new Set(candidates),
+  const candidateIds = new Set(candidates),
+    required = new Set(candidates),
     structured = new Set<string>();
   const include = (id: string) => {
     if (context.native.has(id)) required.add(id);
@@ -103,7 +104,7 @@ export function verificationClosure(
     for (const target of referenceIds(change.fields)) include(target);
     for (const tag of change.tags?.after ?? []) ancestors(tag);
   }
-  return sorted(required).filter((id) => !candidates.includes(id));
+  return sorted(required).filter((id) => !candidateIds.has(id));
 }
 
 export async function selectPlan(

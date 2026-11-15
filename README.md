@@ -132,11 +132,17 @@ archiving both versions. Direct file edits do not establish a trusted local cloc
 missing, equal, or invalid clocks preserve both versions as `untrusted-edit-order`.
 Independent front/back edits to the same basic card still share one whole-Rem
 merge unit, not individual fields.
-Legacy `pull`/`push` aliases are removed. Continuous discovery is limited to bound
-IDs (`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`), read in
-batches of at most 50. Unknown children, missing Rems and reparenting fail or
-conflict; new top-level roots are not discovered by this scope. An initial archive
-import does not prove continuous whole-library coverage.
+Legacy `pull`/`push` aliases are removed. Continuous discovery follows the native
+children of selected bound Rems in batches of at most 50. Fully observed new
+descendants, including empty Rems, nested Documents/Folders and Portal/query
+children, join the frozen plan as `selection.addedIds`. Their exact identities,
+native cards, tags and collected raw facts are preserved. Existing children must
+keep their parent and relative order; deletion, movement, reordering and concurrent
+local/remote insertion under one parent fail or conflict. Receipts use
+`discoveryScope: "bound-descendants"` when additions are found, otherwise
+`"bound-ids"`; both keep `globalDiscoveryComplete: false`. New top-level roots
+and children of unselected Rems are outside scope. An initial archive import does
+not prove continuous whole-library coverage.
 
 Ordinary nested Markdown lists use short, stable Obsidian anchors; a single
 hidden `<!-- remnote:document-key -->` before H1 binds each imported document.

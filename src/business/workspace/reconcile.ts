@@ -20,7 +20,8 @@ import {
 import { remoteVersion, usableVersion } from './versions.js';
 import { mapReads } from './read-pool.js';
 import { verificationClosure } from './selection.js';
-import { mergeTags, nativeTagToken, registerTags, tagSet } from './tags.js';
+import { mergeTags, nativeTagToken, registerTagIds, registerTags, tagSet } from './tags.js';
+import { readIncoming } from './incoming.js';
 
 function batches(ids: string[]): string[][] {
   return Array.from({ length: Math.ceil(ids.length / 50) }, (_, index) =>
@@ -33,9 +34,10 @@ export async function readRemote(
   context: LocalContext,
   local: WorkspacePlan,
   backend: WorkspaceBackend,
-  powerupCodes?: Record<string, string[]>
+  powerupCodes?: Record<string, string[]>,
+  created: Map<string, WorkspaceRem> = new Map()
 ): Promise<Map<string, WorkspaceRem>> {
-  const result = new Map<string, WorkspaceRem>(),
+  const result = new Map(created),
     ids = local.selection
       ? [...local.selection.reconcileIds, ...local.selection.verificationIds].sort()
       : [...context.native.keys()].sort();
@@ -173,8 +175,82 @@ export async function readRemote(
     return batch.map((id) => withNativeSnapshot(context.native.get(id)!, byId.get(id)!));
   });
   for (const rem of nativeReads.flat()) result.set(rem.id, rem);
+  const addedIds = await readIncoming(context, local, result, backend, new Set(created.keys()));
+  if (addedIds.length) {
+    if (local.selection) local.selection.addedIds = addedIds;
+    const graph = new Map([...context.native, ...result]);
+    const additions = addedIds.map((id) => {
+      const rem = result.get(id)!;
+      for (const tag of rem.tags ?? [])
+        if (!context.native.has(tag))
+          throw new Error(`Incoming tag requires an existing sealed native ancestor path: ${tag}`);
+      return {
+        key: id,
+        path: '',
+        parent: rem.parent,
+        position: 0,
+        kind: 'text' as const,
+        cardItem: false,
+        fields: {},
+        tags: { before: [], after: rem.tags ?? [] },
+      };
+    });
+    const closure = verificationClosure(
+      { ...context, native: graph },
+      { ...local, changes: [...local.changes, ...additions] },
+      addedIds
+    );
+    const extra = closure.filter(
+      (id) => !full.has(id) && !addedIds.includes(id) && !created.has(id)
+    );
+    for (const batch of batches(extra)) {
+      const probes = await backend.readProbe(batch, { powerupCodes });
+      const rems = await backend.read(batch, { tags: true, powerupCodes });
+      if (
+        probes.length !== batch.length ||
+        rems.length !== batch.length ||
+        new Set(probes.map((probe) => probe.snapshot.id)).size !== batch.length ||
+        new Set(rems.map((rem) => rem.id)).size !== batch.length
+      )
+        throw new Error('Incomplete incoming verification dependency read');
+      for (const rem of rems) {
+        if (!batch.includes(rem.id)) throw new Error('Unexpected incoming verification identity');
+        const probe = probes.find((item) => item.snapshot.id === rem.id);
+        if (
+          !probe ||
+          hash(publicRevision(rem)) !==
+            hash(publicRevision(withPublicSnapshot(rem, probe.snapshot))) ||
+          hash(rem.tags) !== hash(probe.tags)
+        )
+          throw new Error(`Concurrent incoming verification dependency change: ${rem.id}`);
+        result.set(rem.id, withNativeSnapshot(context.native.get(rem.id)!, rem));
+      }
+    }
+    if (local.selection)
+      local.selection.verificationIds = tagSet([
+        ...local.selection.verificationIds,
+        ...closure.filter((id) => !local.selection!.reconcileIds.includes(id) && !created.has(id)),
+      ]);
+    // Child discovery is not an atomic SDK snapshot. Seal the complete observed frontier again.
+    await checkPublicRevision(
+      backend,
+      new Map([...addedIds, ...closure].map((id) => [id, result.get(id)!]))
+    );
+  }
   // Reject unprojectable incoming tag IDs before a mixed batch can perform any writes.
   registerTags(new Map([...context.native, ...result]), context.state.tagIds);
+  // New names are bound to already sealed native paths, never to an unselected remote rename.
+  const registered = registerTagIds(
+    context.native,
+    tagSet([...result.values()].flatMap((rem) => rem.tags ?? [])),
+    { ...context.state.tagIds, ...local.tagIds }
+  );
+  const tagIds = Object.fromEntries(
+    Object.entries(registered).filter(
+      ([token]) => !Object.hasOwn(context.state.tagIds ?? {}, token)
+    )
+  );
+  if (Object.keys(tagIds).length) local.tagIds = tagIds;
   return result;
 }
 
@@ -187,7 +263,7 @@ export function reconcile(
     ...local,
     changes: [...local.changes],
     remoteHashes: {},
-    incoming: [],
+    incoming: [...(local.selection?.addedIds ?? [])],
     converged: [],
     conflicts: [],
     resolutions: [],
@@ -201,6 +277,7 @@ export function reconcile(
     )
   );
   const metadataChanged: string[] = [];
+  const addedIds = new Set(local.selection?.addedIds ?? []);
   for (const [token, id] of Object.entries(local.tagIds ?? {})) {
     if (nativeTagToken(remote, id) !== token)
       throw new Error(`New tag binding changed remotely: ${token}/${id}`);
@@ -255,12 +332,18 @@ export function reconcile(
     const localEdited = localHash !== baseHash || localVersion?.contentHash === localHash,
       remoteEdited = remoteHash !== baseHash || nativeVersion.sinceBaseline === true;
     if (hash(base) !== hash(current)) metadataChanged.push(id);
-    // Structural moves/additions/removals are visible conflicts, never a silent subset refresh or delete.
+    // Only fully observed additions extend children; existing structure and relative order stay fixed.
     if (
       hash([base.parent, base.children, base.type]) !==
-        hash([current.parent, current.children, current.type]) ||
+        hash([
+          current.parent,
+          current.children.filter((child) => !addedIds.has(child)),
+          current.type,
+        ]) ||
       (base.document !== null && base.document !== current.document) ||
-      (base.folder !== null && base.folder !== current.folder)
+      (base.folder !== null && base.folder !== current.folder) ||
+      (hash(base.children) !== hash(current.children) &&
+        local.changes.some((change) => change.key.startsWith('new:') && change.parent === id))
     ) {
       conflict('remote-structure');
       continue;

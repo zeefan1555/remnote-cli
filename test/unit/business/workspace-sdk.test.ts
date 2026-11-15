@@ -53,6 +53,7 @@ function fixture(count = 2) {
       removeTag: vi.fn(async () => {}),
       addPowerup: vi.fn(async () => {}),
       hasPowerup: vi.fn(async () => false),
+      getPowerupProperty: vi.fn(async () => undefined),
       setText: vi.fn(async (value) => {
         object.text = value;
       }),
@@ -162,16 +163,43 @@ describe('public SDK sync adapter', () => {
     methods.getPortalType!.mockResolvedValue(4);
     methods.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r1' }]);
     const first = (await f.backend.read(['r0', 'r1']))[0]!;
-    expect(first.portal).toEqual({ type: 4, directlyIncludedRemIds: ['r1'] });
+    expect(first.portal).toEqual({
+      type: 4,
+      directlyIncludedRemIds: ['r1'],
+      query: null,
+      filter: null,
+    });
     expect(isReferencePortal(first)).toBe(true);
     expect(f.flags.get('r1')!.getPortalType).not.toHaveBeenCalled();
     expect(f.flags.get('r1')!.getPortalDirectlyIncludedRem).not.toHaveBeenCalled();
     methods.getPortalType!.mockResolvedValue(99);
     methods.getPortalDirectlyIncludedRem!.mockResolvedValue([]);
     const next = (await f.backend.read(['r0']))[0]!;
-    expect(next.portal).toEqual({ type: 99, directlyIncludedRemIds: [] });
+    expect(next.portal).toEqual({
+      type: 99,
+      directlyIncludedRemIds: [],
+      query: null,
+      filter: null,
+    });
     expect(isReferencePortal(next)).toBe(false);
     expect(methods.getPortalType).toHaveBeenCalledTimes(2);
+  });
+  it('reads search Portal query/filter through public slots and refuses incomplete query reads', async () => {
+    const f = fixture(),
+      methods = f.flags.get('r0')!;
+    f.objects.get('r0')!.type = 6;
+    methods.hasPowerup!.mockResolvedValue(true);
+    methods.getPowerupProperty!.mockImplementation(async (_code, slot) =>
+      slot === 'Query' ? '{"search":"native"}' : 'filter'
+    );
+    expect((await f.backend.read(['r0']))[0]!.portal).toMatchObject({
+      query: '{"search":"native"}',
+      filter: 'filter',
+    });
+    expect(methods.getPowerupProperty).toHaveBeenCalledWith('sp', 'Query');
+    expect(methods.getPowerupProperty).toHaveBeenCalledWith('sp', 'Filter');
+    methods.getPowerupProperty!.mockRejectedValue(new Error('query inaccessible'));
+    await expect(f.backend.read(['r0'])).rejects.toThrow('query inaccessible');
   });
 
   it.each([null, undefined])(
@@ -182,7 +210,12 @@ describe('public SDK sync adapter', () => {
       f.flags.get('r1')!.getPortalType!.mockResolvedValue(type);
       f.flags.get('r1')!.getPortalDirectlyIncludedRem!.mockResolvedValue([{ _id: 'r0' }]);
       const rem = (await f.backend.read(['r1']))[0]!;
-      expect(rem.portal).toEqual({ type: null, directlyIncludedRemIds: ['r0'] });
+      expect(rem.portal).toEqual({
+        type: null,
+        directlyIncludedRemIds: ['r0'],
+        query: null,
+        filter: null,
+      });
       expect(isReferencePortal(rem)).toBe(false);
     }
   );
@@ -742,7 +775,7 @@ describe('entity structure sync gates through the actual SDK backend', () => {
   );
 
   it.each(['changed', 'all', 'guarded'])(
-    'rejects concealed type 6 additions in %s mode, never reporting verified',
+    'imports exact type 6 descendant additions in %s mode without native writes',
     async (mode) => {
       const f = await imported();
       f.entityChildren.set('r1', ['r3']);
@@ -754,10 +787,11 @@ describe('entity structure sync gates through the actual SDK backend', () => {
           ? { expectedFileHash: (await readWorkspace(f.directory, 'r0.md')).fileHash }
           : { scope: mode };
       expect(await f.apply(options)).toMatchObject({
-        status: 'conflict',
-        complete: false,
+        status: 'verified',
+        complete: true,
         remoteWrites: 0,
-        conflicts: [expect.objectContaining({ id: 'r1', reason: 'remote-structure' })],
+        incoming: ['r3', 'r4'],
+        selection: { addedIds: ['r3', 'r4'] },
       });
       noWrites(f);
       expect(f.entityChildren.get('r1')).toEqual(['r3']);

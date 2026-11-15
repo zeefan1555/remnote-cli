@@ -17,6 +17,7 @@ import {
   serializeState,
   validateGraph,
   writeSnapshot,
+  prepareSnapshot,
   type LocalContext,
 } from './local.js';
 import {
@@ -539,7 +540,11 @@ function publicationRems(
   structuralIds: string[]
 ) {
   const result = new Map(context.native);
-  for (const id of [...selection.reconcileIds, ...Object.values(assigned)])
+  for (const id of [
+    ...selection.reconcileIds,
+    ...(selection.addedIds ?? []),
+    ...Object.values(assigned),
+  ])
     if (remote.has(id)) result.set(id, remote.get(id)!);
   for (const id of structuralIds) {
     if (selection.reconcileIds.includes(id) || !result.has(id)) continue;
@@ -553,6 +558,53 @@ function publicationRems(
   }
   for (const id of deleted) result.delete(id);
   return [...result.values()];
+}
+
+/** Preview the complete semantic publication before a mixed batch starts native mutations. */
+function plannedPublication(
+  context: LocalContext,
+  plan: SyncPlan,
+  remote: Map<string, WorkspaceRem>
+) {
+  const rems = new Map(remote),
+    assigned: Record<string, string> = {};
+  for (const change of plan.changes) {
+    const fresh = change.key.startsWith('new:');
+    // Shape-only placeholders; never sent to the SDK or persisted as assigned native identities.
+    const id = fresh ? `planned_${hash(change.key).slice(0, 32)}` : change.key;
+    if (fresh) {
+      if (rems.has(id) || context.native.has(id)) throw new Error('Planned identity collision');
+      assigned[change.key] = id;
+      rems.set(id, {
+        id,
+        parent: null,
+        children: [],
+        type: null,
+        text: [],
+        backText: change.kind === 'multiline' ? [] : null,
+        document: false,
+        folder: false,
+        cardItem: change.cardItem,
+        practice: 'forward',
+        enablePractice: true,
+        tags: [],
+        cards: [],
+        ...(change.cardCluster ? { powerupPresence: { cc: true } } : {}),
+      });
+    }
+    const rem = rems.get(id)!;
+    rems.set(id, { ...rem, ...change.fields, ...(change.tags ? { tags: change.tags.after } : {}) });
+    if (fresh) {
+      const parent = assigned[change.parent!] ?? change.parent!,
+        before = rems.get(parent);
+      if (!before) throw new Error('Missing planned creation parent');
+      const children = [...before.children];
+      children.splice(change.position, 0, id);
+      rems.set(parent, { ...before, children });
+      rems.set(id, { ...rems.get(id)!, parent });
+    }
+  }
+  return { assigned, rems: publicationRems(context, rems, plan.selection!, assigned, [], []) };
 }
 
 async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
@@ -887,8 +939,13 @@ async function synchronizeWorkspace(
         'Removing native tag associations requires explicit --allow-destructive and the existing plugin replace gate; no writes were started. Properties and Rem entities are never deleted by tag sync'
       );
     coverage.selection = selection;
+    if (selection.addedIds?.length) coverage.discoveryScope = 'bound-descendants';
     coverage.checkedIds = [
-      ...new Set([...selection.reconcileIds, ...selection.verificationIds]),
+      ...new Set([
+        ...selection.reconcileIds,
+        ...selection.verificationIds,
+        ...(selection.addedIds ?? []),
+      ]),
     ].sort();
     coverage.checkedCount = coverage.checkedIds.length;
     if (
@@ -935,6 +992,23 @@ async function synchronizeWorkspace(
         remoteWrites: 0,
         ...coverage,
       };
+    }
+    if (selection.addedIds?.length) {
+      const intended = plannedPublication(context, plan, remote);
+      await prepareSnapshot(
+        root,
+        state.kbId,
+        intended.rems,
+        state,
+        state,
+        frozen,
+        undefined,
+        undefined,
+        [],
+        context.parsed,
+        intended.assigned,
+        selection
+      );
     }
     if (
       !plan.changes.length &&
@@ -1447,12 +1521,11 @@ export async function recoverWorkspace(
     const codes = knownPowerupCodes(local.native);
     for (const change of localPlan.changes)
       if (change.cardCluster && journal.ids[change.key]) codes[journal.ids[change.key]!] = ['cc'];
-    const rems = await readRemote(local, localPlan, backend, codes);
-    for (const [id, rem] of await readExact(backend, Object.values(journal.ids), {
+    const created = await readExact(backend, Object.values(journal.ids), {
       tags: true,
       powerupCodes: codes,
-    }))
-      rems.set(id, rem);
+    });
+    const rems = await readRemote(local, localPlan, backend, codes, created);
     for (const change of localPlan.changes)
       if (change.cardCluster && rems.get(journal.ids[change.key]!)?.powerupPresence?.cc !== true)
         throw new Error('Created Card Cluster changed after verification');

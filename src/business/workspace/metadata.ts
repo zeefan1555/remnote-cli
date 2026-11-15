@@ -111,6 +111,9 @@ export const nativeSchema = z
       .object({
         type: z.json().nullable(),
         directlyIncludedRemIds: z.array(idSchema).nullable(),
+        /** Absent means uncollected, not an empty native query. */
+        query: z.json().optional(),
+        filter: z.json().optional(),
       })
       .strict()
       .nullable(),

@@ -160,6 +160,8 @@ export interface SyncSelection {
   outgoingKeys: string[];
   reconcileIds: string[];
   verificationIds: string[];
+  /** Fully read native descendants newly discovered below selected, already bound Rems. */
+  addedIds?: string[];
 }
 export interface SyncConflict {
   id: string;

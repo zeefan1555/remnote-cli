@@ -36,11 +36,7 @@ const flagsSchema = z
       .array(z.string().refine((key) => key !== 'collected' && key in nativeSchema.shape))
       .refine((keys) => new Set(keys).size === keys.length)
       .optional(),
-    portal: z
-      .object({ type: z.json().nullable(), directlyIncludedRemIds: z.array(idSchema).nullable() })
-      .strict()
-      .nullable()
-      .optional(),
+    portal: nativeSchema.shape.portal.optional(),
   })
   .strict();
 const snapshotSchema = z

@@ -128,15 +128,14 @@ async function publish(root: string, publication: Publication): Promise<void> {
   await publicationStore().setLocal(`publication:${hash(root)}`, null);
 }
 
-/** Prepare all files first. Keep the old manifest and push journal until publication is complete. */
-export async function stageSnapshot(
+/** Validate the exact serialized ledger as well as every payload before any writes. */
+export function preparePublication(
   root: string,
   next: WorkspaceState,
   previous: WorkspaceState | undefined,
   writes: Map<string, string | null>,
   frozen: FrozenFiles
-): Promise<void> {
-  await requireNoPublication(root);
+): Publication {
   serializeState(next);
   const publication: Publication = {
     version: 1,
@@ -159,6 +158,19 @@ export async function stageSnapshot(
   }
   if (Buffer.byteLength(JSON.stringify(publication)) > MAX_METADATA_BYTES)
     throw new Error('Snapshot publication metadata exceeds 32 MiB');
+  return publication;
+}
+
+/** Prepare all files first. Keep the old manifest and push journal until publication is complete. */
+export async function stageSnapshot(
+  root: string,
+  next: WorkspaceState,
+  previous: WorkspaceState | undefined,
+  writes: Map<string, string | null>,
+  frozen: FrozenFiles
+): Promise<void> {
+  await requireNoPublication(root);
+  const publication = preparePublication(root, next, previous, writes, frozen);
   // Validate final serialized bytes before creating even the first staging file.
   for (const item of publication.writes)
     if (item.stage !== null)
