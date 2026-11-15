@@ -754,6 +754,110 @@ describe('selected incremental sync', () => {
     });
   });
 
+  it.each(['apply', 'recover'] as const)(
+    'publishes deletion attributes through %s without dropping surviving attributes or replaying deletes',
+    async (mode) => {
+      const f = await prepare(),
+        options = { deleteId: 'question', scopeRoot: 'daily' },
+        kept = {
+          title: 'Kept display title',
+          aliases: ['Kept alias'],
+          tags: ['kept-tag'],
+          rems: { [f.state.entries.chapter!.blockId]: { content: 'text' as const } },
+        };
+      await edit(f.path, (source) => {
+        const parsed = parseFrontmatter(f.path, source);
+        return (
+          renderFrontmatter({
+            ...kept,
+            rems: {
+              ...kept.rems,
+              [f.state.entries.question!.blockId]: { content: 'multiline' },
+              [f.state.entries.answer!.blockId]: { content: 'text' },
+            },
+          }) +
+          `<!-- remnote:${parsed.documentKey} -->\n\n` +
+          parsed.body
+        );
+      });
+      const source = await readPrivate(directory, f.path),
+        otherPath = f.state.entries.subdoc!.path,
+        otherSource = await readPrivate(directory, otherPath);
+      expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+      const preview = (await syncWorkspace(directory, async () => f.backend, options)) as {
+        planHash: string;
+      };
+      const original = LocalState.prototype.setLocal;
+      const interrupted =
+        mode === 'recover'
+          ? vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+              this: LocalState,
+              key,
+              value
+            ) {
+              if (key.startsWith('publication:') && value !== null)
+                throw new Error('Injected failure before local publication');
+              return original.call(this, key, value);
+            })
+          : undefined;
+      const result = await syncWorkspace(directory, async () => f.backend, {
+        ...options,
+        apply: true,
+        planHash: preview.planHash,
+      });
+      interrupted?.mockRestore();
+      expect(f.calls).toEqual(['answer:delete', 'question:delete']);
+      if (mode === 'recover') {
+        expect(result).toMatchObject({ status: 'publication-incomplete' });
+        const state = await loadState(directory);
+        expect(await localStore('kb').getLocal(state.pending!.journalKey)).toMatchObject({
+          state: 'verified',
+          steps: { 'answer:delete': 'verified', 'question:delete': 'verified' },
+          final: { deleted: ['answer', 'question'] },
+        });
+        expect(await readPublication(directory)).toBeUndefined();
+        expect(await readPrivate(directory, f.path)).toBe(source);
+        expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+          status: 'recovered',
+          complete: true,
+          remoteWrites: 0,
+        });
+        expect(f.calls).toEqual(['answer:delete', 'question:delete']);
+      } else expect(result).toMatchObject({ status: 'verified', deleted: ['answer', 'question'] });
+      const state = await loadState(directory);
+      expect(state.pending).toBeUndefined();
+      expect(state.entries.question).toBeUndefined();
+      expect(state.entries.answer).toBeUndefined();
+      expect(state.entries.chapter!.blockId).toBe(f.state.entries.chapter!.blockId);
+      expect(f.rems.get('chapter')!.children).toEqual([]);
+      expect(f.rems.get('daily')!.text).toEqual(['Today']);
+      expect(parseFrontmatter(f.path, await readPrivate(directory, f.path)).attributes).toEqual(
+        kept
+      );
+      expect(await readPrivate(directory, otherPath)).toBe(otherSource);
+      expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    }
+  );
+
+  it('rejects unrelated orphan deletion attributes before any remote access', async () => {
+    const f = await prepare(),
+      factory = vi.fn(async () => f.backend);
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({ rems: { 'missing-block': { content: 'multiline' } } }) + source
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({
+      ok: false,
+      diagnostics: [expect.objectContaining({ code: 'ATTRIBUTE_NODE_MISSING' })],
+    });
+    await expect(
+      syncWorkspace(directory, factory, { deleteId: 'question', scopeRoot: 'daily' })
+    ).rejects.toThrow();
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
   it('recovers verified deletion without absorbing its parent dependency or replaying remove', async () => {
     const f = await prepare(),
       options = { deleteId: 'question', scopeRoot: 'daily' };

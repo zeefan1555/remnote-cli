@@ -93,6 +93,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Remove presentation attributes only for explicitly deleted blocks when publishing
+  verified deletions. Pending verified deletions can finish local publication without
+  repeating remote mutations; surviving attributes and strict orphan checks remain.
 - Keep Obsidian block-ID delimiters literal after trailing native whitespace,
   including line endings and rich-text boundaries. Standard paragraph escaping
   preserves the original whitespace; existing anchors, card types and child order

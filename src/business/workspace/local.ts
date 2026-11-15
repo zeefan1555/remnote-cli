@@ -345,10 +345,27 @@ export async function writeSnapshot(
         return [root, { ...(title === undefined ? {} : { title }), aliases, tags }];
       })
   );
+  const removed = new Set(removedIds);
   const attributes = new Map(
     [...sources.values()]
       .filter((source) => source.metadata)
-      .map((source) => [source.metadata!.root, source.attributes ?? {}])
+      .map((source) => {
+        const value = source.attributes ?? {};
+        if (!value.rems || !removed.size) return [source.metadata!.root, value];
+        // Attributes belong to document-local blocks, not globally unique block names.
+        const deletedBlocks = new Set(
+          source.nodes.filter((node) => removed.has(node.key)).map((node) => node.blockId)
+        );
+        return [
+          source.metadata!.root,
+          {
+            ...value,
+            rems: Object.fromEntries(
+              Object.entries(value.rems).filter(([block]) => !deletedBlocks.has(block))
+            ),
+          },
+        ];
+      })
   );
   const links = new WorkspaceLinks(
     [...paths].map(([id, path]) => ({
