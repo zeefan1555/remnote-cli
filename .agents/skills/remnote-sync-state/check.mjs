@@ -18,6 +18,14 @@ const cases = [
   ['SyncState', 'replay-id', 'PersistedIdentityRetained'],
   ['SyncState', 'skip-observation', 'OnlyExactObservedPublication'],
   ['SyncState', 'skip-input', 'PublicationInputBound'],
+  ['ReadSetScope', 'readset-safe', null],
+  ['ReadSetScope', 'readset-overview', null],
+  ['ReadSetScope', 'readset-narrow-initial', 'FullInitialCoverage'],
+  ['ReadSetScope', 'readset-narrow-final', 'FullFinalCoverage'],
+  ['ReadSetScope', 'readset-drop-old-target', 'TouchedPostCoverage'],
+  ['ReadSetScope', 'readset-cached-card', 'ObservedCardIdentityPreserved'],
+  ['ReadSetScope', 'readset-cached-history', 'ObservedReviewHistoryPreserved'],
+  ['ReadSetScope', 'readset-cached-facts', 'FreshRelationshipObservation'],
   ['PublicationWindow', 'window', 'FreshAtPublication'],
 ];
 
@@ -96,9 +104,10 @@ async function run() {
       'run',
       'test/unit/business/workspace.test.ts',
       'test/unit/business/workspace-state-contract.test.ts',
+      'test/unit/business/workspace-readset.test.ts',
       '--maxWorkers=1',
       '--testNamePattern',
-      'rejects an uncertain create without|reuses a known empty orphan|recognizes an already-applied uncertain setter|does not retry an uncertain setter|resumes a confirmed-after uncertain tag write|never retries unknown writes|persists a returned create ID|writes native tags|sync state model implementation witnesses|rejects stale external lint',
+      'rejects an uncertain create without|reuses a known empty orphan|recognizes an already-applied uncertain setter|does not retry an uncertain setter|resumes a confirmed-after uncertain tag write|never retries unknown writes|persists a returned create ID|writes native tags|sync state model implementation witnesses|mutation graph readsets|rejects stale external lint|same-apply native Card evidence|changed known sealed Card IDs|does not substitute sealed facts|refuses final publication when|full selected native guard|removed Tag target|rejects independent Cards on a new answer',
     ],
     { cwd: root, encoding: 'utf8', timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }
   );
