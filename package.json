@@ -78,7 +78,7 @@
     "eslint-config-prettier": "^10.1.8",
     "micromark-util-types": "^2.0.3",
     "prettier": "^3.8.1",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.2",
     "vitest": "^4.1.3"
   },
