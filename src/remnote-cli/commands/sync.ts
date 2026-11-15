@@ -6,6 +6,7 @@ import {
   pushWorkspace,
   statusWorkspace,
   recoverWorkspace,
+  resumeWorkspace,
   readWorkspace,
   saveWorkspace,
 } from '../../business/workspace/workspace.js';
@@ -51,7 +52,17 @@ export function registerSyncCommands(program: Command): void {
     .description('Synchronize local Markdown and RemNote through explicit bounded commands');
 
   async function execute(
-    name: 'sync' | 'import' | 'status' | 'lint' | 'diff' | 'recover' | 'read' | 'save' | 'format',
+    name:
+      | 'sync'
+      | 'import'
+      | 'status'
+      | 'lint'
+      | 'diff'
+      | 'recover'
+      | 'resume'
+      | 'read'
+      | 'save'
+      | 'format',
     directory: string,
     options: SyncOptions,
     path?: string
@@ -75,6 +86,12 @@ export function registerSyncCommands(program: Command): void {
         result = await importWorkspace(directory, kbId, () => client.workspaceBackend(), options);
       } else if (name === 'recover')
         result = await recoverWorkspace(directory, () => client.workspaceBackend());
+      else if (name === 'resume')
+        result = await resumeWorkspace(
+          directory,
+          () => client.workspaceBackend(),
+          options.planHash!
+        );
       else if (name === 'status') result = await statusWorkspace(directory);
       else if (name === 'lint') result = await lintWorkspace(directory);
       else if (name === 'diff') result = await diffWorkspace(directory, options);
@@ -122,6 +139,18 @@ export function registerSyncCommands(program: Command): void {
       execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })
     );
   }
+  workspace
+    .command('resume <directory>')
+    .description(
+      'Reconcile exact IDs for the original interrupted plan, then continue only unattempted writes'
+    )
+    .requiredOption(
+      '--plan-hash <sha256>',
+      'Exact original interrupted plan hash; no selector changes'
+    )
+    .action(async (directory: string, options: SyncOptions) =>
+      execute('resume', directory, options)
+    );
   workspace
     .command('delete <directory>')
     .description('Preview explicit deletion of an exact note/card and its bounded descendants')

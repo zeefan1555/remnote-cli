@@ -175,8 +175,12 @@ native syntax, explicit deletion and recovery, see the
 Writes are sequential, not atomic. Pre/post revision hashes are client optimistic
 checks, not native conditional setters; the check-write window remains. Native
 transactions stay disabled. On an unknown result, preserve the original
-plan/journal and reconcile exact IDs; `sync recover` finishes verified local
-publication, never retries remote writes.
+plan/journal and reconcile exact IDs. Explicit `sync resume DIR --plan-hash HASH`
+can continue the same outgoing-only plan after proving its complete attempted
+prefix by exact-ID readback. It reuses known creation IDs and never replays an
+uncertain write. Changed local/remote evidence, an unknown creation without an ID,
+or an unproven effect is refused. `sync recover` only finishes verified local
+publication. See the reference for the new-card identity evidence boundary.
 
 - [Command reference](docs/guides/remnote-cli-command-reference.md)
 - [Development](docs/guides/development-setup.md)

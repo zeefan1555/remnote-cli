@@ -21,6 +21,7 @@ import {
   pushWorkspace as syncWorkspace,
   statusWorkspace,
   recoverWorkspace,
+  resumeWorkspace,
   planLocal,
 } from '../../../src/business/workspace/workspace.js';
 import * as workspace from '../../../src/business/workspace/workspace.js';
@@ -178,8 +179,17 @@ function fixture() {
     readPublic: vi.fn(async (ids) =>
       ids.flatMap((id) => (rems.has(id) ? [snapshot(rems.get(id)!).public!] : []))
     ),
-    read: vi.fn(async (ids) =>
-      ids.flatMap((id) => (rems.has(id) ? [snapshot(rems.get(id)!)] : []))
+    read: vi.fn(async (ids, options) =>
+      ids.flatMap((id) =>
+        rems.has(id)
+          ? [
+              {
+                ...snapshot(rems.get(id)!),
+                ...(options?.tags ? { tags: rems.get(id)!.tags ?? [] } : {}),
+              },
+            ]
+          : []
+      )
     ),
     guard: vi.fn(async (ids) =>
       hash(ids.map((id) => immutableProjection(snapshot(rems.get(id)!))))
@@ -1414,6 +1424,311 @@ function addNodes(
 const newKeys = Object.fromEntries(
   ['q', 'a', 'n', 'note'].map((key) => [key, localNodeKey('daily', `local-${key}`)])
 );
+
+describe('explicit interrupted sync resume', () => {
+  it('rejects a known-create ID pointing to an unselected baseline Rem before connection', async () => {
+    const f = fixture();
+    f.rems.set('outside', native('outside', null));
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.daily!.path;
+    await edit(path, (s) => addNodes(s, { n: 'text' }, '\n- New note ^local-n\n'));
+    const read = f.backend.read;
+    f.backend.read = vi.fn(async (ids, options) => {
+      if (ids.includes('created_1')) throw new Error('Lost create read');
+      return read(ids, options);
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [path],
+    })) as { planHash: string };
+    f.backend.read = read;
+    const pending = (await loadState(directory)).pending!,
+      store = localStore('kb');
+    const journal = await store.getLocal<{ ids: Record<string, string> }>(pending.journalKey);
+    journal!.ids[newKeys.n!] = 'outside';
+    await store.setLocal(pending.journalKey, journal);
+    const before = [...f.calls],
+      factory = vi.fn(async () => f.backend);
+    await expect(resumeWorkspace(directory, factory, result.planHash)).rejects.toThrow(
+      /identity|baseline/i
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual(before);
+    expect(f.rems.get('outside')!.text).toBeNull();
+  });
+
+  it('recognizes an existing basic card backText effect without replay or recreation', async () => {
+    const f = await prepare();
+    await edit(f.path, (s) => s.replace('> Back', '> Updated back'));
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (...args) => {
+      await write(...args);
+      if (args[1] === 'backText') throw new Error('Lost basic backText response');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, { apply: true })) as {
+      planHash: string;
+    };
+    expect(result).toMatchObject({ status: 'unknown' });
+    expect(await resumeWorkspace(directory, async () => f.backend, result.planHash)).toMatchObject({
+      status: 'verified',
+      complete: true,
+    });
+    expect(f.backend.create).not.toHaveBeenCalled();
+    expect(f.calls.filter((call) => call === 'basic:backText')).toHaveLength(1);
+    expect(f.rems.get('basic')).toMatchObject({
+      text: ['Front'],
+      backText: ['Updated back'],
+      parent: 'daily',
+    });
+  });
+
+  async function interruptedCreate() {
+    const f = await prepare();
+    await edit(f.path, (s) =>
+      addNodes(
+        s,
+        { q: 'multiline', a: 'text', n: 'text' },
+        '\n- New question #card ^local-q\n  - First answer ^local-a\n  - Second answer ^local-n\n'
+      )
+    );
+    const read = f.backend.read;
+    f.backend.read = vi.fn(async (ids, options) => {
+      if (ids.includes('created_2')) throw new Error('Create follow-up read lost');
+      return read(ids, options);
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { planHash: string; ids: Record<string, string> };
+    expect(result).toMatchObject({
+      status: 'unknown',
+      ids: {
+        [newKeys.q!]: 'created_1',
+        [newKeys.a!]: 'created_2',
+      },
+    });
+    f.backend.read = read;
+    return { ...f, result };
+  }
+
+  it('reuses a known empty orphan, finishes the same plan and makes repeat resume a no-op', async () => {
+    const f = await interruptedCreate();
+    const writes = f.calls.length;
+    expect(f.rems.get('created_2')!.parent).toBeNull();
+    const result = await resumeWorkspace(directory, async () => f.backend, f.result.planHash);
+    expect(result).toMatchObject({
+      status: 'verified',
+      complete: true,
+      resumed: true,
+      ids: { [newKeys.q!]: 'created_1', [newKeys.a!]: 'created_2', [newKeys.n!]: 'created_3' },
+      remoteWrites: f.calls.length - writes,
+    });
+    expect(f.backend.create).toHaveBeenCalledTimes(3);
+    expect(f.rems.get('created_1')!.children).toEqual(['created_2', 'created_3']);
+    expect(f.rems.get('created_2')).toMatchObject({
+      parent: 'created_1',
+      cardItem: true,
+      text: ['First answer'],
+    });
+    const factory = vi.fn(async () => f.backend);
+    expect(await resumeWorkspace(directory, factory, f.result.planHash)).toMatchObject({
+      status: 'already-complete',
+      complete: true,
+      remoteWrites: 0,
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.backend.create).toHaveBeenCalledTimes(3);
+  });
+
+  it('recognizes an already-applied uncertain setter without replaying it', async () => {
+    const f = await prepare();
+    await edit(f.path, (s) => s.replace('Because', 'Edited'));
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (...args) => {
+      await write(...args);
+      throw new Error('Lost acknowledgement');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, { apply: true })) as {
+      planHash: string;
+    };
+    expect(result).toMatchObject({ status: 'unknown' });
+    expect(await resumeWorkspace(directory, async () => f.backend, result.planHash)).toMatchObject({
+      status: 'verified',
+      complete: true,
+      remoteWrites: 0,
+    });
+    expect(f.backend.writeField).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry an uncertain setter that still reads before its intended effect', async () => {
+    const f = await prepare();
+    await edit(f.path, (s) => s.replace('Because', 'Edited'));
+    f.backend.writeField = vi.fn(async () => {
+      throw new Error('Unknown transport outcome');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, { apply: true })) as {
+      planHash: string;
+    };
+    await expect(
+      resumeWorkspace(directory, async () => f.backend, result.planHash)
+    ).rejects.toThrow(/resume|remote/i);
+    expect(f.backend.writeField).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an uncertain create without a persisted ID before opening the backend', async () => {
+    const f = await prepare();
+    await edit(f.path, (s) => addNodes(s, { n: 'text' }, '\n- Note ^local-n\n'));
+    const create = f.backend.create;
+    f.backend.create = vi.fn(async (...args) => {
+      await create(...args);
+      throw new Error('Lost ID');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, { apply: true })) as {
+      planHash: string;
+    };
+    const factory = vi.fn(async () => f.backend);
+    await expect(resumeWorkspace(directory, factory, result.planHash)).rejects.toThrow(
+      /identity|ID/
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.backend.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['file', 'hash', 'kb', 'content', 'parent', 'tag', 'card', 'step'] as const)(
+    'refuses changed %s evidence before any resumed native mutation',
+    async (change) => {
+      const f = await interruptedCreate(),
+        before = [...f.calls];
+      let planHash = f.result.planHash;
+      if (change === 'file') await edit(f.path, (s) => s.replace('First answer', 'Changed answer'));
+      if (change === 'hash') planHash = 'b'.repeat(64);
+      if (change === 'kb')
+        f.backend.identity = vi.fn(async () => ({ kbId: 'wrong', writable: true }));
+      if (change === 'content') f.rems.get('created_1')!.text = ['External edit'];
+      if (change === 'parent') f.rems.get('created_2')!.parent = 'daily';
+      if (change === 'tag') f.rems.get('created_2')!.tags = ['external-tag'];
+      if (change === 'card')
+        f.rems.get('daily')!.cards = [
+          {
+            id: 'replacement-card',
+            remId: 'daily',
+            type: 'forward',
+            createdAt: 1,
+            repetitionHistory: [],
+            nextRepetitionTime: null,
+            lastRepetitionTime: null,
+            timesWrongInRow: null,
+          },
+        ];
+      if (change === 'step') {
+        const state = await loadState(directory),
+          store = localStore('kb');
+        const journal = await store.getLocal<{ steps: Record<string, string> }>(
+          state.pending!.journalKey
+        );
+        journal!.steps['unrelated:text'] = 'verified';
+        await store.setLocal(state.pending!.journalKey, journal);
+      }
+      await expect(resumeWorkspace(directory, async () => f.backend, planHash)).rejects.toThrow();
+      expect(f.calls).toEqual(before);
+    }
+  );
+
+  it('resumes a second lost acknowledgement with the same IDs and leaves unselected edits untouched', async () => {
+    const f = await interruptedCreate();
+    const untouched = f.state.entries.subdoc!.path;
+    const localBefore = await readPrivate(directory, untouched);
+    f.rems.get('subdoc')!.text = ['Unselected external edit'];
+    const parent = f.backend.setParent;
+    f.backend.setParent = vi.fn(async (...args) => {
+      await parent(...args);
+      throw new Error('Second lost acknowledgement');
+    });
+    expect(
+      await resumeWorkspace(directory, async () => f.backend, f.result.planHash)
+    ).toMatchObject({
+      status: 'unknown',
+      complete: false,
+      planHash: f.result.planHash,
+    });
+    f.backend.setParent = parent;
+    expect(
+      await resumeWorkspace(directory, async () => f.backend, f.result.planHash)
+    ).toMatchObject({
+      status: 'verified',
+      complete: true,
+    });
+    expect(f.backend.create).toHaveBeenCalledTimes(3);
+    expect(f.rems.get('created_1')!.children).toEqual(['created_2', 'created_3']);
+    expect(await readPrivate(directory, untouched)).toBe(localBefore);
+    expect(f.rems.get('subdoc')!.text).toEqual(['Unselected external edit']);
+  });
+
+  it.each(['publication', 'staging'] as const)(
+    'recovers resumed %s without any remote replay',
+    async (point) => {
+      const f = await interruptedCreate(),
+        original = LocalState.prototype.setLocal,
+        link = fileOps.linkPrivate;
+      const stateSpy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (point === 'publication' && key.startsWith('publication:') && value !== null)
+            throw new Error('Injected publication failure');
+          return original.call(this, key, value);
+        });
+      const fileSpy = vi
+        .spyOn(fileOps, 'linkPrivate')
+        .mockImplementation(async (root, from, to) => {
+          if (point === 'staging' && to === f.path) throw new Error('Injected staged link failure');
+          return link(root, from, to);
+        });
+      expect(
+        await resumeWorkspace(directory, async () => f.backend, f.result.planHash)
+      ).toMatchObject({ status: 'publication-incomplete' });
+      stateSpy.mockRestore();
+      fileSpy.mockRestore();
+      const calls = [...f.calls];
+      expect(
+        await resumeWorkspace(directory, async () => f.backend, f.result.planHash)
+      ).toMatchObject({ status: 'recovered', complete: true, remoteWrites: 0 });
+      expect(f.calls).toEqual(calls);
+      expect(
+        await resumeWorkspace(directory, async () => f.backend, f.result.planHash)
+      ).toMatchObject({ status: 'already-complete', remoteWrites: 0 });
+    }
+  );
+
+  it('does not publish inconsistent Card IDs if they change during final cardFacts reads', async () => {
+    const f = await interruptedCreate(),
+      cardFacts = f.backend.cardFacts;
+    f.backend.cardFacts = vi.fn(async (id) => {
+      if (id === 'created_1')
+        f.rems.get(id)!.cards = [
+          {
+            id: 'changed-final-card',
+            remId: id,
+            type: 'forward',
+            createdAt: 1,
+            repetitionHistory: [],
+            nextRepetitionTime: null,
+            lastRepetitionTime: null,
+            timesWrongInRow: null,
+          },
+        ];
+      return cardFacts(id);
+    });
+    expect(
+      await resumeWorkspace(directory, async () => f.backend, f.result.planHash)
+    ).toMatchObject({
+      status: 'conflict',
+      complete: false,
+      error: expect.stringContaining('card identity'),
+    });
+    expect((await loadState(directory)).pending!.planHash).toBe(f.result.planHash);
+  });
+});
 
 /** A synthetic, sealed publication of the retired dense protocol; never reads a real vault. */
 async function legacyFixture() {

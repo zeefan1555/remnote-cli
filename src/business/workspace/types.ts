@@ -211,7 +211,7 @@ export interface WorkspaceBackend {
   subtree(rootIds: string[]): Promise<WorkspaceRem[]>;
   discover(ids: string[]): Promise<PublicDiscovery>;
   readPublic(ids: string[]): Promise<Record<string, unknown>[]>;
-  read(ids: string[]): Promise<WorkspaceRem[]>;
+  read(ids: string[], options?: { tags?: boolean }): Promise<WorkspaceRem[]>;
   guard(ids: string[]): Promise<string>;
   create(markdown?: string): Promise<string>;
   writeField(id: string, field: 'text' | 'backText', value: unknown[]): Promise<void>;

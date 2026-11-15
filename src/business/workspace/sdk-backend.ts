@@ -205,7 +205,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     return mapReads(rems, 4, (rem) => this.snapshot(rem));
   }
 
-  async read(ids: string[]): Promise<WorkspaceRem[]> {
+  async read(ids: string[], options: { tags?: boolean } = {}): Promise<WorkspaceRem[]> {
     if (ids.length > 50) throw new Error('Exact-ID native read batch exceeds 50');
     const rems = await this.plugin.rem.findMany(ids);
     if (
@@ -216,7 +216,18 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     )
       throw new Error('Incomplete exact-ID native read');
     const byId = new Map(rems.map((rem) => [rem._id, rem]));
-    return mapReads(ids, 4, (id) => this.snapshot(byId.get(id)!));
+    return mapReads(ids, 4, async (id) => {
+      const rem = byId.get(id)!,
+        snapshot = await this.snapshot(rem);
+      if (options.tags) {
+        const tags = await rem.getTagRems();
+        if (!Array.isArray(tags)) throw new Error('Incomplete native tags');
+        snapshot.tags = tags.map((tag) => idSchema.parse(tag?._id)).sort();
+        if (new Set(snapshot.tags).size !== snapshot.tags.length)
+          throw new Error('Duplicate native tags');
+      }
+      return snapshot;
+    });
   }
 
   async readPublic(ids: string[]): Promise<Record<string, unknown>[]> {

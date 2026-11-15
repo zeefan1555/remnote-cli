@@ -17,6 +17,7 @@ vi.mock('../../../src/business/workspace/workspace.js', () => ({
   diffWorkspace: vi.fn(async () => ({ changes: [] })),
   pushWorkspace: vi.fn(async () => ({ status: 'unchanged' })),
   recoverWorkspace: vi.fn(async () => ({ complete: true, remoteWrites: 0 })),
+  resumeWorkspace: vi.fn(async () => ({ complete: true, resumed: true })),
   readWorkspace: vi.fn(async () => ({
     content: 'source',
     fileHash: 'a'.repeat(64),
@@ -48,6 +49,26 @@ function testProgram() {
 }
 
 describe('sync command interface', () => {
+  it('routes explicit resume with the original plan hash and no new selectors', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const close = vi.spyOn(DirectClient.prototype, 'close');
+    await testProgram().program.parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'resume',
+      '/private/tmp/sync',
+      '--plan-hash',
+      'a'.repeat(64),
+    ]);
+    expect(sync.resumeWorkspace).toHaveBeenCalledExactlyOnceWith(
+      '/private/tmp/sync',
+      expect.any(Function),
+      'a'.repeat(64)
+    );
+    expect(sync.pushWorkspace).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
   it('routes explicit offline format without opening a native connection', async () => {
     const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -249,6 +270,7 @@ describe('sync command interface', () => {
     expect(command.commands.map((item) => item.name())).toEqual([
       'plan',
       'apply',
+      'resume',
       'delete',
       'read',
       'save',
@@ -284,6 +306,11 @@ describe('sync command interface', () => {
     ['push', '/private/tmp/sync'],
     ['plan'],
     ['apply'],
+    ['resume'],
+    ['resume', '/private/tmp/sync'],
+    ['resume', '/private/tmp/sync', '--plan-hash', 'a'.repeat(64), '--path', 'Note.md'],
+    ['resume', '/private/tmp/sync', '--plan-hash', 'a'.repeat(64), '--scope', 'all'],
+    ['resume', '/private/tmp/sync', '--plan-hash', 'a'.repeat(64), '--apply'],
     ['plan', '/private/tmp/sync', '--apply'],
     ['plan', '/private/tmp/sync', '--plan-hash', 'a'.repeat(64)],
     ['apply', '/private/tmp/sync', '--apply'],

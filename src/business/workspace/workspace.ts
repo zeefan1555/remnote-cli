@@ -34,6 +34,7 @@ import { selectPlan, type SelectionOptions } from './selection.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
 import {
   contentProjection,
+  cardIdentities,
   publicationRevisionHash,
   revisionHash,
   withNativeSnapshot,
@@ -42,6 +43,7 @@ import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
+import { foldResume, verifyResumeReadback, type Journal } from './resume.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
 import {
   readPublication,
@@ -49,22 +51,6 @@ import {
   recoverWorkspace as recoverPublication,
   stageSnapshot,
 } from './publication.js';
-
-interface Journal {
-  version: 2;
-  planHash: string;
-  guardHash: string;
-  state: 'preview' | 'applying' | 'verified' | 'unknown' | 'conflict';
-  steps: Record<string, 'started' | 'verified' | 'unknown'>;
-  ids: Record<string, string>;
-  selection: SyncSelection;
-  final?: {
-    hashes: Record<string, string>;
-    inputHash: string;
-    deleted: string[];
-    structuralIds: string[];
-  };
-}
 
 async function requirePreviewOnly(state: WorkspaceState): Promise<void> {
   if (!state.pending) return;
@@ -455,12 +441,13 @@ export async function diffWorkspace(
 
 async function readExact(
   backend: WorkspaceBackend,
-  ids: string[]
+  ids: string[],
+  options?: { tags?: boolean }
 ): Promise<Map<string, WorkspaceRem>> {
   const result = new Map<string, WorkspaceRem>();
   for (let start = 0; start < ids.length; start += 50) {
     const batch = ids.slice(start, start + 50),
-      rems = await backend.read(batch);
+      rems = options ? await backend.read(batch, options) : await backend.read(batch);
     if (rems.length !== batch.length) throw new Error('Incomplete exact-ID native read');
     for (const rem of rems) {
       if (!batch.includes(rem.id) || result.has(rem.id))
@@ -553,6 +540,33 @@ export async function pushWorkspace(
   backendFactory: () => Promise<WorkspaceBackend>,
   options: DeleteOptions & SelectionOptions & { apply?: boolean; planHash?: string } = {}
 ): Promise<unknown> {
+  return synchronizeWorkspace(directory, backendFactory, options);
+}
+
+/** Explicit continuation of a frozen write, never an automatic retry by ordinary apply. */
+export async function resumeWorkspace(
+  directory: string,
+  backendFactory: () => Promise<WorkspaceBackend>,
+  planHash: string
+): Promise<unknown> {
+  if (!/^[a-f0-9]{64}$/.test(planHash))
+    throw new Error('Resume requires the exact original --plan-hash');
+  const root = await workspaceDirectory(directory),
+    state = await authoritativeState(root);
+  if (state.pending?.planHash === planHash) {
+    const journal = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
+    if (journal?.state === 'verified' && journal.final)
+      return recoverWorkspace(root, backendFactory);
+  }
+  return synchronizeWorkspace(root, backendFactory, { apply: true, planHash }, planHash);
+}
+
+async function synchronizeWorkspace(
+  directory: string,
+  backendFactory: () => Promise<WorkspaceBackend>,
+  options: DeleteOptions & SelectionOptions & { apply?: boolean; planHash?: string },
+  resumeHash?: string
+): Promise<unknown> {
   if (options.deleteId || options.scopeRoot) {
     if (options.scope !== undefined || options.paths !== undefined)
       throw new Error('Explicit deletion does not accept --scope or --path');
@@ -563,8 +577,48 @@ export async function pushWorkspace(
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
     const context = await inspectLocal(root),
-      state = context.state,
-      localPlan = await selectPlan(context, planLocal(context, options), options);
+      state = context.state;
+    let resuming: Journal | undefined;
+    if (resumeHash) {
+      const key = `workspace-v2:${state.kbId}:${hash(root)}:${resumeHash}`;
+      resuming = await localStore(state.kbId).getLocal<Journal>(key);
+      if (!resuming || resuming.version !== 2 || resuming.planHash !== resumeHash)
+        throw new Error('Resume cannot find the exact original journal for this vault and KB');
+      if (
+        !state.pending &&
+        resuming.state === 'verified' &&
+        resuming.final &&
+        Object.entries(resuming.final.hashes).every(
+          ([id, digest]) =>
+            context.native.has(id) && publicationRevisionHash(context.native.get(id)!) === digest
+        ) &&
+        resuming.final.deleted.every((id) => !context.native.has(id))
+      )
+        return {
+          status: 'already-complete',
+          complete: true,
+          planHash: resumeHash,
+          ids: resuming.ids,
+          remoteWrites: 0,
+        };
+      if (
+        state.pending?.planHash !== resumeHash ||
+        state.pending.journalKey !== key ||
+        !['applying', 'unknown', 'conflict'].includes(resuming.state) ||
+        !resuming.selection ||
+        resuming.selection.scope === 'delete'
+      )
+        throw new Error(
+          "Resume requires this vault's exact pending outgoing journal; use sync recover for verified publication"
+        );
+      options = {
+        apply: true,
+        planHash: resumeHash,
+        scope: resuming.selection.scope,
+        paths: resuming.selection.paths,
+      };
+    }
+    const localPlan = await selectPlan(context, planLocal(context, options), options);
     if (localPlan.changes.length > 100)
       throw new Error('One sync is limited to 100 changed/new nodes; narrow --path or split edits');
     let stateHash = hash(state);
@@ -578,7 +632,7 @@ export async function pushWorkspace(
     const frozen = await context.inputs.freeze();
     localPlan.inputHash = hash(frozen.hashes());
     const store = localStore(state.kbId);
-    await requirePreviewOnly(state);
+    if (!resuming) await requirePreviewOnly(state);
     if (
       options.planHash !== undefined &&
       (!options.apply || !/^[a-f0-9]{64}$/.test(options.planHash))
@@ -653,12 +707,46 @@ export async function pushWorkspace(
       throw new Error(
         'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
       );
+    const reconstructed = resuming
+      ? reconcile(
+          context,
+          localPlan,
+          new Map(checkedIds.map((id) => [id, context.native.get(id)!]))
+        )
+      : undefined;
+    if (
+      reconstructed &&
+      (hash(reconstructed.plan) !== resumeHash ||
+        hash(reconstructed.plan.selection) !== hash(resuming!.selection))
+    )
+      throw new Error(
+        'Resume cannot reconstruct the exact original frozen plan from local content and baseline'
+      );
+    // Validate journal prefix and identities offline, before opening a native connection.
+    const rebuiltRemote = reconstructed
+      ? new Map(checkedIds.map((id) => [id, context.native.get(id)!]))
+      : undefined;
+    if (resuming && Object.values(resuming.ids).some((id) => context.native.has(id)))
+      throw new Error('Resume creation identity belongs to an existing baseline Rem');
+    const folded = reconstructed
+      ? foldResume(
+          reconstructed.plan,
+          resuming!,
+          new Map(
+            affectedIds(reconstructed.plan, rebuiltRemote!).map((id) => [
+              id,
+              rebuiltRemote!.get(id)!,
+            ])
+          )
+        )
+      : undefined;
     const backend = await backendFactory(),
       identity = await backend.identity();
     if (identity.kbId !== state.kbId)
       throw new Error('Connected KB does not match workspace binding');
-    const remote = await readRemote(context, localPlan, backend),
-      { plan, metadataChanged, remoteVersions } = reconcile(context, localPlan, remote),
+    const remote = rebuiltRemote ?? (await readRemote(context, localPlan, backend)),
+      { plan, metadataChanged, remoteVersions } =
+        reconstructed ?? reconcile(context, localPlan, remote),
       planHash = hash(plan);
     const selection = plan.selection!;
     coverage.selection = selection;
@@ -671,7 +759,7 @@ export async function pushWorkspace(
       );
     await frozen.check();
     const stateBeforeObservations = hash(state);
-    state.remoteVersions = remoteVersions;
+    if (!resuming) state.remoteVersions = remoteVersions;
     if (state.pending && state.pending.planHash !== planHash) {
       delete state.pending;
     }
@@ -717,9 +805,10 @@ export async function pushWorkspace(
     )
       return { status: 'unchanged', complete: true, changes: 0, remoteWrites: 0, ...coverage };
     const key = `workspace-v2:${state.kbId}:${hash(root)}:${planHash}`;
-    let journal = await store.getLocal<Journal>(key);
+    let journal = resuming ?? (await store.getLocal<Journal>(key));
     if (
       journal &&
+      !resuming &&
       (journal.version !== 2 ||
         journal.planHash !== planHash ||
         hash(journal.selection) !== hash(selection) ||
@@ -729,12 +818,24 @@ export async function pushWorkspace(
       throw new Error(
         'Prior write outcome requires exact-ID reconciliation; automatic replay is forbidden'
       );
-    const existingIds = affectedIds(plan, remote),
-      expected = new Map(existingIds.map((id) => [id, remote.get(id)!]));
+    const existingIds = affectedIds(plan, remote);
+    let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     const protectedIds = existingIds.filter((id) => !plan.deletion?.ids.includes(id));
     const guardHash = await backend.guard(protectedIds);
     if (journal && journal.guardHash !== guardHash)
       throw new Error('Native card identity or immutable flags changed since preview');
+    if (folded) {
+      const fresh = await readExact(backend, existingIds);
+      const createdIds = Object.values(resuming!.ids);
+      for (const [id, rem] of await readExact(backend, createdIds, { tags: true }))
+        fresh.set(id, rem);
+      expected = verifyResumeReadback(expected, fresh, new Set(createdIds));
+      // Only exact-after is recognized. Exact-before cannot rule out a delayed old SDK write.
+      for (const step of folded.recognized) resuming!.steps[step] = 'verified';
+      resuming!.resumed = true;
+      for (const [id, rem] of expected) remote.set(id, rem);
+      await frozen.check();
+    }
     journal ??= {
       version: 2,
       planHash,
@@ -773,15 +874,30 @@ export async function pushWorkspace(
     journal.state = 'applying';
     await store.setLocal(key, journal);
     let active: string | undefined;
-    const structuralIds = new Set<string>();
+    const structuralIds = folded?.structuralIds ?? new Set<string>();
+    let remoteWrites = 0;
     let checkedWriteBoundary = false;
     async function preflight(): Promise<void> {
       await checkFiles(root, plan);
-      const fresh = await readExact(backend, [...expected.keys()]);
+      const createdIds = resuming ? new Set(Object.values(journal!.ids)) : new Set<string>();
+      const fresh = await readExact(
+        backend,
+        [...expected.keys()].filter((id) => !createdIds.has(id))
+      );
+      if (resuming) {
+        for (const [id, rem] of await readExact(backend, [...createdIds], { tags: true }))
+          fresh.set(id, rem);
+      }
       for (const [id, rem] of expected) {
         const current = withNativeSnapshot(rem, fresh.get(id)!);
         if (revisionHash(current) !== revisionHash(rem))
           throw new Error(`Concurrent remote change on ${id}`);
+        if (
+          createdIds.has(id) &&
+          rem.cards?.length &&
+          hash(cardIdentities(current)) !== hash(cardIdentities(rem))
+        )
+          throw new Error(`New card identity changed after resume readback: ${id}`);
         fresh.set(id, current);
       }
       if ((await backend.guard(protectedIds)) !== guardHash)
@@ -808,10 +924,12 @@ export async function pushWorkspace(
       fn: () => Promise<T>,
       after: (value: T) => Promise<void>
     ): Promise<void> {
+      if (resuming && journal!.steps[step] === 'verified') return;
       await preflight();
       active = step;
       journal!.steps[step] = 'started';
       await store.setLocal(key, journal);
+      remoteWrites++;
       const value = await fn();
       await after(value);
       await preflight();
@@ -859,7 +977,9 @@ export async function pushWorkspace(
               // Save the returned ID before any subsequent read can fail.
               journal!.ids[change.key] = created;
               await store.setLocal(key, journal);
-              const rem = (await readExact(backend, [created])).get(created)!;
+              const rem = (
+                await readExact(backend, [created], resuming ? { tags: true } : undefined)
+              ).get(created)!;
               if (
                 rem.parent !== null ||
                 rem.children.length ||
@@ -927,6 +1047,15 @@ export async function pushWorkspace(
         const id = journal.ids[change.key]!,
           cards = await backend.cardFacts(id);
         if (!cards.length) throw new Error('New multiline card did not produce native cards');
+        const observed = expected
+          .get(id)!
+          .cards?.map(({ id, remId, type }) => ({
+            id,
+            hash: hash({ id, remId, type }),
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+        if (hash(cards) !== hash(observed))
+          throw new Error('New card identity changed after native snapshot verification');
         newCards[id] = cards;
       }
       for (const [id, cards] of Object.entries(newCards))
@@ -979,8 +1108,15 @@ export async function pushWorkspace(
         resolutions,
         deleted: plan.deletion?.ids ?? [],
         nativeCards: newCards,
-        cardsPreserved: true,
-        remoteWrites: Object.keys(journal.steps).length,
+        ...(resuming ? { existingCardsPreserved: true } : { cardsPreserved: true }),
+        remoteWrites,
+        ...(resuming
+          ? {
+              resumed: true,
+              recognizedSteps: folded!.recognized,
+              newCardIdentityBaseline: 'resume-readback',
+            }
+          : {}),
         atomic: false,
         ...coverage,
       };
@@ -996,6 +1132,7 @@ export async function pushWorkspace(
         ids: journal.ids,
         steps: journal.steps,
         error: error instanceof Error ? error.message : String(error),
+        remoteWrites,
         atomic: false,
         ...coverage,
       };
@@ -1055,7 +1192,12 @@ export async function recoverWorkspace(
     );
     localPlan.selection = journal.selection;
     const rems = await readRemote(local, localPlan, backend);
-    for (const [id, rem] of await readExact(backend, Object.values(journal.ids))) rems.set(id, rem);
+    for (const [id, rem] of await readExact(
+      backend,
+      Object.values(journal.ids),
+      journal.resumed ? { tags: true } : undefined
+    ))
+      rems.set(id, rem);
     if (rems.size !== Object.keys(journal.final.hashes).length)
       throw new Error('Remote ID set changed after verified sync');
     for (const [id, rem] of rems)

@@ -9,6 +9,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Explicit `sync resume DIR --plan-hash HASH` reconstructs the original
+  outgoing-only plan, verifies its ordered journal prefix and exact native IDs,
+  reuses known created Rems and continues only unattempted steps. Uncertain
+  writes are recognized only at their exact after-state, never replayed.
+  Missing IDs, changed evidence, incoming/LWW/deletion and unproven effects fail
+  closed. Optional SDK tag collection checks created Rems; receipts distinguish
+  original-card protection from new Card identities first observed at resume.
+  Repeated completion and local publication recovery perform no native writes.
 - Human-readable sync Markdown uses one hidden document-root binding and short
   stable block anchors; ordinary new bullets need no anchor or YAML. Optional
   sparse attributes accept display `title`/`aliases`/`tags` and explicit new

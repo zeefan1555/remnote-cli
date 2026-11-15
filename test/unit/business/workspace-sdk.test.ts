@@ -88,6 +88,18 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('collects exact tags only when requested for resume verification', async () => {
+    const f = fixture(),
+      tags = f.flags.get('r1')!.getTagRems!;
+    tags.mockResolvedValue([{ _id: 'tag-b' }, { _id: 'tag-a' }]);
+    expect((await f.backend.read(['r1']))[0]!.tags).toBeUndefined();
+    expect(tags).not.toHaveBeenCalled();
+    expect((await f.backend.read(['r1'], { tags: true }))[0]!.tags).toEqual(['tag-a', 'tag-b']);
+    tags.mockResolvedValue([{ _id: 'tag' }, { _id: 'tag' }]);
+    await expect(f.backend.read(['r1'], { tags: true })).rejects.toThrow('Duplicate native tags');
+    tags.mockResolvedValue(undefined);
+    await expect(f.backend.read(['r1'], { tags: true })).rejects.toThrow('Incomplete native tags');
+  });
   it('reads fresh portal subtype and direct membership only for native portal Rems', async () => {
     const f = fixture();
     f.objects.get('r0')!.type = 6;
