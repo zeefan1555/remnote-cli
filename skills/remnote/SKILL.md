@@ -1,7 +1,6 @@
 ---
 name: remnote
-description: Search, read, and write RemNote through remnote-cli within the user's authorized scope.
-homepage: https://github.com/zeefan1555/remnote-cli
+description: Search, read, write, or synchronize a private Obsidian vault and RemNote through remnote-cli within the user's authorized scope.
 metadata:
   openclaw:
     requires:
@@ -10,11 +9,16 @@ metadata:
 
 # RemNote CLI
 
+Repository: [zeefan1555/remnote-cli](https://github.com/zeefan1555/remnote-cli).
+
 Use the direct CLI for ordinary knowledge-base operations. A customized
 `remnote-kb-navigation` skill can supply the user's exact root IDs; do not guess
 IDs from an unconfigured template.
 
 ## Preconditions
+
+Offline `sync read|save|status|lint|diff` needs only the bound private workspace.
+Apply the connection prerequisites below to commands that contact RemNote.
 
 - RemNote desktop is open with RemNote CLI Bridge (`remnote-cli-bridge`) enabled. A plugin that still reports `zeefan-remnote-sdk-bridge` is accepted during the rename.
 - CLI and plugin are paired with a private token for the exact intended KB.
@@ -50,7 +54,8 @@ still run. Put `--allow-destructive` on `batch` when an inner `sdk` call needs i
 the previous JSON object; several IDs return `results` keyed by ID.
 Prefer file payloads (`--content-file`, `--plan`, `--request`,
 `--expect`, `--file`) over shell interpolation. Write payloads are bounded to
-100 KiB; a batch file is bounded to 1 MB and 100 commands. Inner batch commands
+100 KiB for native content commands; workspace Markdown uses the sync reference's
+file bound. A batch file is bounded to 1 MB and 100 commands. Inner batch commands
 must not read stdin.
 Use exact Rem IDs, not ambiguous tag names. Respect repository policy: live
 development/acceptance tests run only through the guarded integration wrapper
@@ -160,6 +165,61 @@ text, aliases or review-history bodies. Exact semantic text readback is still
 required before acceptance. See [read receipts](../../docs/guides/read-receipts.md)
 and [task plans](../../docs/guides/task-plans.md).
 
+## Local-file synchronization
+
+For local Markdown editing/import, read the [sync command reference](../../docs/guides/remnote-cli-command-reference.md#sync)
+before creating a vault. Users in Obsidian and agents with file tools edit the same
+Markdown + per-Rem native YAML files; RemNote is also an editable endpoint. Use a
+common baseline for per-Rem semantic three-way merge. One-sided changes propagate,
+equal changes converge and edits to different Rems merge. For conflicting
+edits, use newer content only when trustworthy version evidence is comparable;
+otherwise preserve both versions. Never use whole-file mtime, sync capture time or
+review time to pick a winner. Review history and scheduling remain RemNote-owned;
+local snapshots are read-only and must not be sent back.
+Use an authorized private directory excluded from code Git. A separate local-only
+Git repository may track content without a network remote; ignore `.sync/`, locks
+and credentials. Exclude `.obsidian/`, `.trash/` and `.DS_Store` from content scans,
+frozen plans and Git. Preserve user configuration and trash.
+
+Use `sync import DIR` with an explicit KB and declared subtree or official archive
+only for a new empty vault. Verify reported scope and completeness; repeated
+import is not a merge. Keep the `sync DIR` preview/apply entrypoint rather than
+restoring `pull`/`push` aliases. Preview/apply reports `incoming`, `outgoing`,
+`converged`, `metadataRefresh` and archived `resolutions`. Continuous reads cover bound IDs only (batches
+of at most 50), with `globalDiscoveryComplete: false`; new top-level roots are
+outside scope. Missing objects, unknown children and reparenting must fail or
+conflict. Agent edits start with `sync read DIR PATH`: edit that returned source,
+then `sync save DIR PATH --content-file FILE --expected-file-hash HASH` using the
+same read's hash. Save binds clocks only to changed semantic Rem versions, including
+new `new:key` cards, and stays offline. Same-Rem divergence uses whole-Rem
+`version-time-lww` only with comparable, hash-bound clocks; otherwise it preserves
+both versions as `untrusted-edit-order`. Direct file edits have no trusted clock,
+and a no-op save cannot stamp them retroactively. Read the reference's version-time
+limits: RemNote `updatedAt` is not a text-only clock. Inspect both archived versions
+and the selected winner in `resolutions` before applying within the user's scope.
+Edit supported list nodes only within the supported surface.
+Use stable Obsidian block IDs and their explicit native YAML mapping; edit nested
+YAML in Source mode. Full-path wikilinks resolve through exact file/block mappings.
+Keep display aliases/tags distinct from native relationships; existing Portals are
+lossless read-only, and unverified new embeds fail lint before remote writes.
+
+Run `sync lint DIR` and `sync diff DIR`, then preview `sync DIR` and apply its exact
+frozen hash within the user's write scope. The target plan can include incoming
+and outgoing changes; recheck both endpoints and advance the common baseline only
+after semantic verification. Pre/post checks are optimistic, not an atomic native
+conditional write: concurrent edits can still fall into the check-write window.
+Native transactions stay disabled. Any lint error blocks the whole sync. Preserve opaque
+content, native identity, parent/order and review history. Local renames preserve
+Rem identity; missing files or remote objects are not automatic deletion or movement requests.
+Deletion needs exact `--delete-id`/`--scope-root` intent and the destructive gates.
+Finish with exact-ID semantic readback; represented metadata alone is not proof of
+native writability or full import coverage.
+
+Preserve journals on partial/unknown writes. `sync recover` only finishes local
+publication after verified writes, with no remote replay; it is not permission
+to retry an uncertain mutation. See the reference for recovery and live-test
+entrypoints.
+
 ## Recovery
 
 Exit 0 means success; 1 includes validation, connection and incomplete-receipt
@@ -176,4 +236,5 @@ for a read-only status retry if background timer throttling is suspected. Do not
 stop arbitrary listeners, weaken KB binding or disable browser security.
 
 Capabilities are fetched live per command. Journals and ID-only paging snapshots
-are private local state, not an offline copy of the knowledge base.
+are private local state. An explicitly authorized `sync` directory is a separate
+authoring vault with the privacy boundary described above.

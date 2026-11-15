@@ -30,6 +30,7 @@ import { registerReviewStatsCommand } from './commands/review-stats.js';
 import { registerSdkCommands } from './commands/sdk.js';
 import { registerOutlineCommand } from './commands/outline.js';
 import { registerTodoCommand } from './commands/todo.js';
+import { registerSyncCommands } from './commands/sync.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version: string };
@@ -96,6 +97,7 @@ export function createProgram(version: string): Command {
   registerJournalCommand(program);
   registerStatusCommand(program);
   registerReadTableCommand(program);
+  registerSyncCommands(program);
 
   return program;
 }

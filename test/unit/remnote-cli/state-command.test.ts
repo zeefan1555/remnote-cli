@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { InspectStateSchema } from '../../../src/schemas/state-schemas.js';
 
 afterEach(() => {
   process.exitCode = undefined;
@@ -20,6 +21,39 @@ function capture() {
 }
 
 describe('inspect and assert commands', () => {
+  it('accepts explicit native audit fields through the CLI and strict schema', async () => {
+    const fields = [
+      'isDocument',
+      'isFolder',
+      'isTable',
+      'isProperty',
+      'isPowerup',
+      'isPowerupSlot',
+      'isPowerupProperty',
+      'isPowerupEnum',
+      'isPowerupPropertyListItem',
+      'rawCards',
+    ];
+    expect(InspectStateSchema.safeParse({ remIds: ['root'], fields }).success).toBe(true);
+    const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
+      schemaVersion: 1,
+      complete: true,
+      truncated: false,
+      rems: [{ id: 'root', rawCards: [] }],
+      errors: [],
+    });
+    capture();
+    await createProgram('0.1.0-test').parseAsync(
+      ['node', 'remnote-cli', 'inspect', 'root', '--fields', fields.join(','), '--strict'],
+      { from: 'node' }
+    );
+    expect(execute).toHaveBeenCalledWith('inspect_state', {
+      remIds: ['root'],
+      descendants: 0,
+      fields,
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
   it('inspects many ids in one execute and exits 0 when a rule fails without --strict', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-state-cmd-'));
     const rules = join(directory, 'rules.json');

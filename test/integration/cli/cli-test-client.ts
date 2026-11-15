@@ -34,8 +34,8 @@ export class CliTestClient {
       let stdout = '';
       let stderr = '';
 
-      proc.stdout.on('data', (data) => (stdout += data.toString()));
-      proc.stderr.on('data', (data) => (stderr += data.toString()));
+      proc.stdout.setEncoding('utf8').on('data', (data) => (stdout += data));
+      proc.stderr.setEncoding('utf8').on('data', (data) => (stderr += data));
 
       proc.on('close', (code) => {
         let json: unknown = null;

@@ -109,6 +109,7 @@ export function registerInspectCommand(program: Command): void {
         'Literal [[ counts are separate from rem-reference elements. tags and parent are root-first name/id/type chains; ancestors exclude the node itself.',
         'portal is set for a portal Rem or a Rem carrying powerup sp. query is slot q and filter is slot f (search portals and table filters). An unrecognized portal type is portalType null plus portalTypeRaw, not a read error. When complete is false, errors lists the reason, including each Rem field error.',
         'cards include due/nextRepetition (the same timestamp), history length, and a hash of card id, rem id, type, and repetition history.',
+        'Explicit rawCards includes native id/remId/type, creation, full repetition history, and scheduling; unavailable values stay null. Explicit isDocument/isFolder and native audit is* fields return each actual SDK boolean. These audit fields and rawCards are not included by default.',
         'Rule failures are reported in assertions and exit 0 unless --strict. assertions.ok is false when a rule fails, the read is incomplete, or the read has errors. Usage and connection errors still exit 1.',
         'Examples:',
         '  remnote-cli inspect REM_ID --fields elements,markdown,isCardItem,hasCardStructure',

@@ -3,24 +3,28 @@ import { Readable } from 'node:stream';
 
 export const MAX_WRITE_CONTENT_BYTES = 100 * 1024;
 
-function formatLimit(): string {
-  return `${MAX_WRITE_CONTENT_BYTES / 1024} KB`;
+function formatLimit(maxBytes: number): string {
+  return `${maxBytes / 1024} KB`;
 }
 
-function ensureWithinLimit(byteLength: number, sourceLabel: string): void {
-  if (byteLength > MAX_WRITE_CONTENT_BYTES) {
-    throw new Error(`${sourceLabel} exceeds ${formatLimit()} limit`);
+function ensureWithinLimit(byteLength: number, sourceLabel: string, maxBytes: number): void {
+  if (byteLength > maxBytes) {
+    throw new Error(`${sourceLabel} exceeds ${formatLimit(maxBytes)} limit`);
   }
 }
 
-async function readUtf8FromStream(stream: Readable, sourceLabel: string): Promise<string> {
+async function readUtf8FromStream(
+  stream: Readable,
+  sourceLabel: string,
+  maxBytes: number
+): Promise<string> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
 
   for await (const chunk of stream) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.byteLength;
-    ensureWithinLimit(totalBytes, sourceLabel);
+    ensureWithinLimit(totalBytes, sourceLabel, maxBytes);
     chunks.push(buffer);
   }
 
@@ -29,15 +33,16 @@ async function readUtf8FromStream(stream: Readable, sourceLabel: string): Promis
 
 export async function readContentFileOrStdin(
   pathOrDash: string,
-  stdin: Readable = process.stdin
+  stdin: Readable = process.stdin,
+  maxBytes = MAX_WRITE_CONTENT_BYTES
 ): Promise<string> {
   if (pathOrDash === '-') {
-    return readUtf8FromStream(stdin, 'Stdin content');
+    return readUtf8FromStream(stdin, 'Stdin content', maxBytes);
   }
 
   try {
     const buffer = await readFile(pathOrDash);
-    ensureWithinLimit(buffer.byteLength, `Content file "${pathOrDash}"`);
+    ensureWithinLimit(buffer.byteLength, `Content file "${pathOrDash}"`, maxBytes);
     return buffer.toString('utf8');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

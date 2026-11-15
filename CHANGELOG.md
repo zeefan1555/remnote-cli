@@ -9,6 +9,43 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `sync DIR` preview/apply and `sync import|status|lint|diff|recover` for a private,
+  exact-KB-bound Obsidian vault. The updated design permits edits in both RemNote
+  and the shared Markdown/native-YAML files, using a common baseline and per-Rem
+  semantic three-way merge. Preview/apply reports incoming, outgoing, converged
+  and metadata-only changes; native acceptance remains separate from offline tests.
+- Offline `sync read|save` binds guarded local edits to per-Rem content hashes and
+  save timestamps without advancing the native baseline. Staged recovery retains
+  the original clock; no-op/direct-file edits cannot be retroactively stamped.
+- Whole-Rem `version-time-lww` selects the later comparable, hash-bound local/native
+  version after archiving both versions immutably. Same-content metadata/review
+  drift does not retime observed content; explicit/observed reverts remain new
+  versions until publication. Missing/equal/invalid clocks preserve both versions
+  as `untrusted-edit-order`. Native `updatedAt` is not a text-only chronology, and
+  file mtime is never an ordering signal. Edits to different Rems merge.
+  Review history/scheduling remain RemNote-owned, and local snapshots never write
+  them back. Absence on either side never implies automatic deletion.
+- Stable Obsidian block-ID to Rem-ID mapping and full-path wikilinks, preserving
+  native identity across local renames. Native YAML is edited in Source mode;
+  display aliases/tags and embeds are distinct from native Rem relationships.
+  Unsupported or unverified structures, including Portals, remain lossless and read-only.
+- Whole-sync offline lint, frozen-plan apply, explicit bounded deletion, preserved
+  Rem/card identity and review-history guards. Missing files never imply movement
+  or deletion. Obsidian configuration/trash are excluded from content scans and
+  frozen plans; normal Obsidian Markdown permissions are supported in a private vault.
+- Durable staged snapshot publication with local-only recovery after verified
+  writes. Unknown mutation outcomes remain blocked for exact-ID reconciliation,
+  without automatic remote replay or an atomicity guarantee.
+- Continuous discovery explicitly covers bound IDs only, in public-read batches
+  of at most 50, with `globalDiscoveryComplete: false`. Unknown children, missing
+  Rems and reparenting are rejected or conflicted; new top-level roots are outside
+  scope. Client pre/post revision checks are not server-side atomic CAS.
+- A draft opt-in `scripts/sync-agent-acceptance.mjs` driver for serialized, guarded
+  live tests in one synthetic subtree, using YAML/block identities and incoming /
+  mixed-direction, convergence and conflict-preservation checks. Deletion uses
+  explicit missing-ID receipts and fresh-root cleanup guards. Its synthetic self-test is offline only; a new native
+  run still requires exclusive ownership, a frozen candidate and explicit approval.
+
 - `flashcards apply` plans accept optional `parentRemId`: an existing topic Rem directly under the daily document
   that already carries `tagRemId`. New cards (up to 7 per plan, no title needed) are created as its last direct
   children and get no tag of their own, replacing single-card plans plus `move-note` and tag removal for overflow
@@ -17,6 +54,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Workspace SDK Card history snapshots omit undefined object properties recursively,
+  preserving defined JSON values, unknown fields and review order. Only plain or
+  null-prototype objects are accepted. Array holes, undefined array elements and
+  other non-JSON values still fail validation.
+- Workspace aggregate manifests and state mirrors now share bounded 32 MiB
+  publication, readback and recovery support; ordinary payloads remain limited
+  to 4 MiB. Final serialized sizes, including the publication ledger, are checked
+  before staging, and oversized recovery metadata fails before local installation.
 - `context`, `inspect --fields markdown` and other reads that render titles no longer fail with
   `richText parameter: Invalid input` on a rendered image. RemNote stores `percent: 0` on images
   after rendering, outside the SDK enum (5/25/50/100; audio 25/50/100). Only the copy passed to

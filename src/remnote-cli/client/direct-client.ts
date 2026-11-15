@@ -12,6 +12,7 @@ import { connectionConfigPath, readConnectionConfig } from './connection-config.
 import { verifiedCatalog, type CapabilityResult } from './sdk-capabilities.js';
 import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
+import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
@@ -52,6 +53,7 @@ export class DirectClient {
   private adapter?: RemAdapter;
   private catalog?: CapabilityResult;
   private state?: LocalState;
+  private workspace?: SdkWorkspaceBackend;
   private startedAt = performance.now();
   private readonly configPath = connectionConfigPath();
   private holds = 0;
@@ -91,6 +93,20 @@ export class DirectClient {
     const kbKey = createHash('sha256').update(config.knowledgeBaseId).digest('hex');
     this.state = new LocalState(join(dirname(this.configPath), 'state', kbKey));
     const plugin = remoteSdk(this.connection, catalog, this.options.allowDestructive === true);
+    this.workspace = new SdkWorkspaceBackend(plugin, this.state, async () => {
+      const status = (await this.connection!.request('get_status', {})) as Record<string, unknown>;
+      if (
+        typeof status.knowledgeBaseId !== 'string' ||
+        typeof status.acceptWriteOperations !== 'boolean'
+      )
+        throw new Error('Incomplete live workspace status');
+      return {
+        kbId: status.knowledgeBaseId,
+        writable: status.acceptWriteOperations,
+        destructive:
+          status.acceptReplaceOperation === true && this.options.allowDestructive === true,
+      };
+    });
     this.adapter = new RemAdapter(
       plugin,
       {
@@ -144,6 +160,11 @@ export class DirectClient {
     }
     // The table is local CLI code, not user-controlled SDK dispatch.
     return Reflect.apply(Reflect.get(this.adapter!, operation![0]), this.adapter!, [input]);
+  }
+  /** Called lazily, only after offline workspace parsing/lint. Shares the batch connection. */
+  async workspaceBackend(): Promise<SdkWorkspaceBackend> {
+    await this.connect();
+    return this.workspace!;
   }
   async close(): Promise<void> {
     if (this.holds > 0) return;
