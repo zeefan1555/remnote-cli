@@ -203,12 +203,20 @@ limits: RemNote `updatedAt` is not a text-only clock. Inspect both archived vers
 and the selected winner in `resolutions` before applying within the user's scope.
 Edit supported list nodes only within the supported surface.
 Keep the single hidden `<!-- remnote:document-key -->` before H1 and existing short
-block anchors. No user attributes means no YAML. Optional title/aliases/tags are
+block anchors. No user attributes means no YAML. Optional top-level title/aliases/tags are
 display-only; only new multiline questions need `rems.<short-key>.content: multiline`
 and a matching question anchor with direct leaf answer bullets. Existing types
 come from identity-bound native records. Ordinary new bullets need no manual YAML
 or anchors. Tracked `.remnote/identity.json` holds only KB/document/block identity;
 native records, originals and card/history facts stay hidden and read-only.
+Use per-Rem `tags` with exact bound wikilinks for ordinary native Tag sets and
+sparse `powerups: {cc: true}` for explicit activation. Omission preserves existing
+relationships; `false`/slot removal is unsupported. Existing multiline questions
+accept direct answer leaves while retaining old identities and order, including
+an explicitly anchored empty leaf (`- ^separator-key`) as a native blank answer.
+For an external content checker, use the reference's `read --outline` input seal
+and `apply --expected-local-hash` flow; distinguish effective local intent from
+sealed `observed` facts and verify receipt-bound hashes after publication.
 Unknown YAML fields fail lint; unmappable native fields remain preserved sidecars.
 Generated links use full paths; unique basenames and the named document's current H1 fragments resolve, while
 ambiguous or broken targets fail. Local file moves do not move native Rems.

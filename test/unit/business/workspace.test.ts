@@ -300,6 +300,153 @@ const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =
   });
 
 describe('identity-preserving outline relationships', () => {
+  it('creates an explicit empty direct answer without inventing a question or independent card', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) =>
+      source.replace('    - Because', '    - ^answer-spacer\n    - Because')
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    const outline = await workspace.readWorkspace(directory, f.path, { outline: true });
+    const spacer = Object.values(outline.outline!.nodes).find(
+      (node) => node.text === '' && node.id === null
+    )!;
+    expect(spacer).toMatchObject({
+      kind: 'text',
+      cardItem: true,
+      cards: [],
+      cardIds: [],
+      children: [],
+      observed: { cardItem: null, cards: null },
+    });
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'verified', complete: true });
+    expect(f.rems.get('created_1')).toMatchObject({
+      text: [],
+      parent: 'question',
+      children: [],
+      cardItem: true,
+      backText: null,
+    });
+    expect(await f.backend.cardFacts('created_1')).toEqual([]);
+    expect(f.rems.get('question')!.children).toEqual(['created_1', 'answer']);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
+  });
+
+  it('still rejects new empty ordinary notes before opening a backend', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source + '\n- ^empty-note\n');
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('EMPTY_QUESTION');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('rejects inserting grandchildren beneath an existing multiline answer before connecting', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) =>
+      source.replace(/(    - Because[^\n]*)/, '$1\n      - Nested ^nested-answer')
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: false });
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('ANSWER_SHAPE');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('retains unknown sealed history when unrelated reference drift blocks a metadata-only refresh', async () => {
+    const f = fixture();
+    const cards = (await f.backend.read(['question']))[0]!.cards!;
+    f.rems.get('question')!.cards = cards.map((card) => ({ ...card, repetitionHistory: null }));
+    f.rems.get('answer')!.text = [{ i: 'q', _id: 'subdoc' }];
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    const before = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(before.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toBeNull();
+    f.rems.get('question')!.cards = cards;
+    f.rems.get('subdoc')!.folder = true;
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { scope: 'all', paths: [path] })
+    ).rejects.toThrow('Verification dependency structure changed: subdoc');
+    const after = await workspace.readWorkspace(directory, path, { outline: true });
+    expect(after.outline!.nodes.question!.observed.cards![0]!.repetitionHistory).toBeNull();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('measures the bounded read amplification of a multi-question leaf insertion batch', async () => {
+    const f = fixture();
+    const questions = Array.from({ length: 9 }, (_, n) => (n === 0 ? 'question' : `question${n}`));
+    const answers: string[] = [];
+    f.rems.get('chapter')!.children = questions;
+    for (const [qi, id] of questions.entries()) {
+      const children = Array.from({ length: 3 }, (_, n) =>
+        qi === 0 && n === 0 ? 'answer' : `answer${qi}_${n}`
+      );
+      f.rems.set(id, native(id, [`Question ${qi}`], { parent: 'chapter', children, backText: [] }));
+      for (const child of children) {
+        f.rems.set(child, native(child, [`Text ${child}`], { parent: id, cardItem: true }));
+        answers.push(child);
+      }
+    }
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory),
+      path = state.entries.question!.path;
+    await edit(path, (source) => {
+      for (const [qi, id] of questions.entries()) {
+        const first = f.rems.get(id)!.children[0]!;
+        const leaves = Array.from(
+          { length: qi === 0 ? 9 : 5 },
+          (_, n) => `    - Label ${qi} ${n} ^leaf-${qi}-${n}`
+        ).join('\n');
+        source = source.replace(`    - Text ${first} `, `${leaves}\n    - Text ${first} `);
+      }
+      for (const id of answers) source = source.replace(`Text ${id} `, `Edited ${id} `);
+      return (
+        renderFrontmatter({
+          rems: {
+            [state.entries.chapter!.blockId]: { powerups: { cc: true } },
+            ...Object.fromEntries(
+              questions.map((id) => [
+                state.entries[id]!.blockId,
+                { tags: ['[[HOME]]', '[[Child doc]]'] },
+              ])
+            ),
+          },
+        }) + source
+      );
+    });
+    vi.mocked(f.backend.read).mockClear();
+    vi.mocked(f.backend.readPublic).mockClear();
+    vi.mocked(f.backend.readEditGuards!).mockClear();
+    vi.mocked(f.backend.identity).mockClear();
+    const start = performance.now();
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [path],
+    })) as { remoteWrites: number };
+    expect(result).toMatchObject({ status: 'verified', complete: true, remoteWrites: 242 });
+    const readCalls = vi.mocked(f.backend.read).mock.calls;
+    const guardCalls = vi.mocked(f.backend.readEditGuards!).mock.calls;
+    process.stdout.write(
+      'SYNTHETIC_SYNC_READ_PROFILE ' +
+        JSON.stringify({
+          elapsedMs: Math.round(performance.now() - start),
+          remoteWrites: result.remoteWrites,
+          exactBatches: readCalls.length,
+          exactRems: readCalls.reduce((sum, [ids]) => sum + ids.length, 0),
+          guardBatches: guardCalls.length,
+          guardedRems: guardCalls.reduce((sum, [ids]) => sum + ids.length, 0),
+          publicBatches: vi.mocked(f.backend.readPublic).mock.calls.length,
+          identities: vi.mocked(f.backend.identity).mock.calls.length,
+        }) +
+        '\n'
+    );
+  }, 60_000);
+
   it('projects authored native relationships and a sealed input hash without a backend', async () => {
     const f = await prepare();
     await edit(
@@ -323,6 +470,44 @@ describe('identity-preserving outline relationships', () => {
     });
     expect(read.outline?.nodes.chapter).toMatchObject({ powerups: { cc: true } });
     expect(read.outline?.nodes.home).toMatchObject({ id: 'home', parent: null });
+    expect(read.outline?.nodes.question).toMatchObject({
+      cardItem: false,
+      observed: { cardItem: false },
+    });
+    expect(read.outline?.nodes.answer).toMatchObject({
+      cardItem: true,
+      observed: { cardItem: true },
+    });
+  });
+
+  it('projects new answer membership as intent without inventing native observations', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        source.replace('    - Because', '    - Planned answer ^planned-answer\n    - Because') +
+        '\n- Planned topic ^planned-topic\n'
+    );
+    const read = await workspace.readWorkspace(directory, f.path, { outline: true });
+    const nodes = Object.values(read.outline!.nodes);
+    expect(nodes.find((node) => node.text === 'Planned answer')).toMatchObject({
+      id: null,
+      kind: 'text',
+      cardItem: true,
+      cards: [],
+      cardIds: [],
+      document: false,
+      folder: false,
+      observed: { cardItem: null, cards: null, cardIds: null, document: null, folder: null },
+    });
+    expect(nodes.find((node) => node.text === 'Planned topic')).toMatchObject({
+      id: null,
+      kind: 'text',
+      cardItem: false,
+      cards: [],
+      cardIds: [],
+      observed: { cardItem: null, cards: null, cardIds: null },
+    });
   });
 
   it('inserts direct answer leaves without replacing existing answers or card identities', async () => {

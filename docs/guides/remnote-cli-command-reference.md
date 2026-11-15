@@ -207,10 +207,14 @@ with no write steps can be replaced by a fresh preview.
 `read --outline` additionally returns `localHash` (the whole-vault frozen input
 seal) and `outline: {schema: "remnote-outline/1", observation:
 "sealed-local-baseline", nodes: {...}}`. Nodes include stable/native identity,
-kind, text, parent/children, resolved references, effective native relationships
+kind, text, parent/children, `cardItem`, resolved references, effective native relationships
 and separately labeled `observed` baseline facts. Dependencies include exact
 reference/Tag targets and ancestors. The command is offline: unknown facts remain
 null, and baseline metadata is not a fresh native observation.
+For new text nodes, flat `cardItem` is the intended native answer membership
+(true only directly under a multiline question), `cards`/`cardIds` are empty,
+and `document`/`folder` are false. Their `observed` facts remain null until a
+verified native publication; a new question's future Card IDs remain unknown.
 
 External policy checkers can validate this parsed intent before passing
 `--expected-local-hash` to apply. A stale/malformed seal fails before backend
@@ -408,9 +412,14 @@ Auxiliary Portal/reference children are not answer items. For a basic card, the 
 the same list item is the back, not a new Rem. Literal `===` and `>>` in ordinary
 text do not declare cards.
 
-Existing multiline questions also accept new direct nonempty leaf answers while
+Existing multiline questions also accept new direct leaf answers while
 preserving all original answer IDs, relative order, parents and question Card
-identities. Native Tag sets and enable-only Powerups use the sparse attributes
+identities. An explicitly anchored empty answer (`- ^separator-key`, indented
+under the question) is a real blank native answer Rem with `isCardItem=true`,
+no children and no independent Cards. It is not spacing CSS or an embedded
+newline. Empty new ordinary notes/questions and nested answer children remain
+invalid; deciding whether an empty answer belongs in a learning template is
+external content policy. Native Tag sets and enable-only Powerups use the sparse attributes
 above. Each mutation is journaled and guarded before/after; existing immutable
 facts and exact review history remain protected. Powerup observations cover
 declared and previously known codes, not an unsupported full enumeration.

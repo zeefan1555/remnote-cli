@@ -35,6 +35,7 @@ export interface OutlineProjectionNode {
   parent: string | null;
   document: boolean | null;
   folder: boolean | null;
+  cardItem: boolean | null;
   pinned: null;
   tags: string[] | null;
   powerups: Record<string, boolean> | null;
@@ -48,6 +49,7 @@ export interface OutlineProjectionNode {
     cards: WorkspaceRem['cards'] | null;
     document: boolean | null;
     folder: boolean | null;
+    cardItem: boolean | null;
     pinned: null;
     kind: string | null;
     text: string;
@@ -95,6 +97,7 @@ export function projectOutline(context: LocalContext, path: string) {
       cards: rem?.cards ?? null,
       document: rem?.document ?? null,
       folder: rem?.folder ?? null,
+      cardItem: rem?.cardItem ?? null,
       pinned: null,
       kind: rem ? nodeKind(rem, context.native) : null,
       text: plain(rem?.text),
@@ -112,6 +115,14 @@ export function projectOutline(context: LocalContext, path: string) {
       path: local?.path ?? context.state.entries[key]?.path ?? path,
       line: node?.line ?? 1,
       ...observed,
+      ...(node?.key.startsWith('new:')
+        ? {
+            document: false,
+            folder: false,
+            cardItem: parsed.get(node.parent ?? '')?.node.kind === 'multiline',
+            ...(node.kind === 'text' ? { cardIds: [], cards: [] } : {}),
+          }
+        : {}),
       kind: node?.kind ?? (rem ? nodeKind(rem, context.native) : 'text'),
       text: plain(node?.kind === 'opaque' ? rem?.text : (node?.text ?? rem?.text)),
       children: node?.children ?? rem?.children ?? [],
