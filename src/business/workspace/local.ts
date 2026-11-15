@@ -160,7 +160,7 @@ export function publicationStore(): LocalState {
   );
 }
 
-function manifestStore(): LocalState {
+export function manifestStore(): LocalState {
   return new LocalState(
     join(dirname(connectionConfigPath()), 'sync-manifests'),
     MAX_METADATA_BYTES

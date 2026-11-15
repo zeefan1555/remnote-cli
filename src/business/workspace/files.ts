@@ -21,7 +21,9 @@ export function fileByteLimit(name: string): number {
 /** Exact owned guide paths only; arbitrary README.md/SKILL.md remain modeled source. */
 export function isContentMarkdown(path: string): boolean {
   return (
-    path.endsWith('.md') && path !== 'AGENTS.md' && path !== '.agents/skills/remnote-data/SKILL.md'
+    path.endsWith('.md') &&
+    path !== 'AGENTS.md' &&
+    path !== '.agents/skills/remnote-obsidian/SKILL.md'
   );
 }
 
@@ -221,7 +223,31 @@ export async function allFiles(root: string, prefix = ''): Promise<string[]> {
   return result.sort();
 }
 
-export async function withWorkspaceLock<T>(root: string, action: () => Promise<T>): Promise<T> {
+async function releaseOwnedLock(
+  roots: string[],
+  owned: { dev: number; ino: number }
+): Promise<void> {
+  // A relocation moves this same lock inode. Never remove a replacement/foreign lock.
+  for (const candidate of new Set(roots)) {
+    try {
+      const path = await safePath(candidate, '.sync/writer.lock');
+      const current = await lstat(path);
+      if (current.dev !== owned.dev || current.ino !== owned.ino || current.isSymbolicLink())
+        continue;
+      await unlink(path);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error('Workspace lock identity changed; inspect before recovery');
+}
+
+export async function withWorkspaceLock<T>(
+  root: string,
+  action: () => Promise<T>,
+  relocatedRoot?: string
+): Promise<T> {
   const path = await safePath(root, '.sync/writer.lock', true);
   let file;
   try {
@@ -234,12 +260,13 @@ export async function withWorkspaceLock<T>(root: string, action: () => Promise<T
       );
     throw error;
   }
+  const owned = await file.stat();
   try {
     await file.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
     await file.sync();
     return await action();
   } finally {
     await file.close();
-    await unlink(path);
+    await releaseOwnedLock(relocatedRoot ? [root, relocatedRoot] : [root], owned);
   }
 }

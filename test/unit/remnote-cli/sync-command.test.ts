@@ -6,6 +6,10 @@ import type { Command } from 'commander';
 import * as sync from '../../../src/business/workspace/workspace.js';
 import * as contentInput from '../../../src/remnote-cli/commands/content-input.js';
 import * as format from '../../../src/business/workspace/format.js';
+import * as relocate from '../../../src/business/workspace/relocate.js';
+vi.mock('../../../src/business/workspace/relocate.js', () => ({
+  relocateWorkspace: vi.fn(async () => ({ ok: true, nativeWrites: 0 })),
+}));
 vi.mock('../../../src/business/workspace/format.js', () => ({
   formatWorkspace: vi.fn(async () => ({ complete: true, remoteWrites: 0 })),
 }));
@@ -49,6 +53,23 @@ function testProgram() {
 }
 
 describe('sync command interface', () => {
+  it('routes explicit relocation offline with both exact paths', async () => {
+    const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await testProgram().program.parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'relocate',
+      '/private/tmp/old',
+      '/private/tmp/new',
+    ]);
+    expect(relocate.relocateWorkspace).toHaveBeenCalledExactlyOnceWith(
+      '/private/tmp/old',
+      '/private/tmp/new'
+    );
+    expect(backend).not.toHaveBeenCalled();
+  });
   it('routes explicit resume with the original plan hash and no new selectors', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const close = vi.spyOn(DirectClient.prototype, 'close');
@@ -272,6 +293,7 @@ describe('sync command interface', () => {
       'apply',
       'resume',
       'delete',
+      'relocate',
       'read',
       'save',
       'import',
