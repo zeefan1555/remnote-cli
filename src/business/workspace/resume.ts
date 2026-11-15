@@ -10,7 +10,15 @@ import {
   type SyncSelection,
   type WorkspaceChange,
   type WorkspaceRem,
+  type EditGuard,
 } from './types.js';
+import {
+  advanceEditGuard,
+  applyRelation,
+  guardRelations,
+  relationOperations,
+  type RelationOperation,
+} from './relations.js';
 
 export interface Journal {
   version: 2;
@@ -22,11 +30,14 @@ export interface Journal {
   selection: SyncSelection;
   /** Exact-ID resume collected tags on created Rems; recovery must use the same projection. */
   resumed?: true;
+  editGuards?: EditGuard[];
+  powerupCodes?: string[];
   final?: {
     hashes: Record<string, string>;
     inputHash: string;
     deleted: string[];
     structuralIds: string[];
+    editGuards?: EditGuard[];
   };
 }
 
@@ -44,10 +55,13 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
     );
   const expected = structuredClone(initial),
     structuralIds = new Set<string>();
+  const editGuards = journal.editGuards ? structuredClone(journal.editGuards) : undefined;
+  guardRelations(expected, editGuards ?? []);
   const sequence: Array<{
     key: string;
     change: WorkspaceChange;
-    operation: 'create' | 'text' | 'backText' | 'parent' | 'cardItem';
+    operation: 'create' | 'text' | 'backText' | 'parent' | 'cardItem' | 'relation';
+    relation?: RelationOperation;
   }> = [];
   for (const change of plan.changes) {
     const operations: Array<(typeof sequence)[number]['operation']> = [];
@@ -60,6 +74,16 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
     }
     for (const operation of operations)
       sequence.push({ key: `${change.key}:${operation}`, change, operation });
+    for (const relation of relationOperations(
+      change,
+      journal.editGuards?.find((guard) => guard.id === change.key)
+    ))
+      sequence.push({
+        key: `${change.key}:${relation.suffix}`,
+        change,
+        operation: 'relation',
+        relation,
+      });
   }
   const entries = Object.entries(journal.steps),
     assigned = new Set<string>();
@@ -96,6 +120,10 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
         cardItem: false,
         practice: 'forward',
         enablePractice: true,
+        ...(editGuards ? { tags: [] } : {}),
+        ...(journal.powerupCodes?.length
+          ? { powerupStates: Object.fromEntries(journal.powerupCodes.map((code) => [code, false])) }
+          : {}),
       });
     } else {
       const rem = expected.get(id);
@@ -118,6 +146,9 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
         expected.set(id, { ...rem, parent });
         expected.set(parent, { ...p, children });
         structuralIds.add(parent);
+      } else if (operation === 'relation') {
+        expected.set(id, applyRelation(rem, step.relation!));
+        advanceEditGuard(editGuards ?? [], id, step.relation!);
       } else if (operation === 'cardItem') expected.set(id, { ...rem, cardItem: change.cardItem });
       else expected.set(id, { ...rem, [operation]: change.fields[operation] });
     }
@@ -132,6 +163,7 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
   return {
     expected,
     structuralIds,
+    editGuards,
     recognized: entries.filter(([, status]) => status !== 'verified').map(([key]) => key),
   };
 }
@@ -176,7 +208,7 @@ export function verifyResumeReadback(
       changedFacts.length ||
       actual.unsupported ||
       !Array.isArray(actual.tags) ||
-      actual.tags.length ||
+      hash(actual.tags) !== hash(intended.tags ?? []) ||
       (actual.powerups?.length ?? 0) ||
       (actual.propertyValues?.length ?? 0) ||
       actual.portal ||
@@ -194,7 +226,9 @@ export function verifyResumeReadback(
           .map(([key]) => key),
         ...changedFacts,
         ...(actual.unsupported ? ['unsupported'] : []),
-        ...(!Array.isArray(actual.tags) || actual.tags.length ? ['tags'] : []),
+        ...(!Array.isArray(actual.tags) || hash(actual.tags) !== hash(intended.tags ?? [])
+          ? ['tags']
+          : []),
         ...(actual.powerups?.length ? ['powerups'] : []),
         ...(actual.propertyValues?.length ? ['propertyValues'] : []),
         ...(actual.portal ? ['portal'] : []),

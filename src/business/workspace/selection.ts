@@ -7,6 +7,7 @@ import type { SyncSelection, WorkspacePlan, WorkspaceRem } from './types.js';
 export interface SelectionOptions {
   scope?: 'changed' | 'all';
   paths?: string[];
+  expectedLocalHash?: string;
 }
 
 const sorted = (ids: Iterable<string>): string[] => [...new Set(ids)].sort();
@@ -100,6 +101,7 @@ export function verificationClosure(
     ancestors(change.key);
     ancestors(change.parent);
     for (const target of referenceIds(change.fields)) include(target);
+    for (const target of change.relations?.tags ?? []) ancestors(target);
   }
   return sorted(required).filter((id) => !candidates.includes(id));
 }

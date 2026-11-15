@@ -83,6 +83,7 @@ below is the authorized private vault's absolute path.
 | Offline inspection | `remnote-cli sync diff DIR --path 'Folder'`; `sync lint DIR` and `sync status DIR` remain whole-vault |
 | Explicit deletion | `remnote-cli sync delete DIR --id ID --scope-root ID` previews; execution additionally requires `--apply --plan-hash HASH`, destructive authorization and live gates |
 | Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
+| External content check | `sync read DIR PATH --outline`, validate effective intent, then `sync apply DIR --path PATH --expected-local-hash HASH`; compare receipt hashes with a fresh local outline afterward |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
 | Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
 | Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
@@ -203,6 +204,22 @@ retroactively. Use guarded save for Agent edits when automatic same-Rem resoluti
 is needed. Uncertain mutation journals still block save and sync; a prior preview
 with no write steps can be replaced by a fresh preview.
 
+`read --outline` additionally returns `localHash` (the whole-vault frozen input
+seal) and `outline: {schema: "remnote-outline/1", observation:
+"sealed-local-baseline", nodes: {...}}`. Nodes include stable/native identity,
+kind, text, parent/children, resolved references, effective native relationships
+and separately labeled `observed` baseline facts. Dependencies include exact
+reference/Tag targets and ancestors. The command is offline: unknown facts remain
+null, and baseline metadata is not a fresh native observation.
+
+External policy checkers can validate this parsed intent before passing
+`--expected-local-hash` to apply. A stale/malformed seal fails before backend
+creation. Guarded verified apply returns `editGuardsVerified`,
+`reviewHistoryPreserved`, and `verification: {planHash, observedHashes}`. Match
+required nodes against the subsequent outline's `observed.revisionHash`; an
+effective local property alone does not prove the native write. No learning-card
+policy or plugin registry is part of this generic sync interface.
+
 ### Human Markdown and stable identities
 
 The vault uses ordinary nested Markdown lists plus document/Folder notes and
@@ -241,6 +258,29 @@ come from identity-bound records and flags: edit their body directly, without
 restating native metadata. Existing identity and native facts cannot be replaced
 through YAML. H1 is the sole root-text authority; optional `title` is not a
 second source of native text. Publication preserves display attributes.
+
+Two sparse native relationship attributes are writable on editable Rems:
+
+```yaml
+rems:
+  question-key:
+    tags: ['[[Topics/Concepts#^existing-topic]]']
+  chapter-key:
+    powerups:
+      cc: true
+```
+
+`rems[shortKey].tags` is the exact ordinary native Tag set; `[]` explicitly removes
+ordinary Tags, omission leaves them alone. Every entry must resolve an existing
+mapped Rem using the normal wikilink rules. Duplicate resolved IDs, broken or
+unpublished targets and Powerup tags are refused; no search/create fallback exists.
+Tag removal uses the SDK's non-slot-deleting form. Top-level `tags` stays
+Obsidian-only metadata.
+
+`rems[shortKey].powerups` is an explicit code-to-boolean map, not a complete set.
+Only `true` is currently writable: `false` fails offline because Powerup removal
+can delete slots. Undeclared codes are never toggled. Both attributes stay
+separate from sealed native records; opaque/mounted nodes remain read-only.
 
 The following native facts are retained in hidden records and hydrated metadata,
 not accepted as user frontmatter:
@@ -368,8 +408,15 @@ Auxiliary Portal/reference children are not answer items. For a basic card, the 
 the same list item is the back, not a new Rem. Literal `===` and `>>` in ordinary
 text do not declare cards.
 
-Native Folder/Document/Tag/Power-up changes, moves, new embeds/media and complex
-rich-text edits are outside this write surface. Existing native content is kept
+Existing multiline questions also accept new direct nonempty leaf answers while
+preserving all original answer IDs, relative order, parents and question Card
+identities. Native Tag sets and enable-only Powerups use the sparse attributes
+above. Each mutation is journaled and guarded before/after; existing immutable
+facts and exact review history remain protected. Powerup observations cover
+declared and previously known codes, not an unsupported full enumeration.
+
+Native Folder/Document changes, Powerup removal/slots, moves, new embeds/media and
+complex rich-text edits are outside this write surface. Existing native content is kept
 losslessly and displayed read-only as faithfully as supported. Portal metadata
 records its native type and directly included Rem IDs; it does not grant Portal
 write support. Raw-record preservation, metadata mapping, writable support and

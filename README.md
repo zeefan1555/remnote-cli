@@ -139,10 +139,29 @@ import does not prove continuous whole-library coverage.
 Ordinary nested Markdown lists use short, stable Obsidian anchors; a single
 hidden `<!-- remnote:document-key -->` before H1 binds each imported document.
 There is no YAML when no user attributes are needed. Optional `title`, `aliases`
-and `tags` are display metadata; only a new multiline question needs an explicit
-`rems.<short-key>.content: multiline` attribute. Existing card types are recovered
+and top-level `tags` are display metadata; only a new multiline question needs an
+explicit `rems.<short-key>.content: multiline` attribute. Per-Rem `tags` instead
+sets native ordinary Tags through exact bound wikilinks, and sparse `powerups`
+may explicitly enable a code such as `cc: true`. Omission preserves native
+relationships; Powerup removal/slot editing remain unsupported. Existing card types are recovered
 through identity-bound native records. New ordinary bullets need no hand-written
 YAML or anchor; verified publication assigns identity.
+
+Existing multiline questions may gain direct nonempty text/code answer leaves
+without replacing their Card or answer identities. Original answer order and
+parents remain fixed. Every relationship/leaf write checks known native flags,
+Tags, declared/previously observed Powerup codes, original Card IDs and review
+history against the recorded expected state before and after the atomic setter.
+Unknown Powerup codes are not claimed as enumerated or verified.
+
+External content checkers may consume `sync read DIR PATH --outline` without a
+native connection. It returns effective local intent, separately labeled sealed
+native `observed` facts and a whole-vault `localHash`. Pass that hash as
+`sync apply DIR --path PATH --expected-local-hash HASH` to reject changed inputs
+before connecting. After a guarded verified apply, compare the returned
+`verification.observedHashes` with a new outline's `observed.revisionHash`; the
+outline alone is not fresh remote evidence. Content-learning policy stays outside
+the generic CLI.
 
 Tracked `.remnote/identity.json` maps KB, document and short block keys to Rem IDs;
 native records, originals, card identity and history stay in hidden read-only

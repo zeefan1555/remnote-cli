@@ -188,7 +188,9 @@ export function reconcile(
     }
     if (!localEdited && !remoteEdited) continue;
     if (localHash === remoteHash) {
-      plan.changes = plan.changes.filter((change) => change.key !== id);
+      plan.changes = plan.changes.flatMap((change) =>
+        change.key !== id ? [change] : change.relations ? [{ ...change, fields: {} }] : []
+      );
       plan.converged.push(id);
       continue;
     }
@@ -217,8 +219,10 @@ export function reconcile(
       policy: 'version-time-lww',
       winner,
     });
-    if (winner === 'remote') plan.incoming.push(id);
-    else {
+    if (winner === 'remote') {
+      plan.incoming.push(id);
+      if (localChange?.relations) plan.changes.push({ ...localChange, fields: {} });
+    } else {
       if (!localChange) throw new Error('Missing local content change for LWW');
       // The entire Rem wins. A base-relative delta could otherwise fabricate a third version.
       const fields: typeof localChange.fields = {};

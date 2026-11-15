@@ -37,6 +37,7 @@ import {
   cardIdentities,
   publicationRevisionHash,
   revisionHash,
+  publicRevision,
   withNativeSnapshot,
 } from './snapshots.js';
 import { nodeContent } from './versions.js';
@@ -44,6 +45,13 @@ import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
 import { foldResume, verifyResumeReadback, type Journal } from './resume.js';
+import { projectOutline } from './outline.js';
+import {
+  advanceEditGuard,
+  applyRelation,
+  guardRelations,
+  relationOperations,
+} from './relations.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
 import {
   readPublication,
@@ -68,7 +76,11 @@ async function requirePreviewOnly(state: WorkspaceState): Promise<void> {
 }
 
 /** Return source and its guard from the same read, without opening a native connection. */
-export async function readWorkspace(directory: string, path: string) {
+export async function readWorkspace(
+  directory: string,
+  path: string,
+  options: { outline?: boolean } = {}
+) {
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
@@ -82,6 +94,12 @@ export async function readWorkspace(directory: string, path: string) {
       content,
       fileHash: hash(content),
       remoteWrites: 0,
+      ...(options.outline
+        ? {
+            localHash: hash((await local.inputs.freeze()).hashes()),
+            outline: projectOutline(local, path),
+          }
+        : {}),
     };
   });
 }
@@ -382,11 +400,17 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
         native = context.native.get(node.key),
         parent = node.parent ? nodes.get(node.parent) : undefined;
       const fields: WorkspaceChange['fields'] = {};
+      const relations: NonNullable<WorkspaceChange['relations']> = {};
+      if (node.relations?.tags !== undefined && hash(node.relations.tags) !== hash(native?.tags))
+        relations.tags = node.relations.tags;
+      for (const [code, enabled] of Object.entries(node.relations?.powerups ?? {}))
+        if (native?.powerupStates?.[code] !== enabled) (relations.powerups ??= {})[code] = enabled;
       if (!before || hash(before.text) !== hash(node.text)) fields.text = node.text;
       if (node.kind === 'basic' && (!before || hash(before.backText) !== hash(node.backText)))
         fields.backText = node.backText;
       if (
         !Object.keys(fields).length &&
+        !Object.keys(relations).length &&
         context.state.localVersions?.[node.key]?.contentHash !== hash(nodeContent(node, native))
       )
         continue;
@@ -399,6 +423,7 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
         cardItem: before ? native!.cardItem === true : parent?.kind === 'multiline',
         ...(native ? { beforeHash: hash(native) } : {}),
         fields,
+        ...(Object.keys(relations).length ? { relations } : {}),
       });
     }
   }
@@ -442,7 +467,7 @@ export async function diffWorkspace(
 async function readExact(
   backend: WorkspaceBackend,
   ids: string[],
-  options?: { tags?: boolean }
+  options?: { tags?: boolean; powerups?: string[] }
 ): Promise<Map<string, WorkspaceRem>> {
   const result = new Map<string, WorkspaceRem>();
   for (let start = 0; start < ids.length; start += 50) {
@@ -508,11 +533,19 @@ function publicationRems(
   selection: SyncSelection,
   assigned: Record<string, string>,
   deleted: string[],
-  structuralIds: string[]
+  structuralIds: string[],
+  verifiedIds: string[] = []
 ) {
   const result = new Map(context.native);
   for (const id of [...selection.reconcileIds, ...Object.values(assigned)])
     if (remote.has(id)) result.set(id, remote.get(id)!);
+  for (const id of verifiedIds) {
+    const before = context.native.get(id),
+      current = remote.get(id);
+    // Promote freshly collected metadata only; verification-only content is never imported.
+    if (before && current && hash(publicRevision(before)) === hash(publicRevision(current)))
+      result.set(id, current);
+  }
   for (const id of structuralIds) {
     if (selection.reconcileIds.includes(id) || !result.has(id)) continue;
     const base = result.get(id)!,
@@ -619,6 +652,38 @@ async function synchronizeWorkspace(
       };
     }
     const localPlan = await selectPlan(context, planLocal(context, options), options);
+    const selectedIds = new Set([
+      ...localPlan.selection.reconcileIds,
+      ...localPlan.selection.verificationIds,
+    ]);
+    // Preserve every previously observed/explicitly authored code, not just codes being changed.
+    // The SDK has no complete code enumeration: unknown Powerups are never claimed as verified.
+    const powerupCodes =
+      resuming?.powerupCodes ??
+      [
+        ...new Set([
+          ...localPlan.changes.flatMap((change) => Object.keys(change.relations?.powerups ?? {})),
+          ...[...selectedIds].flatMap((id) => [
+            ...Object.keys(context.native.get(id)?.powerupStates ?? {}),
+            ...(context.native.get(id)?.powerups ?? []).map((powerup) => powerup.code),
+          ]),
+          ...[...context.parsed.values()].flatMap((doc) =>
+            doc.nodes
+              .filter((node) => selectedIds.has(node.key))
+              .flatMap((node) => Object.keys(node.relations?.powerups ?? {}))
+          ),
+        ]),
+      ].sort();
+    const guardedEdits =
+      Boolean(resuming?.editGuards) ||
+      powerupCodes.length > 0 ||
+      localPlan.changes.some(
+        (change) =>
+          change.relations ||
+          (change.key.startsWith('new:') &&
+            change.parent &&
+            Array.isArray(context.native.get(change.parent)?.backText))
+      );
     if (localPlan.changes.length > 100)
       throw new Error('One sync is limited to 100 changed/new nodes; narrow --path or split edits');
     let stateHash = hash(state);
@@ -631,6 +696,12 @@ async function synchronizeWorkspace(
     }
     const frozen = await context.inputs.freeze();
     localPlan.inputHash = hash(frozen.hashes());
+    if (
+      options.expectedLocalHash !== undefined &&
+      (!/^[a-f0-9]{64}$/.test(options.expectedLocalHash) ||
+        options.expectedLocalHash !== localPlan.inputHash)
+    )
+      throw new Error('Expected local input hash changed after the external lint check');
     const store = localStore(state.kbId);
     if (!resuming) await requirePreviewOnly(state);
     if (
@@ -821,13 +892,43 @@ async function synchronizeWorkspace(
     const existingIds = affectedIds(plan, remote);
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     const protectedIds = existingIds.filter((id) => !plan.deletion?.ids.includes(id));
-    const guardHash = await backend.guard(protectedIds);
+    if (guardedEdits && !backend.readEditGuards)
+      throw new Error('Backend cannot verify identity-preserving relationship edits');
+    if (plan.changes.some((change) => change.relations?.tags) && !backend.setTag)
+      throw new Error('Backend cannot write explicit native Tag relationships');
+    if (
+      plan.changes.some((change) => Object.keys(change.relations?.powerups ?? {}).length) &&
+      !backend.setPowerup
+    )
+      throw new Error('Backend cannot write explicit Powerup relationships');
+    const observedEditGuards = guardedEdits
+      ? await backend.readEditGuards!(protectedIds, powerupCodes)
+      : undefined;
+    if (
+      observedEditGuards &&
+      (observedEditGuards.length !== protectedIds.length ||
+        hash(observedEditGuards.map((guard) => guard.id).sort()) !== hash([...protectedIds].sort()))
+    )
+      throw new Error('Incomplete exact native edit guard');
+    const initialEditGuards = journal?.editGuards ?? observedEditGuards;
+    const expectedEditGuards =
+      folded?.editGuards ?? (initialEditGuards ? structuredClone(initialEditGuards) : undefined);
+    if (observedEditGuards && hash(observedEditGuards) !== hash(expectedEditGuards))
+      throw new Error('Native identities, flags, tags, powerups or review history changed');
+    const guardHash = initialEditGuards
+      ? hash(initialEditGuards)
+      : await backend.guard(protectedIds);
     if (journal && journal.guardHash !== guardHash)
       throw new Error('Native card identity or immutable flags changed since preview');
+    if (expectedEditGuards) guardRelations(expected, expectedEditGuards);
+    const editReadOptions = expectedEditGuards ? { tags: true, powerups: powerupCodes } : undefined;
     if (folded) {
-      const fresh = await readExact(backend, existingIds);
+      const fresh = await readExact(backend, existingIds, editReadOptions);
       const createdIds = Object.values(resuming!.ids);
-      for (const [id, rem] of await readExact(backend, createdIds, { tags: true }))
+      for (const [id, rem] of await readExact(backend, createdIds, {
+        tags: true,
+        powerups: powerupCodes,
+      }))
         fresh.set(id, rem);
       expected = verifyResumeReadback(expected, fresh, new Set(createdIds));
       // Only exact-after is recognized. Exact-before cannot rule out a delayed old SDK write.
@@ -844,6 +945,7 @@ async function synchronizeWorkspace(
       steps: {},
       ids: {},
       selection,
+      ...(initialEditGuards ? { editGuards: initialEditGuards, powerupCodes } : {}),
     };
     await store.setLocal(key, journal);
     state.pending = { planHash, journalKey: key };
@@ -882,10 +984,14 @@ async function synchronizeWorkspace(
       const createdIds = resuming ? new Set(Object.values(journal!.ids)) : new Set<string>();
       const fresh = await readExact(
         backend,
-        [...expected.keys()].filter((id) => !createdIds.has(id))
+        [...expected.keys()].filter((id) => !createdIds.has(id)),
+        editReadOptions
       );
       if (resuming) {
-        for (const [id, rem] of await readExact(backend, [...createdIds], { tags: true }))
+        for (const [id, rem] of await readExact(backend, [...createdIds], {
+          tags: true,
+          powerups: powerupCodes,
+        }))
           fresh.set(id, rem);
       }
       for (const [id, rem] of expected) {
@@ -900,7 +1006,15 @@ async function synchronizeWorkspace(
           throw new Error(`New card identity changed after resume readback: ${id}`);
         fresh.set(id, current);
       }
-      if ((await backend.guard(protectedIds)) !== guardHash)
+      if (expectedEditGuards) {
+        if (
+          hash(await backend.readEditGuards!(protectedIds, powerupCodes)) !==
+          hash(expectedEditGuards)
+        )
+          throw new Error(
+            'Existing identities, flags, native relationships or review history changed'
+          );
+      } else if ((await backend.guard(protectedIds)) !== guardHash)
         throw new Error('Existing card identity or immutable flags changed');
       const identity = await backend.identity();
       if (
@@ -978,7 +1092,11 @@ async function synchronizeWorkspace(
               journal!.ids[change.key] = created;
               await store.setLocal(key, journal);
               const rem = (
-                await readExact(backend, [created], resuming ? { tags: true } : undefined)
+                await readExact(
+                  backend,
+                  [created],
+                  editReadOptions ?? (resuming ? { tags: true } : undefined)
+                )
               ).get(created)!;
               if (
                 rem.parent !== null ||
@@ -1038,6 +1156,22 @@ async function synchronizeWorkspace(
               }
             );
         }
+        for (const relation of relationOperations(
+          change,
+          initialEditGuards?.find((guard) => guard.id === change.key)
+        )) {
+          await mutate(
+            `${change.key}:${relation.suffix}`,
+            () =>
+              relation.kind === 'tag'
+                ? backend.setTag!(id, relation.value, relation.enabled)
+                : backend.setPowerup!(id, relation.value, relation.enabled),
+            async () => {
+              expected.set(id, applyRelation(expected.get(id)!, relation));
+              advanceEditGuard(expectedEditGuards ?? [], id, relation);
+            }
+          );
+        }
       }
       await preflight();
       const newCards: Record<string, Array<{ id: string; hash: string }>> = {};
@@ -1074,15 +1208,22 @@ async function synchronizeWorkspace(
         inputHash: plan.inputHash!,
         deleted: plan.deletion?.ids ?? [],
         structuralIds: [...structuralIds].sort(),
+        ...(expectedEditGuards ? { editGuards: structuredClone(expectedEditGuards) } : {}),
       };
       journal.state = 'verified';
       await store.setLocal(key, journal);
       await writeSnapshot(
         root,
         state.kbId,
-        publicationRems(context, remote, selection, journal.ids, plan.deletion?.ids ?? [], [
-          ...structuralIds,
-        ]),
+        publicationRems(
+          context,
+          remote,
+          selection,
+          journal.ids,
+          plan.deletion?.ids ?? [],
+          [...structuralIds],
+          expectedEditGuards ? protectedIds : []
+        ),
         state,
         { ...state, globalDiscoveryComplete: false },
         frozen,
@@ -1109,6 +1250,18 @@ async function synchronizeWorkspace(
         deleted: plan.deletion?.ids ?? [],
         nativeCards: newCards,
         ...(resuming ? { existingCardsPreserved: true } : { cardsPreserved: true }),
+        ...(expectedEditGuards
+          ? {
+              editGuardsVerified: true,
+              reviewHistoryPreserved: true,
+              verification: {
+                planHash,
+                observedHashes: Object.fromEntries(
+                  [...expected].map(([id, rem]) => [id, publicationRevisionHash(rem)])
+                ),
+              },
+            }
+          : {}),
         remoteWrites,
         ...(resuming
           ? {
@@ -1192,12 +1345,25 @@ export async function recoverWorkspace(
     );
     localPlan.selection = journal.selection;
     const rems = await readRemote(local, localPlan, backend);
+    const guardedIds = journal.editGuards?.map((guard) => guard.id) ?? [];
     for (const [id, rem] of await readExact(
       backend,
-      Object.values(journal.ids),
-      journal.resumed ? { tags: true } : undefined
+      [...new Set([...guardedIds, ...Object.values(journal.ids)])],
+      journal.editGuards || journal.resumed
+        ? { tags: true, powerups: journal.powerupCodes ?? [] }
+        : undefined
     ))
-      rems.set(id, rem);
+      rems.set(id, withNativeSnapshot(rems.get(id) ?? rem, rem));
+    if (journal.editGuards) {
+      if (
+        !journal.final.editGuards ||
+        !backend.readEditGuards ||
+        hash(await backend.readEditGuards(guardedIds, journal.powerupCodes ?? [])) !==
+          hash(journal.final.editGuards)
+      )
+        throw new Error('Native edit guards or review history changed after verified sync');
+      guardRelations(rems, journal.final.editGuards);
+    }
     if (rems.size !== Object.keys(journal.final.hashes).length)
       throw new Error('Remote ID set changed after verified sync');
     for (const [id, rem] of rems)
@@ -1215,7 +1381,8 @@ export async function recoverWorkspace(
         journal.selection,
         journal.ids,
         journal.final.deleted,
-        journal.final.structuralIds
+        journal.final.structuralIds,
+        guardedIds
       ),
       state,
       { ...state, globalDiscoveryComplete: false },
@@ -1227,6 +1394,18 @@ export async function recoverWorkspace(
       journal.ids,
       journal.selection
     );
-    return { status: 'recovered', complete: true, remoteWrites: 0, ids: journal.ids };
+    return {
+      status: 'recovered',
+      complete: true,
+      remoteWrites: 0,
+      ids: journal.ids,
+      ...(journal.final.editGuards
+        ? {
+            editGuardsVerified: true,
+            reviewHistoryPreserved: true,
+            verification: { planHash: journal.planHash, observedHashes: journal.final.hashes },
+          }
+        : {}),
+    };
   });
 }

@@ -4,6 +4,7 @@ import { RemType } from '../sdk-constants.generated.js';
 import { idSchema } from './identity.js';
 import { immutableProjection } from './snapshots.js';
 import { mapReads, settleReads } from './read-pool.js';
+import { editGuard } from './relations.js';
 import {
   hash,
   type MetadataStore,
@@ -205,7 +206,10 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     return mapReads(rems, 4, (rem) => this.snapshot(rem));
   }
 
-  async read(ids: string[], options: { tags?: boolean } = {}): Promise<WorkspaceRem[]> {
+  async read(
+    ids: string[],
+    options: { tags?: boolean; powerups?: string[] } = {}
+  ): Promise<WorkspaceRem[]> {
     if (ids.length > 50) throw new Error('Exact-ID native read batch exceeds 50');
     const rems = await this.plugin.rem.findMany(ids);
     if (
@@ -226,6 +230,15 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
         if (new Set(snapshot.tags).size !== snapshot.tags.length)
           throw new Error('Duplicate native tags');
       }
+      if (options.powerups?.length)
+        snapshot.powerupStates = Object.fromEntries(
+          await Promise.all(
+            options.powerups.map(
+              async (code) =>
+                [code, boolean(await rem.hasPowerup(code), `powerup ${code}`)] as const
+            )
+          )
+        );
       return snapshot;
     });
   }
@@ -339,6 +352,25 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     return hash(facts);
   }
 
+  async readEditGuards(ids: string[], powerups: string[]) {
+    return mapReads([...ids].sort(), 4, async (id) => {
+      const rem = await this.rem(id),
+        snapshot = await this.snapshot(rem);
+      const tags = await rem.getTagRems();
+      if (!Array.isArray(tags)) throw new Error('Incomplete native tags');
+      const tagIds = tags.map((tag) => idSchema.parse(tag?._id));
+      if (new Set(tagIds).size !== tagIds.length) throw new Error('Duplicate native tags');
+      const states = Object.fromEntries(
+        await Promise.all(
+          powerups.map(
+            async (code) => [code, boolean(await rem.hasPowerup(code), `powerup ${code}`)] as const
+          )
+        )
+      );
+      return editGuard(snapshot, tagIds, states);
+    });
+  }
+
   private async writable(): Promise<void> {
     if (!(await this.identity()).writable) throw new Error('Live workspace write gate is disabled');
   }
@@ -365,6 +397,19 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   async setCardItem(id: string, value: boolean): Promise<void> {
     await this.writable();
     await (await this.rem(id)).setIsCardItem(value);
+  }
+  async setTag(id: string, tagId: string, enabled: boolean): Promise<void> {
+    await this.writable();
+    const tag = await this.rem(tagId);
+    if (await tag.isPowerup()) throw new Error('Native Tag attributes cannot change a Powerup tag');
+    const rem = await this.rem(id);
+    if (enabled) await rem.addTag(tagId);
+    else await rem.removeTag(tagId, false);
+  }
+  async setPowerup(id: string, code: string, enabled: boolean): Promise<void> {
+    if (!enabled) throw new Error('Powerup slot removal is not supported');
+    await this.writable();
+    await (await this.rem(id)).addPowerup(code);
   }
   async remove(id: string): Promise<void> {
     const live = await this.identity();

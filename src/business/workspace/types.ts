@@ -37,6 +37,7 @@ export interface WorkspaceRem {
   /** Complete public snapshot, including unknown fields and explicit SDK timestamps. Never written back. */
   public?: Record<string, unknown>;
   tags?: NativeMetadata['tags'];
+  powerupStates?: Record<string, boolean>;
   references?: NativeMetadata['references'];
   powerups?: NativeMetadata['powerups'];
   propertyValues?: NativeMetadata['propertyValues'];
@@ -99,6 +100,18 @@ export interface Diagnostic {
   message: string;
 }
 export type NodeKind = 'text' | 'multiline' | 'basic' | 'opaque' | 'mount';
+export interface RemRelations {
+  tags?: string[];
+  powerups?: Record<string, boolean>;
+}
+/** All old guard invariants plus separately exact-checked writable relationships and review history. */
+export interface EditGuard {
+  id: string;
+  invariantHash: string;
+  reviewHash: string;
+  tags: string[];
+  powerups: Record<string, boolean>;
+}
 export interface OutlineNode {
   key: string;
   blockId: string;
@@ -109,6 +122,7 @@ export interface OutlineNode {
   backText: unknown[];
   children: string[];
   contentHash: string;
+  relations?: RemRelations;
 }
 export interface ParsedOutline {
   path: string;
@@ -129,6 +143,7 @@ export interface WorkspaceChange {
   cardItem: boolean;
   beforeHash?: string;
   fields: Partial<Record<'text' | 'backText', unknown[]>>;
+  relations?: RemRelations;
 }
 export interface WorkspacePlan {
   version: 1;
@@ -211,8 +226,11 @@ export interface WorkspaceBackend {
   subtree(rootIds: string[]): Promise<WorkspaceRem[]>;
   discover(ids: string[]): Promise<PublicDiscovery>;
   readPublic(ids: string[]): Promise<Record<string, unknown>[]>;
-  read(ids: string[], options?: { tags?: boolean }): Promise<WorkspaceRem[]>;
+  read(ids: string[], options?: { tags?: boolean; powerups?: string[] }): Promise<WorkspaceRem[]>;
   guard(ids: string[]): Promise<string>;
+  readEditGuards?(ids: string[], powerups: string[]): Promise<EditGuard[]>;
+  setTag?(id: string, tagId: string, enabled: boolean): Promise<void>;
+  setPowerup?(id: string, code: string, enabled: boolean): Promise<void>;
   create(markdown?: string): Promise<string>;
   writeField(id: string, field: 'text' | 'backText', value: unknown[]): Promise<void>;
   setParent(id: string, parent: string, position: number): Promise<void>;

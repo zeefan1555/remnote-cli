@@ -77,6 +77,7 @@ const remSchema = z
     unsupported: z.string().optional(),
     public: z.record(z.string(), z.unknown()).optional(),
     tags: z.array(idSchema).nullable().optional(),
+    powerupStates: nativeSchema.shape.powerupStates,
     references: z.array(idSchema).nullable().optional(),
     powerups: nativeSchema.shape.powerups.optional(),
     propertyValues: nativeSchema.shape.propertyValues.optional(),
@@ -774,13 +775,6 @@ export async function inspectLocal(
             node.line,
             'ANSWER_SHAPE',
             'Multiline answers must be nonempty leaf text/code nodes'
-          );
-        if (parent?.kind === 'multiline' && !parent.key.startsWith('new:'))
-          fail(
-            path,
-            node.line,
-            'CARD_IDENTITY',
-            'Adding answers to an existing card changes its shape; only new cards may gain answer nodes'
           );
       } else if (!before)
         fail(path, node.line, 'UNKNOWN_ID', 'Native ID does not belong to this mapped document');

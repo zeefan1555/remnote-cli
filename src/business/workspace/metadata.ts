@@ -12,6 +12,7 @@ import type { Diagnostic } from './types.js';
 
 const bool = () => z.boolean().nullable().default(null);
 const number = () => z.number().finite().nullable().default(null);
+export const powerupStatesSchema = z.record(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), z.boolean());
 const propertyValue = z
   .object({
     propertyId: idSchema,
@@ -87,6 +88,7 @@ export const nativeSchema = z
     practiceDirection: z.enum(['forward', 'backward', 'both', 'none']).nullable(),
     enablePractice: z.boolean().nullable(),
     tags: z.array(idSchema).nullable(),
+    powerupStates: powerupStatesSchema.optional(),
     references: z.array(idSchema).nullable(),
     powerups: z
       .array(
@@ -209,7 +211,13 @@ export const attributesSchema = z
     rems: z
       .record(
         shortBlockSchema,
-        z.object({ content: z.enum(['text', 'multiline']).optional() }).strict()
+        z
+          .object({
+            content: z.enum(['text', 'multiline']).optional(),
+            tags: z.array(z.string().min(1)).optional(),
+            powerups: powerupStatesSchema.optional(),
+          })
+          .strict()
       )
       .optional(),
   })

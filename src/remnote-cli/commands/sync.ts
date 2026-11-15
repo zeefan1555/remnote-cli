@@ -29,6 +29,8 @@ interface SyncOptions {
   editableRootId?: string;
   contentFile?: string;
   expectedFileHash?: string;
+  expectedLocalHash?: string;
+  outline?: boolean;
 }
 
 interface SelectionOptions {
@@ -71,7 +73,7 @@ export function registerSyncCommands(program: Command): void {
     const client = createCommandClient(program);
     try {
       let result: unknown;
-      if (name === 'read') result = await readWorkspace(directory, path!);
+      if (name === 'read') result = await readWorkspace(directory, path!, options);
       else if (name === 'format') result = await formatWorkspace(directory);
       else if (name === 'save')
         result = await saveWorkspace(
@@ -134,7 +136,12 @@ export function registerSyncCommands(program: Command): void {
           .default('changed')
       );
     if (name === 'apply')
-      command.option('--plan-hash <sha256>', 'Require this exact previous preview when applying');
+      command
+        .option('--plan-hash <sha256>', 'Require this exact previous preview when applying')
+        .option(
+          '--expected-local-hash <sha256>',
+          'Require the exact offline outline input seal before opening a backend'
+        );
     command.action(async (directory: string, { path, ...options }: SelectionOptions) =>
       execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })
     );
@@ -178,7 +185,13 @@ export function registerSyncCommands(program: Command): void {
   workspace
     .command('read <directory> <path>')
     .description('Read local Markdown and its exact fileHash offline')
-    .action(async (directory: string, path: string) => execute('read', directory, {}, path));
+    .option(
+      '--outline',
+      'Include parsed local nodes, effective relationships and sealed native observations'
+    )
+    .action(async (directory: string, path: string, options: SyncOptions) =>
+      execute('read', directory, options, path)
+    );
   workspace
     .command('save <directory> <path>')
     .description('Save local Markdown offline and bind changed Rem content to this save time')

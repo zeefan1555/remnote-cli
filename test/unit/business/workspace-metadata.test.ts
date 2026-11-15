@@ -141,7 +141,7 @@ describe('Obsidian workspace frontmatter', () => {
     ['invalid block', (s: string) => s.replace('local-question:', 'local_question:')],
     [
       'unknown attribute',
-      (s: string) => s.replace('content: multiline', 'content: multiline\n    tags: []'),
+      (s: string) => s.replace('content: multiline', 'content: multiline\n    practice: backward'),
     ],
     ['unsupported content', (s: string) => s.replace('content: multiline', 'content: basic')],
     ['duplicate root', (s: string) => s + marker],

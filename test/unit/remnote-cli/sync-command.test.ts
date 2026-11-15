@@ -94,7 +94,7 @@ describe('sync command interface', () => {
       '/private/tmp/sync',
       'Note.md',
     ]);
-    expect(sync.readWorkspace).toHaveBeenCalledWith('/private/tmp/sync', 'Note.md');
+    expect(sync.readWorkspace).toHaveBeenCalledWith('/private/tmp/sync', 'Note.md', {});
     await createProgram('test').parseAsync([
       'node',
       'remnote-cli',
@@ -118,6 +118,40 @@ describe('sync command interface', () => {
       process.stdin,
       4 * 1024 * 1024
     );
+    expect(backend).not.toHaveBeenCalled();
+  });
+  it('routes the offline outline flag and expected input seal without extra backend calls', async () => {
+    const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createProgram('test').parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'read',
+      '/private/tmp/sync',
+      'Note.md',
+      '--outline',
+    ]);
+    expect(sync.readWorkspace).toHaveBeenCalledWith('/private/tmp/sync', 'Note.md', {
+      outline: true,
+    });
+    await createProgram('test').parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'apply',
+      '/private/tmp/sync',
+      '--path',
+      'Note.md',
+      '--expected-local-hash',
+      'a'.repeat(64),
+    ]);
+    expect(sync.pushWorkspace).toHaveBeenCalledWith('/private/tmp/sync', expect.any(Function), {
+      apply: true,
+      scope: 'changed',
+      paths: ['Note.md'],
+      expectedLocalHash: 'a'.repeat(64),
+    });
     expect(backend).not.toHaveBeenCalled();
   });
   it('exposes only sync, with no abandoned workspace alias', () => {

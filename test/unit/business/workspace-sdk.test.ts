@@ -38,6 +38,10 @@ function fixture(count = 2) {
       getPortalType: vi.fn(async () => 0),
       getPortalDirectlyIncludedRem: vi.fn(async () => []),
       getTagRems: vi.fn(async () => []),
+      hasPowerup: vi.fn(async () => false),
+      addPowerup: vi.fn(async () => {}),
+      addTag: vi.fn(async () => {}),
+      removeTag: vi.fn(async () => {}),
       setText: vi.fn(async (value) => {
         object.text = value;
       }),
@@ -88,6 +92,43 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('collects requested powerups and exact edit guards independently of ordinary tags', async () => {
+    const f = fixture(),
+      methods = f.flags.get('r1')!;
+    methods.hasPowerup!.mockResolvedValue(true);
+    expect((await f.backend.read(['r1']))[0]!.powerupStates).toBeUndefined();
+    expect(methods.hasPowerup).not.toHaveBeenCalled();
+    expect((await f.backend.read(['r1'], { tags: true, powerups: ['cc'] }))[0]).toMatchObject({
+      tags: [],
+      powerupStates: { cc: true },
+    });
+    expect(methods.hasPowerup).toHaveBeenCalledExactlyOnceWith('cc');
+    expect(await f.backend.readEditGuards(['r1'], ['cc'])).toMatchObject([
+      { id: 'r1', tags: [], powerups: { cc: true } },
+    ]);
+  });
+
+  it('writes ordinary tags without slot deletion and adds only explicitly requested powerups', async () => {
+    const f = fixture(),
+      methods = f.flags.get('r1')!;
+    await f.backend.setTag('r1', 'r0', true);
+    await f.backend.setTag('r1', 'r0', false);
+    await f.backend.setPowerup('r1', 'cc', true);
+    expect(methods.addTag).toHaveBeenCalledExactlyOnceWith('r0');
+    expect(methods.removeTag).toHaveBeenCalledExactlyOnceWith('r0', false);
+    expect(methods.addPowerup).toHaveBeenCalledExactlyOnceWith('cc');
+    await expect(f.backend.setPowerup('r1', 'cc', false)).rejects.toThrow('Powerup slot removal');
+    expect(methods.addPowerup).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a Powerup identity passed as an ordinary Tag without any mutation', async () => {
+    const f = fixture();
+    f.flags.get('r0')!.isPowerup!.mockResolvedValue(true);
+    await expect(f.backend.setTag('r1', 'r0', true)).rejects.toThrow('cannot change a Powerup tag');
+    expect(f.flags.get('r1')!.addTag).not.toHaveBeenCalled();
+    expect(f.flags.get('r1')!.removeTag).not.toHaveBeenCalled();
+  });
+
   it('collects exact tags only when requested for resume verification', async () => {
     const f = fixture(),
       tags = f.flags.get('r1')!.getTagRems!;

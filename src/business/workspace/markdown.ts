@@ -225,6 +225,7 @@ export function nativeMetadata(rem: WorkspaceRem): NativeMetadata {
     practiceDirection: rem.practice,
     enablePractice: rem.enablePractice,
     tags: rem.tags ?? null,
+    ...(rem.powerupStates ? { powerupStates: rem.powerupStates } : {}),
     references: rem.references ?? null,
     powerups: rem.powerups ?? null,
     propertyValues: rem.propertyValues ?? null,
@@ -801,6 +802,43 @@ function parseOutline(
           ? hash({ mount: key })
           : hash(toMarkdown({ type: 'root', children: own }, MARKDOWN_OPTIONS)),
     };
+    const attributes = frontmatter.attributes?.rems?.[blockId];
+    if (attributes?.tags !== undefined || attributes?.powerups !== undefined) {
+      if (kind === 'opaque' || kind === 'mount')
+        fail(
+          line,
+          'READONLY_RELATION',
+          'Native relationships on opaque nodes and mounts are read only'
+        );
+      const relations: NonNullable<OutlineNode['relations']> = {};
+      if (attributes.tags !== undefined) {
+        relations.tags = [];
+        for (const tag of attributes.tags) {
+          try {
+            const match = /^\[\[([^\]\r\n]+)\]\]$/.exec(tag);
+            if (!match) throw new Error('Native tags require a bound Obsidian Wiki link');
+            const target = links.resolve(path, match[1]!.split('|')[0]!);
+            if (target.id.startsWith('new:')) throw new Error('Tag target must already be bound');
+            if (relations.tags.includes(target.id))
+              throw new Error('Duplicate resolved native tag');
+            relations.tags.push(target.id);
+          } catch (error) {
+            fail(line, 'TAG_REFERENCE', error instanceof Error ? error.message : String(error));
+          }
+        }
+        relations.tags.sort();
+      }
+      if (attributes.powerups !== undefined) {
+        relations.powerups = attributes.powerups;
+        if (Object.values(attributes.powerups).some((enabled) => !enabled))
+          fail(
+            line,
+            'POWERUP_REMOVAL',
+            'Powerup removal can delete slots and is not supported by this edit protocol'
+          );
+      }
+      node.relations = relations;
+    }
     result.nodes.push(node);
     const branch = branches.get(key);
     if (branch) {

@@ -40,6 +40,9 @@ export function withNativeSnapshot(before: WorkspaceRem, snapshot: WorkspaceRem)
     ...snapshot,
     unsupported: snapshot.unsupported,
     ...(before.facts || snapshot.facts ? { facts: { ...before.facts, ...snapshot.facts } } : {}),
+    ...(before.powerupStates || snapshot.powerupStates
+      ? { powerupStates: { ...before.powerupStates, ...snapshot.powerupStates } }
+      : {}),
     ...(before.collected || snapshot.collected
       ? {
           collected: [
@@ -91,6 +94,7 @@ export function immutableProjection(rem: WorkspaceRem): Record<string, unknown> 
     unsupported: rem.unsupported ?? '',
     facts,
     tags: rem.tags ?? null,
+    powerupStates: rem.powerupStates ?? null,
     powerups: rem.powerups ?? null,
     propertyValues: rem.propertyValues ?? null,
     portal: rem.portal ?? null,

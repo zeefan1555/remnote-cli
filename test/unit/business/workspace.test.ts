@@ -65,6 +65,7 @@ import { reconcile } from '../../../src/business/workspace/reconcile.js';
 import { readPublication } from '../../../src/business/workspace/publication.js';
 import { formatWorkspace } from '../../../src/business/workspace/format.js';
 import { stringify as yamlStringify } from 'yaml';
+import { editGuard } from '../../../src/business/workspace/relations.js';
 
 let temporary: string, directory: string;
 beforeEach(async () => {
@@ -186,6 +187,16 @@ function fixture() {
               {
                 ...snapshot(rems.get(id)!),
                 ...(options?.tags ? { tags: rems.get(id)!.tags ?? [] } : {}),
+                ...(options?.powerups?.length
+                  ? {
+                      powerupStates: Object.fromEntries(
+                        options.powerups.map((code) => [
+                          code,
+                          rems.get(id)!.powerupStates?.[code] ?? false,
+                        ])
+                      ),
+                    }
+                  : {}),
               },
             ]
           : []
@@ -194,6 +205,30 @@ function fixture() {
     guard: vi.fn(async (ids) =>
       hash(ids.map((id) => immutableProjection(snapshot(rems.get(id)!))))
     ),
+    readEditGuards: vi.fn(async (ids, powerups) =>
+      [...ids]
+        .sort()
+        .map((id) =>
+          editGuard(
+            snapshot(rems.get(id)!),
+            rems.get(id)!.tags ?? [],
+            Object.fromEntries(
+              powerups.map((code) => [code, rems.get(id)!.powerupStates?.[code] ?? false])
+            )
+          )
+        )
+    ),
+    setTag: vi.fn(async (id, tagId, enabled) => {
+      calls.push(`${id}:tag:${tagId}:${enabled}`);
+      const tags = new Set(rems.get(id)!.tags ?? []);
+      if (enabled) tags.add(tagId);
+      else tags.delete(tagId);
+      rems.get(id)!.tags = [...tags].sort();
+    }),
+    setPowerup: vi.fn(async (id, code, enabled) => {
+      calls.push(`${id}:powerup:${code}:${enabled}`);
+      rems.get(id)!.powerupStates = { ...rems.get(id)!.powerupStates, [code]: enabled };
+    }),
     create: vi.fn(async (markdown) => {
       const id = `created_${++counter}`;
       calls.push('create');
@@ -263,6 +298,338 @@ const pushWorkspace: typeof syncWorkspace = (directory, backend, options = {}) =
     ...(options.deleteId || options.scopeRoot ? {} : { scope: 'all' }),
     ...options,
   });
+
+describe('identity-preserving outline relationships', () => {
+  it('projects authored native relationships and a sealed input hash without a backend', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+            [f.state.entries.chapter!.blockId]: { powerups: { cc: true } },
+          },
+        }) + source
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    const read = await workspace.readWorkspace(directory, f.path, { outline: true });
+    expect(read.localHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(read.outline?.nodes.question).toMatchObject({
+      id: 'question',
+      tags: ['home'],
+      kind: 'multiline',
+      text: 'Why?',
+    });
+    expect(read.outline?.nodes.chapter).toMatchObject({ powerups: { cc: true } });
+    expect(read.outline?.nodes.home).toMatchObject({ id: 'home', parent: null });
+  });
+
+  it('inserts direct answer leaves without replacing existing answers or card identities', async () => {
+    const f = await prepare();
+    const original = structuredClone((await f.backend.read(['question']))[0]!.cards);
+    await edit(f.path, (source) =>
+      source.replace('    - Because', '    - Label ^insert-label\n    - Because')
+    );
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({ status: 'verified', complete: true, cardsPreserved: true });
+    expect(f.rems.get('question')!.children).toEqual(['created_1', 'answer']);
+    expect(f.rems.get('answer')!.parent).toBe('question');
+    expect(f.rems.get('created_1')!.cardItem).toBe(true);
+    expect((await f.backend.read(['question']))[0]!.cards).toEqual(original);
+  });
+
+  it('rejects stale external lint seals before opening a backend', async () => {
+    const f = await prepare();
+    const read = await workspace.readWorkspace(directory, f.path, { outline: true });
+    await edit(f.path, (source) => source.replace('Because', 'Changed answer'));
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, {
+        apply: true,
+        paths: [f.path],
+        expectedLocalHash: read.localHash,
+      })
+    ).rejects.toThrow(/local.*hash|input.*hash/i);
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  async function relationships(f: Awaited<ReturnType<typeof prepare>>) {
+    await edit(
+      f.path,
+      (source) =>
+        renderFrontmatter({
+          rems: {
+            [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+            [f.state.entries.chapter!.blockId]: { powerups: { cc: true } },
+          },
+        }) + source
+    );
+  }
+
+  it('writes native tags and a powerup once, preserves IDs/history, and proves published observations', async () => {
+    const f = await prepare();
+    await relationships(f);
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { verification: { observedHashes: Record<string, string> } };
+    expect(result).toMatchObject({
+      status: 'verified',
+      complete: true,
+      editGuardsVerified: true,
+      reviewHistoryPreserved: true,
+    });
+    expect(f.rems.get('question')!.tags).toEqual(['home']);
+    expect(f.rems.get('chapter')!.powerupStates).toMatchObject({ cc: true });
+    expect(f.calls).toEqual(['chapter:powerup:cc:true', 'question:tag:home:true']);
+    const read = await workspace.readWorkspace(directory, f.path, { outline: true });
+    expect(read.outline!.nodes.question!.observed.revisionHash).toBe(
+      result.verification.observedHashes.question
+    );
+    expect(read.outline!.nodes.question!.observed.tags).toEqual(['home']);
+    expect(read.outline!.nodes.chapter!.observed.powerups).toMatchObject({ cc: true });
+    const count = f.calls.length;
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'unchanged' });
+    expect(f.calls).toHaveLength(count);
+  });
+
+  it('resumes a confirmed-after uncertain tag write without repeating any relationship operation', async () => {
+    const f = await prepare();
+    await relationships(f);
+    const original = f.backend.setTag!;
+    f.backend.setTag = vi.fn(async (...args) => {
+      await original(...args);
+      throw new Error('transport lost');
+    });
+    const stopped = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { planHash: string };
+    expect(stopped).toMatchObject({ status: 'unknown', complete: false });
+    const count = f.calls.length;
+    f.backend.setTag = original;
+    expect(await resumeWorkspace(directory, async () => f.backend, stopped.planHash)).toMatchObject(
+      { status: 'verified', complete: true, editGuardsVerified: true }
+    );
+    expect(f.calls).toHaveLength(count);
+  });
+
+  it('refuses uncertain exact-before relationships without a second write', async () => {
+    const f = await prepare();
+    await relationships(f);
+    f.backend.setTag = vi.fn(async () => {
+      throw new Error('transport lost before reply');
+    });
+    const stopped = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { planHash: string };
+    expect(stopped).toMatchObject({ status: 'unknown' });
+    const count = f.calls.length;
+    await expect(
+      resumeWorkspace(directory, async () => f.backend, stopped.planHash)
+    ).rejects.toThrow(/relationships|tags|powerups|history|identit/i);
+    expect(f.calls).toHaveLength(count);
+  });
+
+  it.each([false, true])(
+    'resumes inserted leaves with original identities (relationships=%s)',
+    async (withRelations) => {
+      const f = await prepare();
+      if (withRelations) await relationships(f);
+      await edit(f.path, (source) =>
+        source.replace('    - Because', '    - Label ^insert-label\n    - Because')
+      );
+      const original = f.backend.setParent;
+      f.backend.setParent = vi.fn(async (...args) => {
+        await original(...args);
+        throw new Error('lost parent reply');
+      });
+      const stopped = (await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+      })) as { planHash: string };
+      expect(stopped).toMatchObject({ status: 'unknown' });
+      f.backend.setParent = original;
+      expect(
+        await resumeWorkspace(directory, async () => f.backend, stopped.planHash)
+      ).toMatchObject({ status: 'verified', complete: true });
+      expect(f.rems.get('question')!.children).toEqual(['created_1', 'answer']);
+      expect(f.calls.filter((call) => call === 'create')).toHaveLength(1);
+      expect(f.calls.filter((call) => call === 'created_1:parent')).toHaveLength(1);
+    }
+  );
+
+  it.each([false, true])(
+    'recovers guarded publication without replay and rejects history drift=%s',
+    async (drift) => {
+      const f = await prepare();
+      await relationships(f);
+      await edit(f.path, (source) =>
+        source.replace('    - Because', '    - Label ^insert-label\n    - Because')
+      );
+      const original = LocalState.prototype.setLocal;
+      const spy = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+        this: LocalState,
+        key,
+        value
+      ) {
+        if (key.startsWith('publication:') && value !== null)
+          throw new Error('Injected publication failure');
+        return original.call(this, key, value);
+      });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({ status: 'publication-incomplete' });
+      spy.mockRestore();
+      const writes = [...f.calls];
+      if (drift) {
+        const cards = (await f.backend.read(['question']))[0]!.cards!;
+        cards[0]!.repetitionHistory = [{ score: 1 }];
+        f.rems.get('question')!.cards = cards;
+        await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(
+          /history|guard|changed/i
+        );
+      } else {
+        expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+          status: 'recovered',
+          complete: true,
+          remoteWrites: 0,
+        });
+        const read = await workspace.readWorkspace(directory, f.path, { outline: true });
+        expect(read.outline!.nodes.question!.observed.tags).toEqual(['home']);
+        expect(read.outline!.nodes.chapter!.observed.powerups).toMatchObject({ cc: true });
+        expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+      }
+      expect(f.calls).toEqual(writes);
+    }
+  );
+
+  it('retains authored relationships when saved content has converged remotely', async () => {
+    const f = await prepare();
+    const read = await workspace.readWorkspace(directory, f.path);
+    await workspace.saveWorkspace(
+      directory,
+      f.path,
+      renderFrontmatter({
+        rems: {
+          [f.state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+        },
+      }) + read.content.replace('Why?', 'What?'),
+      read.fileHash
+    );
+    f.rems.get('question')!.text = ['What?'];
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'verified', complete: true });
+    expect(f.calls).toEqual(['question:tag:home:true']);
+    expect(f.rems.get('question')!.tags).toEqual(['home']);
+  });
+
+  it.each(['tag', 'text'])(
+    'guards previously observed powerups during a %s-only edit',
+    async (operation) => {
+      const f = fixture();
+      f.rems.get('chapter')!.powerupStates = { cc: true };
+      await importWorkspace(directory, 'kb', async () => f.backend);
+      const state = await loadState(directory),
+        path = state.entries.question!.path;
+      const read = f.backend.read;
+      f.backend.read = vi.fn(async (ids, options) =>
+        (await read(ids, options)).map((rem) => {
+          if (!options?.powerups?.length) delete rem.powerupStates;
+          return rem;
+        })
+      );
+      f.backend.guard = vi.fn(async (ids) =>
+        hash(
+          (await read(ids)).map((rem) => {
+            delete rem.powerupStates;
+            return immutableProjection(rem);
+          })
+        )
+      );
+      if (operation === 'tag') {
+        await edit(
+          path,
+          (source) =>
+            renderFrontmatter({
+              rems: {
+                [state.entries.question!.blockId]: { tags: ['[[HOME]]'] },
+              },
+            }) + source
+        );
+        const original = f.backend.setTag!;
+        f.backend.setTag = vi.fn(async (...args) => {
+          await original(...args);
+          f.rems.get('chapter')!.powerupStates = { cc: false };
+        });
+      } else {
+        await edit(path, (source) => source.replace('Because', 'Edited answer'));
+        const original = f.backend.writeField;
+        f.backend.writeField = vi.fn(async (...args) => {
+          await original(...args);
+          f.rems.get('chapter')!.powerupStates = { cc: false };
+        });
+      }
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [path] })
+      ).toMatchObject({ status: 'unknown', complete: false, remoteWrites: 1 });
+    }
+  );
+
+  it('rejects missing or duplicate resolved Tag links and destructive powerup removal offline', async () => {
+    const f = await prepare();
+    const original = await readPrivate(directory, f.path);
+    for (const attrs of [
+      { tags: ['[[Missing]]'] },
+      { tags: ['[[HOME]]', '[[HOME|alias]]'] },
+      { powerups: { cc: false } },
+    ]) {
+      await writePrivate(
+        directory,
+        f.path,
+        renderFrontmatter({ rems: { [f.state.entries.question!.blockId]: attrs } }) + original
+      );
+      expect(await lintWorkspace(directory)).toMatchObject({ ok: false });
+      const factory = vi.fn(async () => f.backend);
+      await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow();
+      expect(factory).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(['tags', 'powerup', 'history', 'identity'])(
+    'rejects unrelated %s drift before continuing a guarded plan',
+    async (field) => {
+      const f = await prepare();
+      await relationships(f);
+      const original = f.backend.setPowerup!;
+      f.backend.setPowerup = vi.fn(async (...args) => {
+        await original(...args);
+        if (field === 'tags') f.rems.get('question')!.tags = ['chapter'];
+        if (field === 'powerup') f.rems.get('question')!.powerupStates = { cc: true };
+        if (field === 'history' || field === 'identity') {
+          const cards = (await f.backend.read(['question']))[0]!.cards!;
+          if (field === 'history') cards[0]!.repetitionHistory = [{ score: 1 }];
+          else cards[0]!.id = 'replacement-card';
+          f.rems.get('question')!.cards = cards;
+        }
+      });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({ status: 'unknown', complete: false });
+      expect(f.calls).toEqual(['chapter:powerup:cc:true']);
+    }
+  );
+});
 
 describe('selected incremental sync', () => {
   it('does not open a backend for a clean changed selection or an existing empty directory', async () => {
@@ -1059,7 +1426,7 @@ describe('human Markdown workspace', () => {
       remoteWrites: 0,
     });
     expect(await readPrivate(directory, f.state.entries.answer!.rawPath)).toBe(original);
-    for (const attrs of ['tags: []', 'native: {}', 'readOnly: false', 'content: basic']) {
+    for (const attrs of ['practice: backward', 'native: {}', 'readOnly: false', 'content: basic']) {
       const source = await readPrivate(directory, f.path),
         header = parseFrontmatter(f.path, source);
       await writePrivate(
