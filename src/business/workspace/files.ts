@@ -1,5 +1,15 @@
-import { constants } from 'node:fs';
-import { link, lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import { constants, type Stats } from 'node:fs';
+import {
+  link,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  unlink,
+  type FileHandle,
+} from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -223,19 +233,71 @@ export async function allFiles(root: string, prefix = ''): Promise<string[]> {
   return result.sort();
 }
 
-async function releaseOwnedLock(
-  roots: string[],
-  owned: { dev: number; ino: number }
-): Promise<void> {
-  // A relocation moves this same lock inode. Never remove a replacement/foreign lock.
+const LOCK = '.sync/writer.lock';
+const LOCK_MARKER = 'remnote-workspace-kernel-lock:1\n';
+
+function sameInode(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+/** Publish complete bytes exactly once. The canonical lock inode is never replaced or removed. */
+async function openWorkspaceLock(path: string) {
+  try {
+    return await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const file = await open(temporary, 'wx', 0o600);
+  let owned: Stats | undefined;
+  try {
+    owned = await file.stat();
+    await file.writeFile(LOCK_MARKER);
+    await file.sync();
+    try {
+      await link(temporary, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+  } finally {
+    await file.close();
+    // A death here can retain this private alias; it never invalidates the complete marker.
+    const current = await lstat(temporary).catch(() => undefined);
+    if (owned && current && sameInode(current, owned) && !current.isSymbolicLink())
+      await unlink(temporary);
+  }
+  return open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+}
+
+async function assertLockMarker(file: FileHandle): Promise<Stats> {
+  const owned = await file.stat(),
+    marker = Buffer.alloc(Buffer.byteLength(LOCK_MARKER));
+  if (
+    !owned.isFile() ||
+    (owned.mode & 0o777) !== 0o600 ||
+    owned.size !== marker.length ||
+    (await file.read(marker, 0, marker.length, 0)).bytesRead !== marker.length ||
+    marker.toString('utf8') !== LOCK_MARKER
+  )
+    throw new Error(
+      'Workspace writer is locked by legacy, unknown or unsafe metadata; preserve it for inspection'
+    );
+  return owned;
+}
+
+async function assertOwnedLock(roots: string[], directory: Stats, owned: Stats): Promise<void> {
   for (const candidate of new Set(roots)) {
     try {
-      const path = await safePath(candidate, '.sync/writer.lock');
-      const current = await lstat(path);
-      if (current.dev !== owned.dev || current.ino !== owned.ino || current.isSymbolicLink())
+      const currentDirectory = await lstat(candidate);
+      if (
+        !sameInode(currentDirectory, directory) ||
+        !currentDirectory.isDirectory() ||
+        currentDirectory.isSymbolicLink() ||
+        (currentDirectory.mode & 0o077) !== 0
+      )
         continue;
-      await unlink(path);
-      return;
+      const current = await lstat(await safePath(candidate, LOCK));
+      if (sameInode(current, owned) && current.isFile() && (current.mode & 0o777) === 0o600) return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -248,25 +310,47 @@ export async function withWorkspaceLock<T>(
   action: () => Promise<T>,
   relocatedRoot?: string
 ): Promise<T> {
-  const path = await safePath(root, '.sync/writer.lock', true);
-  let file;
+  const directory = await lstat(root);
+  if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077) !== 0)
+    throw new Error('Workspace must be a private 0700 directory, not a symlink');
+  const path = await safePath(root, LOCK, true);
+  // Loading/locking errors fail closed. There is no PID/TTL or existence-lock fallback.
+  const { tryLock } = await import('fs-native-extensions');
+  const file = await openWorkspaceLock(path);
   try {
-    file = await open(path, 'wx', 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
-      throw new Error(
-        'Workspace writer is locked; inspect its process and pending journal, never auto-break an unknown writer',
-        { cause: error }
-      );
-    throw error;
-  }
-  const owned = await file.stat();
-  try {
-    await file.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
-    await file.sync();
-    return await action();
+    if (!tryLock(file.fd)) throw new Error('Workspace writer is locked by another process');
+    const owned = await assertLockMarker(file);
+    await assertOwnedLock([root], directory, owned);
+    // Also flush a marker published by an initializer that died before syncing the directory.
+    const parent = await open(dirname(path), 'r');
+    try {
+      await parent.sync();
+    } finally {
+      await parent.close();
+    }
+    let outcome: { value: T } | { error: unknown };
+    try {
+      outcome = { value: await action() };
+    } catch (error) {
+      outcome = { error };
+    }
+    // Relocation moves this exact directory and inode; pathname replacement is never repaired.
+    try {
+      await assertLockMarker(file);
+      await assertOwnedLock(relocatedRoot ? [root, relocatedRoot] : [root], directory, owned);
+    } catch (error) {
+      if ('error' in outcome)
+        throw new AggregateError(
+          [outcome.error, error],
+          'Workspace action and lock verification failed; preserve the journal before recovery',
+          { cause: error }
+        );
+      throw error;
+    }
+    if ('error' in outcome) throw outcome.error;
+    return outcome.value;
   } finally {
+    // The kernel also releases ownership on process death; the permanent marker stays intact.
     await file.close();
-    await releaseOwnedLock(relocatedRoot ? [root, relocatedRoot] : [root], owned);
   }
 }

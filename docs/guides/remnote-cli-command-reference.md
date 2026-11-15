@@ -165,6 +165,24 @@ Only root `AGENTS.md` and exact `.agents/skills/remnote-obsidian/SKILL.md` are e
 from content parsing as tooling documents; they are still scanned and frozen.
 Other `README.md` or `SKILL.md` files are not silently exempt from content lint.
 
+Workspace writers hold a nonblocking OS advisory lock on the permanent
+`.sync/writer.lock` inode. Initialization publishes the complete version marker
+atomically; the file remains after success, failure and process death. A paused
+writer still owns the lock. Confirmed process exit releases kernel ownership,
+so the next command can acquire it without deleting metadata. Legacy JSON,
+incomplete/unknown markers, unsafe paths and changed identities are refused
+unchanged; there is no PID/TTL takeover, migration or existence-lock fallback.
+Use a single host and a local filesystem. The local verification baseline is
+macOS/APFS; shared/network filesystems and power-loss recovery are not verified.
+Native-addon loading and unsupported locking errors fail closed.
+
+Lock availability proves only local ownership has ended, not that an outstanding
+SDK request has completed. Preserve pending journals and known IDs: `sync recover`
+still requires verified outcomes, and `sync resume --plan-hash HASH` still uses the
+exact original plan and readback proof. Unknown mutations are never replayed merely
+because a lock is available; uncertain before-state or a create without its
+persisted ID remains a refusal.
+
 `sync relocate OLD NEW` moves the existing private directory and rebinds its
 authoritative manifest offline. Stop all other filesystem writers first: Node's
 rename is not atomic no-replace, so destination prechecks do not close the external
@@ -180,12 +198,13 @@ A durable private relocation receipt binds the exact paths, source inode/device
 and original state hash before rename. After failure, inspect both paths and the
 receipt before rerunning the same command. Recovery accepts only that directory
 and the exact original/new manifests and mirror; the old manifest remains until
-new-authority/mirror readback succeeds. Unknown writer locks are never broken
-automatically: inspect their recorded process and pending outcome first. Do not
-raw-move a bound directory, rewrite its mirror, or substitute another destination.
-Caught failures release the same owned lock inode; a hard kill can leave a lock
-and requires manual outcome inspection. Failure-injection tests are not proof of
-automatic recovery after process death or power loss.
+new-authority/mirror readback succeeds. The same permanent lock inode moves with
+the directory and remains held through readback. After process death the exact
+original command can resume through that receipt; a copied or replaced directory
+is refused. Do not raw-move a bound directory, rewrite its mirror, substitute
+another destination or delete unknown lock metadata. Synthetic process-death
+tests prove this local ownership/receipt path, not native SDK completion or
+power-loss recovery.
 
 Lossless native records live in `.remnote/records/ID.json`; imported payloads
 live under `.remnote/originals/{rems,cards,public}/`. These read-only sidecars

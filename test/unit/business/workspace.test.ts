@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import {
   chmod,
   mkdir,
@@ -13,7 +15,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   diffWorkspace,
   lintWorkspace,
@@ -70,12 +73,20 @@ import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 
 let temporary: string, directory: string;
+const syntheticCliChildren = new Set<ChildProcess>();
 beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-workspace-test-')));
   directory = join(temporary, 'remnote-obsidian');
   vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
 });
 afterEach(async () => {
+  await Promise.all(
+    [...syntheticCliChildren].map(async (child) => {
+      const ended = once(child, 'exit');
+      child.kill('SIGKILL');
+      await ended;
+    })
+  );
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await rm(temporary, { recursive: true, force: true });
@@ -308,6 +319,114 @@ async function prepare(setup?: (f: ReturnType<typeof fixture>) => void) {
 }
 async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
+}
+
+/** Exercise the public parser/command in an owned process; SDK effects stay in this synthetic fixture. */
+function syntheticCli(
+  backend: WorkspaceBackend,
+  args: string[],
+  pause?: 'lock' | 'writeField' | 'create'
+) {
+  const entry = resolve('src/remnote-cli/index.ts');
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '-e',
+      `
+    const fs = (await import('node:fs/promises')).default;
+    const { syncBuiltinESMExports } = await import('node:module');
+    const originalOpen = fs.open;
+    fs.open = async (...args) => {
+      const handle = await originalOpen(...args);
+      if (${JSON.stringify(pause)} === 'lock' && args[0] === ${JSON.stringify(join(directory, '.sync'))}) {
+        const originalSync = handle.sync.bind(handle);
+        handle.sync = async () => {
+          await originalSync();
+          process.send({ checkpoint: 'lock' });
+          await new Promise(() => { setInterval(() => {}, 1000); });
+        };
+      }
+      return handle;
+    };
+    syncBuiltinESMExports();
+    const { DirectClient } = await import(${JSON.stringify(pathToFileURL(resolve('src/remnote-cli/client/direct-client.ts')).href)});
+    const { localStore } = await import(${JSON.stringify(pathToFileURL(resolve('src/business/workspace/local.ts')).href)});
+    const pending = new Map();
+    let id = 0;
+    process.on('message', reply => {
+      const entry = pending.get(reply.id);
+      if (!entry) return;
+      pending.delete(reply.id);
+      reply.error ? entry.reject(new Error(reply.error)) : entry.resolve(reply.value);
+    });
+    const backend = { journal: localStore('kb') };
+    for (const method of ${JSON.stringify(Object.keys(backend).filter((key) => key !== 'journal'))}) {
+      backend[method] = (...args) => new Promise((resolve, reject) => {
+        pending.set(++id, { resolve, reject });
+        process.send({ id, method, args });
+      });
+    }
+    DirectClient.prototype.workspaceBackend = async () => backend;
+    process.argv = [process.execPath, ${JSON.stringify(entry)}, ...${JSON.stringify(args)}];
+    await import(${JSON.stringify(pathToFileURL(entry).href)});
+    process.disconnect();
+  `,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], serialization: 'advanced' }
+  );
+  syntheticCliChildren.add(child);
+  child.once('exit', () => syntheticCliChildren.delete(child));
+  let stdout = '',
+    stderr = '';
+  child.stdout!.on('data', (data) => {
+    stdout += data;
+  });
+  child.stderr!.on('data', (data) => {
+    stderr += data;
+  });
+  let reached!: () => void;
+  const checkpoint = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  child.on(
+    'message',
+    async (message: { id: number; method?: string; args: unknown[]; checkpoint?: string }) => {
+      if (message.checkpoint) {
+        reached();
+        return;
+      }
+      const methods = backend as unknown as Record<
+        string,
+        (...args: unknown[]) => Promise<unknown>
+      >;
+      try {
+        const value = await methods[message.method!]!(...message.args);
+        if (message.method === pause) {
+          reached();
+          return;
+        }
+        if (child.connected) child.send({ id: message.id, value });
+      } catch (error) {
+        if (child.connected) child.send({ id: message.id, error: (error as Error).message });
+      }
+    }
+  );
+  const result = once(child, 'close').then(([code, signal]) => ({ code, signal, stdout, stderr }));
+  return {
+    child,
+    result,
+    checkpoint: pause
+      ? Promise.race([
+          checkpoint,
+          result.then((result) => {
+            throw new Error(`CLI exited before checkpoint: ${JSON.stringify(result)}`);
+          }),
+        ])
+      : Promise.resolve(),
+  };
 }
 
 describe('first-class tag and Card Cluster creation', () => {
@@ -1975,6 +2094,104 @@ const newKeys = Object.fromEntries(
 );
 
 describe('explicit interrupted sync resume', () => {
+  it('re-enters public recovery after repeated actual process deaths with identical lock and baseline', async () => {
+    const f = await prepare(),
+      path = join(directory, '.sync/writer.lock');
+    const before = await stat(path),
+      marker = await readFile(path),
+      state = await loadState(directory);
+    for (let i = 0; i < 2; i++) {
+      const running = syntheticCli(f.backend, ['sync', 'recover', directory], 'lock');
+      await running.checkpoint;
+      await expect(withWorkspaceLock(directory, async () => {})).rejects.toThrow('locked');
+      running.child.kill('SIGKILL');
+      expect(await running.result).toMatchObject({ code: null, signal: 'SIGKILL' });
+      expect(await loadState(directory)).toEqual(state);
+      expect((await stat(path)).ino).toBe(before.ino);
+      expect(await readFile(path)).toEqual(marker);
+    }
+    const result = await syntheticCli(f.backend, ['sync', 'recover', directory]).result;
+    expect(result).toMatchObject({ code: 0, signal: null, stderr: '' });
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      status: 'nothing-to-recover',
+      remoteWrites: 0,
+    });
+    expect(f.calls).toEqual([]);
+  }, 15000);
+
+  it.each(['exact-after', 'before-state', 'create-without-id'] as const)(
+    'preserves journal identity after public apply/resume process death: %s',
+    async (mode) => {
+      const f = await prepare();
+      if (mode === 'create-without-id')
+        await edit(f.path, (s) => addNodes(s, { n: 'text' }, '\n- Note ^local-n\n'));
+      else await edit(f.path, (s) => s.replace('Because', 'Edited'));
+      if (mode === 'before-state')
+        f.backend.writeField = vi.fn(async (id, field) => {
+          // Synthetic server accepted a request, but its effect is not visible.
+          f.calls.push(`${id}:${field}`);
+        });
+      const running = syntheticCli(
+        f.backend,
+        ['sync', 'apply', directory],
+        mode === 'create-without-id' ? 'create' : 'writeField'
+      );
+      await running.checkpoint;
+      const path = join(directory, '.sync/writer.lock'),
+        before = await stat(path),
+        marker = await readFile(path);
+      const pending = (await loadState(directory)).pending!;
+      expect(pending.planHash).toMatch(/^[a-f0-9]{64}$/);
+      const store = localStore('kb'),
+        journal = await store.getLocal(pending.journalKey);
+      expect(journal).toMatchObject({ state: 'applying' });
+      await expect(withWorkspaceLock(directory, async () => {})).rejects.toThrow('locked');
+      running.child.kill('SIGKILL');
+      expect(await running.result).toMatchObject({ code: null, signal: 'SIGKILL' });
+      expect(await store.getLocal(pending.journalKey)).toEqual(journal);
+      expect((await loadState(directory)).pending).toEqual(pending);
+      const calls = [...f.calls];
+      expect(calls).toHaveLength(1);
+      const recovery = await syntheticCli(f.backend, ['sync', 'recover', directory]).result;
+      expect(recovery.code).toBe(1);
+      expect(recovery.stderr).toContain('Remote outcome is not verified');
+      expect(await store.getLocal(pending.journalKey)).toEqual(journal);
+      const args = ['sync', 'resume', directory, '--plan-hash', pending.planHash];
+      const interruptedResume = syntheticCli(f.backend, args, 'lock');
+      await interruptedResume.checkpoint;
+      interruptedResume.child.kill('SIGKILL');
+      expect(await interruptedResume.result).toMatchObject({ code: null, signal: 'SIGKILL' });
+      expect(await store.getLocal(pending.journalKey)).toEqual(journal);
+      const result = await syntheticCli(f.backend, args).result;
+      expect(f.calls).toEqual(calls);
+      expect((await stat(path)).ino).toBe(before.ino);
+      expect(await readFile(path)).toEqual(marker);
+      if (mode === 'exact-after') {
+        expect(result).toMatchObject({ code: 0, signal: null, stderr: '' });
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          status: 'verified',
+          complete: true,
+          remoteWrites: 0,
+        });
+        expect((await loadState(directory)).pending).toBeUndefined();
+        const repeated = await syntheticCli(f.backend, args).result;
+        expect(repeated.code).toBe(0);
+        expect(JSON.parse(repeated.stdout)).toMatchObject({
+          status: 'already-complete',
+          remoteWrites: 0,
+        });
+      } else {
+        expect(result.code).toBe(1);
+        expect(result.stderr).toMatch(
+          mode === 'create-without-id' ? /identity|ID/ : /resume|remote/i
+        );
+        expect((await loadState(directory)).pending).toEqual(pending);
+        expect(await store.getLocal(pending.journalKey)).toEqual(journal);
+      }
+    },
+    15000
+  );
+
   it('rejects a known-create ID pointing to an unselected baseline Rem before connection', async () => {
     const f = fixture();
     f.rems.set('outside', native('outside', null));

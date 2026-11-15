@@ -59,6 +59,7 @@
   "dependencies": {
     "commander": "^15.0.0",
     "fflate": "^0.8.3",
+    "fs-native-extensions": "1.5.3",
     "mdast-util-from-markdown": "^2.1.0",
     "mdast-util-to-markdown": "^2.2.3",
     "ws": "^8.20.0",

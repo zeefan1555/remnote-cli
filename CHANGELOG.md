@@ -9,6 +9,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Workspace writers use a permanent-inode OS advisory lock instead of an orphanable
+  existence lock. Confirmed process death releases ownership without deleting
+  metadata; relocation retains the same lock and original recovery receipt.
+  Legacy/unknown markers and changed identities fail closed. Journal identity,
+  exact-after verification and unknown-mutation/no-replay rules are unchanged;
+  lock release does not prove completion of an outstanding SDK request.
+
 - Coordinate protocol 2 with the Bridge: send monotonic safe-integer IDs, bound
   wire concurrency/local waiters, and fail exhaustion without reuse or replay.
   Sessions can exceed 200,000 calls without the former 20,000-ID ceiling.

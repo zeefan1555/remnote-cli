@@ -11,12 +11,16 @@ describe('direct CLI package', () => {
     expect(Object.keys(pkg.dependencies).sort()).toEqual([
       'commander',
       'fflate',
+      'fs-native-extensions',
       'mdast-util-from-markdown',
       'mdast-util-to-markdown',
       'ws',
       'yaml',
       'zod',
     ]);
+    expect(pkg.dependencies['fs-native-extensions']).toBe('1.5.3');
+    expect(lock.packages[''].dependencies).toEqual(pkg.dependencies);
+    expect(lock.packages['node_modules/fs-native-extensions'].version).toBe('1.5.3');
     expect(pkg.scripts.build).toContain('tsc');
     expect(pkg.scripts.build).not.toContain('mcpb');
     for (const file of [

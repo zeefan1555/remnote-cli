@@ -115,9 +115,8 @@ describe('offline workspace relocation', () => {
     await expect(authoritativeState(source)).rejects.toMatchObject({ code: 'ENOENT' });
     for (const path of ['Dirty.md', '.git/config', '.remnote/identity.json', '.sync/history.json'])
       expect(await files.readPrivate(destination, path)).toBe(`unchanged bytes ${path}`);
-    await expect(lstat(join(destination, '.sync/writer.lock'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
+    expect((await lstat(join(destination, '.sync/writer.lock'))).isFile()).toBe(true);
+    await expect(files.withWorkspaceLock(destination, async () => true)).resolves.toBe(true);
   });
 
   it('refuses an existing destination and an orphaned destination authority', async () => {
