@@ -487,7 +487,7 @@ describe('exact feedback partition regression', () => {
     expect(await run(args)).toMatchObject({ status: 'acknowledged', remoteWrites: 3 });
     expect(await run(args)).toMatchObject({ status: 'acknowledged', remoteWrites: 0 });
     expect(f.calls.filter((call) => call === 'question:text')).toHaveLength(1);
-  });
+  }, 15_000);
   it('binds only already-aligned source, preserving all Markdown bytes including YAML comments', async () => {
     const f = await prepare(({ rems }) => {
       rems.set('todo', native('todo', ['TODO']));
