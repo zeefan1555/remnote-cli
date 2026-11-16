@@ -908,7 +908,6 @@ function parseOutline(
     const node: OutlineNode = {
       key,
       blockId,
-      ...(key.startsWith('new:') && anchor ? { explicitNewAnchor: true as const } : {}),
       parent,
       line,
       kind,

@@ -976,8 +976,7 @@ export async function inspectLocal(
     for (const oldNode of old.nodes) {
       if (currentKeys.has(oldNode.key) || oldNode.kind === 'mount') continue;
       const lostAnchor = current.document.nodes.some(
-        (node) =>
-          node.key.startsWith('new:') && node.parent === oldNode.parent && !node.explicitNewAnchor
+        (node) => node.key.startsWith('new:') && node.parent === oldNode.parent
       );
       if (lostAnchor)
         fail(

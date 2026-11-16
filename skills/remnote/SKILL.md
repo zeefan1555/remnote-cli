@@ -327,11 +327,11 @@ selected scope. `sync apply DIR` removes the exact verified mirror identities;
 remote absence or drift is not inferred as local deletion. Both plugin write gates
 remain mandatory, unknown outcomes are never retried automatically.
 Missing directories, identity collisions, and an entire multi-document directory
-disappearing fail closed; directory deletion is unsupported. Unanchored additions
-alongside deletion are ambiguous, and deleting only an existing multiline answer
+disappearing fail closed; directory deletion is unsupported. Any new nodes
+alongside deletion are ambiguous and must be synchronized separately; deleting only an existing multiline answer
 is blocked because surviving Card identity is not proven stable. Locally retained
 references are checked, including opaque content, but unselected/unbound native
-backlinks are not globally discovered. Deletion receipts only claim preservation
+backlinks and uncollected relationships are not globally discovered. Deletion receipts only claim preservation
 of checked surviving Card identities, not deleted cards or review history.
 Finish with exact-ID semantic readback; represented metadata alone is not proof of
 native writability or full import coverage.

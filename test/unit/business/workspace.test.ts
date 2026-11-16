@@ -5625,23 +5625,85 @@ describe('controlled RemNote workspace', () => {
 
   it('blocks cross-parent movement with a lost anchor before native access', async () => {
     const f = await prepare((fixture) => {
-      fixture.rems.get('question')!.children.push('answer2');
-      fixture.rems.set(
-        'answer2',
-        native('answer2', ['Also'], { parent: 'question', cardItem: true })
-      );
+      fixture.rems.get('chapter')!.children.push('plain');
+      fixture.rems.set('plain', native('plain', ['Plain'], { parent: 'chapter' }));
     });
     await edit(
       f.path,
       (source) =>
-        source.replace(`    - Because ^${f.state.entries.answer!.blockId}\n`, '') + '\n- Because\n'
+        source.replace(`  - Plain ^${f.state.entries.plain!.blockId}\n`, '') + '\n- Plain\n'
     );
     const factory = vi.fn(async () => f.backend);
-    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
-      'unanchored new node'
-    );
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow('MISSING_ID');
     expect(factory).not.toHaveBeenCalled();
     expect(f.calls).toEqual([]);
+  });
+
+  it.each([false, true])(
+    'blocks a mistyped existing anchor with changed content=%s',
+    async (changed) => {
+      const f = await prepare((fixture) => {
+        fixture.rems.get('chapter')!.children.push('plain');
+        fixture.rems.set('plain', native('plain', ['Plain'], { parent: 'chapter' }));
+      });
+      await edit(f.path, (source) =>
+        source.replace(
+          `Plain ^${f.state.entries.plain!.blockId}`,
+          `${changed ? 'Changed' : 'Plain'} ^${f.state.entries.plain!.blockId}x`
+        )
+      );
+      const factory = vi.fn(async () => f.backend);
+      await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        'MISSING_ID'
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(f.rems.has('plain')).toBe(true);
+    }
+  );
+
+  it('publishes an unrelated selected edit without acting on unselected deletion or new content', async () => {
+    const f = fixture();
+    f.rems.clear();
+    for (const rem of [
+      native('A', ['A'], { document: true, children: ['target'] }),
+      native('target', ['target'], { parent: 'A' }),
+      native('B', ['B'], { document: true }),
+      native('C', ['C'], { document: true }),
+    ])
+      f.rems.set(rem.id, rem);
+    await importWorkspace(directory, 'kb', async () => f.backend);
+    const state = await loadState(directory);
+    const a = state.entries.A!.path,
+      b = state.entries.B!.path,
+      c = state.entries.C!.path;
+    await edit(a, (source) => source.replace(`- target ^${state.entries.target!.blockId}\n`, ''));
+    await edit(b, (source) => source + '\n- new note\n');
+    await edit(c, (source) => source.replace('# C', '# Changed C'));
+    const aSource = await readPrivate(directory, a),
+      bSource = await readPrivate(directory, b);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [c] })
+    ).toMatchObject({ status: 'verified', updated: ['C'] });
+    expect(f.rems.has('target')).toBe(true);
+    expect(await readPrivate(directory, a)).toBe(aSource);
+    expect(await readPrivate(directory, b)).toBe(bSource);
+    expect(f.calls).toEqual(['C:text']);
+  });
+
+  it('blocks creation selected separately while an unselected local deletion exists', async () => {
+    const f = await prepare();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const other = f.state.entries.subdoc!.path;
+    await edit(other, (source) => source + '\n- New note ^local-new-note\n');
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [other] })
+    ).rejects.toThrow('MISSING_ID');
+    expect(factory).not.toHaveBeenCalled();
   });
 
   it('blocks deletion if a surviving opaque native node references its target', async () => {
@@ -5662,6 +5724,22 @@ describe('controlled RemNote workspace', () => {
     );
     expect(factory).not.toHaveBeenCalled();
     expect(f.calls).toEqual([]);
+  });
+
+  it('blocks deletion when an editable surviving Rem has a known native reference to the target', async () => {
+    const f = await prepare((fixture) => {
+      fixture.rems.get('basic')!.references = ['question'];
+    });
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+      'still points to deleted identity'
+    );
+    expect(factory).not.toHaveBeenCalled();
   });
 
   it('does not interpret an absent tracked parent directory as deletion', async () => {
@@ -5755,7 +5833,7 @@ describe('controlled RemNote workspace', () => {
     expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts a deliberate anchored new sibling and deletion under the same parent', async () => {
+  it('blocks same-parent deletion and anchored creation as ambiguous', async () => {
     const f = await prepare();
     await edit(f.path, (source) =>
       source.replace(
@@ -5765,17 +5843,12 @@ describe('controlled RemNote workspace', () => {
         '\n  - New sibling ^local-new-sibling'
       )
     );
-    const result = await syncWorkspace(directory, async () => f.backend, {
-      apply: true,
-      paths: [f.path],
-    });
-    expect(result).toMatchObject({ status: 'verified', deleted: ['answer', 'question'] });
-    expect(f.rems.has('question')).toBe(false);
-    expect(
-      [...f.rems.values()].some(
-        (rem) => JSON.stringify(rem.text) === JSON.stringify(['New sibling'])
-      )
-    ).toBe(true);
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('MISSING_ID');
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.rems.has('question')).toBe(true);
   });
 
   it('blocks a lost anchor with changed content when deletion versus replacement is ambiguous', async () => {

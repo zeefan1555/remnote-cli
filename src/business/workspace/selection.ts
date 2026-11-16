@@ -185,6 +185,14 @@ export async function selectPlan(
   const deletedIds = (plan.deletion?.ids ?? []).filter((id) =>
     selected.files.includes(deletionPath(context, id))
   );
+  const anyNew = [...context.parsed.values()].some((document) =>
+    document.nodes.some((node) => node.key.startsWith('new:'))
+  );
+  const selectedNew = changes.some((change) => change.key.startsWith('new:'));
+  if ((deletedIds.length && anyNew) || (selectedNew && plan.deletion?.ids.length))
+    throw new Error(
+      'MISSING_ID: deletion and new nodes are ambiguous; split into separate synchronizations'
+    );
   const deleted = new Set(deletedIds);
   for (const id of deletedIds)
     if (context.native.get(id)!.children.some((child) => !deleted.has(child)))

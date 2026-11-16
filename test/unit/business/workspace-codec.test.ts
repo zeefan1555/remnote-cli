@@ -317,9 +317,7 @@ describe('Obsidian Rem codec', () => {
       ).diagnostics.length
     ).toBeGreaterThan(0);
     const changed = parseDocument('Note.md', source.replace(`^${nativeBlockId('a')}`, '^missing'));
-    expect(
-      changed.document.nodes.some((node) => node.key.startsWith('new:') && node.explicitNewAnchor)
-    ).toBe(true);
+    expect(changed.document.nodes.some((node) => node.key.startsWith('new:'))).toBe(true);
   });
 
   it('keeps escaped Wiki-looking literals and code literal while rejecting malformed or formatted links', () => {

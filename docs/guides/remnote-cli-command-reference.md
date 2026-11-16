@@ -667,9 +667,11 @@ unverified parents, unsupported native structures, remote drift, disabled plugin
 gates and incomplete journal outcomes fail closed. The global `--allow-destructive`
 flag is not needed for mirror deletion or association-only tag removal; other SDK
 operations keep their existing permission rules.
-An unanchored new node anywhere in a deletion batch is ambiguous with an
-accidentally lost anchor and stops before any native call. Give a deliberate new
-node an explicit new block anchor or split the edits. A sync is bounded to 100
+Any new node alongside a deletion is ambiguous with a lost or mistyped identity
+and stops before any native call, even if the new node has an anchor. Restore the
+identity or separate deletion and creation into different synchronizations. An
+unrelated selected content edit can still proceed without publishing unselected
+creation/deletion. A sync is bounded to 100
 deleted identities; imported scope roots and targets referenced by surviving
 local nodes cannot be deleted. Individual answers of a surviving multiline card
 cannot be deleted: native Card identity preservation has not been proven. Delete
@@ -684,7 +686,7 @@ atomic filesystem/native transaction. A missing single document in an existing
 directory remains authorized deletion intent, not proof against every possible
 mount failure that predates inspection.
 
-Local reference checks include surviving opaque projections, but do not discover
+Local reference checks include known native relationships and surviving opaque projections, but do not discover
 remote-only references in unselected or unbound Rems. `partial` and
 `globalDiscoveryComplete: false` explicitly prevent a full-KB safety claim.
 `checkedSurvivingCardIdentitiesPreserved` covers id/remId/type only for the exact

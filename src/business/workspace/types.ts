@@ -114,8 +114,6 @@ export type NodeKind = 'text' | 'multiline' | 'basic' | 'opaque' | 'mount';
 export interface OutlineNode {
   key: string;
   blockId: string;
-  /** Explicit local anchor distinguishes a new node from a lost identity. */
-  explicitNewAnchor?: true;
   parent: string | null;
   line: number;
   kind: NodeKind;

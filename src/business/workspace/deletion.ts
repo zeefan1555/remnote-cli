@@ -22,14 +22,6 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
   for (const path of context.missing)
     for (const id of context.state.documents[path]!.nodeIds) missing.add(id);
   if (!missing.size) return undefined;
-  if (
-    [...context.parsed.values()].some((doc) =>
-      doc.nodes.some((node) => node.key.startsWith('new:') && !node.explicitNewAnchor)
-    )
-  )
-    throw new Error(
-      'Ambiguous deletion with an unanchored new node; restore its identity or add an explicit new anchor'
-    );
 
   for (const id of missing) {
     const rem = context.native.get(id);
@@ -68,8 +60,8 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
           ...(node.kind === 'opaque' && native ? [native.text, native.backText] : []),
         ]),
         ...(node.readonlyLinks ?? []).map((link) => link.id),
-        ...(node.kind === 'opaque' ? (native?.references ?? []) : []),
-        ...(node.kind === 'opaque' ? (native?.portal?.directlyIncludedRemIds ?? []) : []),
+        ...(native?.references ?? []),
+        ...(native?.portal?.directlyIncludedRemIds ?? []),
       ].find((id) => missing.has(id));
       if (target)
         throw new Error(`Local reference in ${path} still points to deleted identity ${target}`);
