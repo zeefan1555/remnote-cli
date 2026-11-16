@@ -284,7 +284,7 @@ YAML tags require a user decision rather than automatic reinterpretation.
 
 Run `sync apply DIR` once within the user's write scope; it performs whole-vault
 lint, fresh planning, guarded apply and verification. Plan/apply default to
-`--scope changed` probes every selected bound Rem's public content and direct tags,
+`--scope changed` probes locally dirty selected documents and required dependencies,
 then reads full native detail only where needed. Repeat
 `--path PATH` to filter vault-relative files/directories, not globs or patches;
 confirm existing edits in a selected file are authorized too. `--scope all`
@@ -294,8 +294,8 @@ local lint/identity/freeze still run. Changed scope is not a remote changes-sinc
 feed. Offline `sync diff DIR` supports path filtering; status/lint stay full-vault.
 Verification-only dependencies do not advance their native baseline;
 later selected reconciliation still detects their remote-content drift.
-Only empty selections make no native calls. A clean changed result establishes
-public/tag probing, not fresh card/history proof. For a shared checker that needs
+Clean changed or empty selections make no native calls and cannot establish remote
+freshness. For a shared checker that needs
 input-bound native evidence, use `sync read DIR PATH` and then exactly one
 `sync apply DIR --path PATH --expected-file-hash HASH`. This audits the exact file
 and direct-tag ancestors and returns the outline plus same-invocation native
@@ -311,8 +311,8 @@ exact-plan resume returns that original proof plus fresh nativeAfter, never
 fabricating a before-history from recovery-time values.
 
 Direct tags are local desired memberships, not set-merged feedback. Tag removal keeps native properties
-via `removeTag(id, false)`, but the existing Bridge still requires the explicit
-destructive capability gate. Check `plan.tagChanges` and `requiredPermissions`;
+via `removeTag(id, false)`. Each exact planned removal is narrowly authorized and
+still requires both live plugin write gates. Check `plan.tagChanges` and `requiredPermissions`;
 missing permission refuses all writes, including prior text/add operations.
 
 `sync apply DIR --plan-hash HASH` requires a previously reviewed frozen plan with
@@ -322,10 +322,10 @@ after semantic verification. Pre/post checks are optimistic, not an atomic nativ
 conditional write: concurrent edits can still fall into the check-write window.
 Native transactions stay disabled. Any lint error blocks the whole sync. Preserve opaque
 content, native identity, parent/order and review history. Local renames preserve
-Rem identity; missing files or remote objects are not automatic deletion or movement requests.
-Deletion is independent: `sync delete DIR --id ID --scope-root ID` previews by
-default; execution also requires `--apply --plan-hash HASH`, destructive
-authorization and live write gates. It accepts no scope/path filters.
+Rem identity; missing tracked local nodes or files are deletion intent within the
+selected scope. `sync apply DIR` removes the exact verified mirror identities;
+remote absence or drift is not inferred as local deletion. Both plugin write gates
+remain mandatory, unknown outcomes are never retried automatically.
 Finish with exact-ID semantic readback; represented metadata alone is not proof of
 native writability or full import coverage.
 

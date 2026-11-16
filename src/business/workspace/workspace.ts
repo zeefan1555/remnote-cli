@@ -41,7 +41,7 @@ import { recordPath } from './identity.js';
 import { partitionRemote } from './feedback-partition.js';
 import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
-import { planDeletion, type DeleteOptions } from './deletion.js';
+import { deletionPath, planDeletion } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
 import {
   foldResume,
@@ -91,8 +91,19 @@ export async function readWorkspace(directory: string, path: string) {
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
     const local = await inspectLocal(root);
-    if (!local.parsed.has(path)) throw new Error('Read requires an exact tracked Markdown path');
-    const content = await local.inputs.read(path);
+    const missing = local.missing.includes(path);
+    if (!local.parsed.has(path) && !missing)
+      throw new Error('Read requires an exact tracked Markdown path');
+    const content = missing ? null : await local.inputs.read(path);
+    const allDeletion = planDeletion(local);
+    const ids = (allDeletion?.ids ?? []).filter((id) => deletionPath(local, id) === path);
+    const selected = new Set(ids);
+    const deletion = {
+      roots: ids
+        .filter((id) => !selected.has(local.native.get(id)!.parent ?? ''))
+        .map((id) => ({ id, parent: local.native.get(id)!.parent })),
+      ids,
+    };
     return {
       contentAuthority: 'local' as const,
       status: 'read',
@@ -100,7 +111,10 @@ export async function readWorkspace(directory: string, path: string) {
       path,
       content,
       fileHash: hash(content),
-      outline: workspaceOutline(local, path),
+      outline: missing
+        ? { schema: 'remnote-outline/1', path, nodes: {} }
+        : workspaceOutline(local, path),
+      deletion,
       remoteWrites: 0,
     };
   });
@@ -330,7 +344,7 @@ export async function statusWorkspace(directory: string): Promise<unknown> {
   };
 }
 
-export function planLocal(context: LocalContext, options: DeleteOptions = {}): WorkspacePlan {
+export function planLocal(context: LocalContext): WorkspacePlan {
   if (!context.state.complete)
     throw new Error('Workspace is incomplete; its declared scope must be reconciled before sync');
   if (!context.state.tagIds)
@@ -396,12 +410,8 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
       });
     }
   }
-  const deletion = planDeletion(context, options);
-  if (deletion) {
-    if (plan.changes.length)
-      throw new Error('Keep an explicit deletion separate from content edits and creates');
-    plan.deletion = deletion;
-  }
+  const deletion = planDeletion(context);
+  if (deletion) plan.deletion = deletion;
   return plan;
 }
 
@@ -462,14 +472,16 @@ function affectedIds(
   const ids = new Set<string>();
   if (plan.deletion) {
     for (const id of plan.deletion.ids) ids.add(id);
-    let ancestor = native.get(plan.deletion.rootId)?.parent;
-    while (
-      ancestor &&
-      native.has(ancestor) &&
-      native.get(ancestor)!.unsupported !== 'unverified-native-flags'
-    ) {
-      ids.add(ancestor);
-      ancestor = native.get(ancestor)?.parent;
+    for (const root of plan.deletion.roots) {
+      let ancestor = native.get(root.id)?.parent;
+      while (
+        ancestor &&
+        native.has(ancestor) &&
+        native.get(ancestor)!.unsupported !== 'unverified-native-flags'
+      ) {
+        ids.add(ancestor);
+        ancestor = native.get(ancestor)?.parent;
+      }
     }
   }
   for (const id of plan.converged) {
@@ -575,8 +587,7 @@ async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
 export async function pushWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: DeleteOptions &
-    SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string } = {}
+  options: SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string } = {}
 ): Promise<unknown> {
   return synchronizeWorkspace(directory, backendFactory, options);
 }
@@ -634,7 +645,21 @@ export async function resumeWorkspace(
             throw new Error(`Native state changed after guarded publication: ${id}`);
           remote.set(id, current);
         }
+        if (
+          journal.final!.deleted.length &&
+          (await backend.existingIds(journal.final!.deleted)).length
+        )
+          throw new Error('Verified deletion no longer matches native state');
         await frozen.check();
+        const deletionParents = Object.fromEntries(
+          (journal.proof?.plan.deletion?.roots ?? [])
+            .map(({ parent }) => parent)
+            .filter((id): id is string => id !== null && remote.has(id))
+            .map((id) => [
+              id,
+              { observed: nativeOutline(remote.get(id)!, new Map([...context.native, ...remote])) },
+            ])
+        );
         return {
           contentAuthority: 'local',
           status: 'verified',
@@ -643,6 +668,7 @@ export async function resumeWorkspace(
           existingCardsPreserved: true,
           planHash,
           ids: journal.ids,
+          deleted: journal.final!.deleted,
           remoteWrites: 0,
           verification: {
             fileHash: binding.fileHash,
@@ -656,10 +682,13 @@ export async function resumeWorkspace(
               ])
             ),
           },
-          outline: workspaceOutline(
-            { ...context, native: new Map([...context.native, ...remote]) },
-            binding.path
-          ),
+          outline: context.parsed.has(binding.path)
+            ? workspaceOutline(
+                { ...context, native: new Map([...context.native, ...remote]) },
+                binding.path
+              )
+            : { schema: 'remnote-outline/1', path: binding.path, nodes: {} },
+          deletionParents,
         };
       });
   }
@@ -669,16 +698,9 @@ export async function resumeWorkspace(
 async function synchronizeWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: DeleteOptions &
-    SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string },
+  options: SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string },
   resumeHash?: string
 ): Promise<unknown> {
-  if (options.deleteId || options.scopeRoot) {
-    if (options.scope !== undefined || options.paths !== undefined)
-      throw new Error('Explicit deletion does not accept --scope or --path');
-    if (options.apply && !options.planHash)
-      throw new Error('Explicit deletion apply requires the exact --plan-hash');
-  }
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
@@ -713,7 +735,7 @@ async function synchronizeWorkspace(
         state.pending.journalKey !== key ||
         !['applying', 'unknown', 'conflict'].includes(resuming.state) ||
         !resuming.selection ||
-        resuming.selection.scope === 'delete'
+        resuming.proof?.plan.deletion
       )
         throw new Error(
           "Resume requires this vault's exact pending outgoing journal; use sync recover for verified publication"
@@ -732,25 +754,25 @@ async function synchronizeWorkspace(
     if (options.expectedFileHash !== undefined) {
       if (
         !options.apply ||
-        options.deleteId ||
-        options.scopeRoot ||
         options.paths?.length !== 1 ||
         !proofPath ||
         !/^[a-f0-9]{64}$/.test(options.expectedFileHash) ||
-        context.parsed.get(proofPath)?.fileHash !== options.expectedFileHash
+        (context.parsed.get(proofPath)?.fileHash ??
+          (context.missing.includes(proofPath) ? hash(null) : undefined)) !==
+          options.expectedFileHash
       )
         throw new Error(
           'Guarded apply requires one exact --path and its current --expected-file-hash from sync read; no native calls were made'
         );
       options = { ...options, scope: 'all' };
     }
-    const localPlan = await selectPlan(context, planLocal(context, options), options);
+    const localPlan = await selectPlan(context, planLocal(context), options);
     if (resuming?.proof) localPlan.guarded = guardedBinding(resuming);
     if (proofPath)
       localPlan.selection.verificationIds = [
         ...new Set([
           ...localPlan.selection.verificationIds,
-          ...outlineIds(context, proofPath).filter(
+          ...(context.parsed.has(proofPath) ? outlineIds(context, proofPath) : []).filter(
             (id) => !localPlan.selection.reconcileIds.includes(id)
           ),
         ]),
@@ -896,9 +918,9 @@ async function synchronizeWorkspace(
     const removesTags = plan.changes.some((change) =>
       change.tags?.before.some((tag) => !change.tags!.after.includes(tag))
     );
-    if (options.apply && removesTags && !identity.destructive)
+    if (options.apply && removesTags && !identity.mirrorDestructive)
       throw new Error(
-        'Removing native tag associations requires explicit --allow-destructive and the existing plugin replace gate; no writes were started. Properties and Rem entities are never deleted by tag sync'
+        'Removing native tag associations requires both live plugin write gates; no writes were started'
       );
     coverage.selection = selection;
     coverage.checkedIds = [
@@ -928,17 +950,19 @@ async function synchronizeWorkspace(
         if (remoteSnapshot)
           await writePrivate(root, remoteSnapshot, JSON.stringify(rem, null, 2) + '\n');
         const node = context.parsed
-          .get(conflict.path)!
-          .nodes.find((node) => node.key === conflict.id)!;
+          .get(conflict.path)
+          ?.nodes.find((node) => node.key === conflict.id);
         const localSnapshot = `.sync/conflicts/${planHash}/${conflict.id}-${conflict.localHash}.local.json`;
         await writePrivateOnce(
           root,
           localSnapshot,
           JSON.stringify(
-            {
-              ...nodeContent(node, context.native.get(conflict.id)),
-              tags: node.tags ?? context.native.get(conflict.id)?.tags ?? null,
-            },
+            node
+              ? {
+                  ...nodeContent(node, context.native.get(conflict.id)),
+                  tags: node.tags ?? context.native.get(conflict.id)?.tags ?? null,
+                }
+              : { deleted: true, id: conflict.id },
             null,
             2
           ) + '\n'
@@ -1108,19 +1132,18 @@ async function synchronizeWorkspace(
         tagChanges: plan.changes
           .filter((change) => change.tags)
           .map((change) => ({ key: change.key, ...change.tags! })),
-        requiredPermissions: removesTags
-          ? ['allow-destructive', 'plugin.acceptReplaceOperation']
-          : [],
+        requiredPermissions:
+          removesTags || plan.deletion
+            ? ['plugin.acceptWriteOperations', 'plugin.acceptReplaceOperation']
+            : [],
         atomic: false,
         remoteWrites: 0,
         ...coverage,
       };
     const writesRemote = plan.changes.length > 0 || Boolean(plan.deletion);
     if (writesRemote && !identity.writable) throw new Error('Live write gate is disabled');
-    if (plan.deletion && !identity.destructive)
-      throw new Error(
-        'Explicit deletion requires --allow-destructive and both live plugin write gates'
-      );
+    if (plan.deletion && !identity.mirrorDestructive)
+      throw new Error('Mirror deletion requires both live plugin write gates');
     if (writesRemote && journal.executionSequence === undefined)
       journal.executionSequence = await startPublisherExecution(store, root);
     journal.state = 'applying';
@@ -1204,7 +1227,7 @@ async function synchronizeWorkspace(
       if (
         identity.kbId !== state.kbId ||
         (writesRemote && !identity.writable) ||
-        ((plan.deletion || removesTags) && !identity.destructive)
+        ((plan.deletion || removesTags) && !identity.mirrorDestructive)
       )
         throw new Error('Live KB/write permission changed');
       if (!checkedWriteBoundary) {
@@ -1244,7 +1267,7 @@ async function synchronizeWorkspace(
       for (const id of plan.deletion?.ids ?? []) {
         await mutate(
           `${id}:delete`,
-          () => backend.remove(id),
+          () => backend.removeMirror(id),
           async () => {
             if ((await backend.existingIds([id])).length)
               throw new Error('Deleted Rem is still present');
@@ -1325,7 +1348,8 @@ async function synchronizeWorkspace(
             for (const tag of tags)
               await mutate(
                 `${change.key}:tag:${operation}:${tag}`,
-                () => (operation === 'add' ? backend.addTag(id, tag) : backend.removeTag(id, tag)),
+                () =>
+                  operation === 'add' ? backend.addTag(id, tag) : backend.removeMirrorTag(id, tag),
                 async () => {
                   const current = expected.get(id)!;
                   if (!Array.isArray(current.tags))
@@ -1461,18 +1485,31 @@ async function synchronizeWorkspace(
             ),
           }
         : undefined;
-      const outline = proofPath
-        ? workspaceOutline(
-            { ...(await inspectLocal(root)), native: new Map([...context.native, ...remote]) },
-            proofPath
-          )
-        : undefined;
+      const publishedContext = proofPath ? await inspectLocal(root) : undefined;
+      const outline =
+        proofPath && publishedContext
+          ? publishedContext.parsed.has(proofPath)
+            ? workspaceOutline(
+                { ...publishedContext, native: new Map([...context.native, ...remote]) },
+                proofPath
+              )
+            : { schema: 'remnote-outline/1', path: proofPath, nodes: {} }
+          : undefined;
+      const deletionParents = Object.fromEntries(
+        (plan.deletion?.roots ?? [])
+          .map(({ parent }) => parent)
+          .filter((id): id is string => id !== null && remote.has(id))
+          .map((id) => [
+            id,
+            { observed: nativeOutline(remote.get(id)!, new Map([...context.native, ...remote])) },
+          ])
+      );
       return {
         status: 'verified',
         complete: true,
         planHash,
         ids: journal.ids,
-        ...(verification ? { verification, outline } : {}),
+        ...(verification ? { verification, outline, deletionParents } : {}),
         updated: plan.changes
           .filter((change) => !change.key.startsWith('new:'))
           .map((change) => change.key),

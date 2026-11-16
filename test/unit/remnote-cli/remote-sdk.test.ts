@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { remoteSdk } from '../../../src/remnote-cli/client/remote-sdk.js';
+import { createMirrorScope, remoteSdk } from '../../../src/remnote-cli/client/remote-sdk.js';
 import {
   verifiedCatalog,
   type Capability,
@@ -83,6 +83,27 @@ function catalog(): CapabilityResult {
   };
 }
 describe('remote SDK values', () => {
+  it('scopes mirror authorization to one exact operation, target and tag without enabling other destructive calls', async () => {
+    const scope = createMirrorScope();
+    expect(scope.permits('rem:remove', 'a', [])).toBe(false);
+    await scope.run('rem:remove', 'a', [], async () => {
+      expect(scope.permits('rem:remove', 'a', [])).toBe(true);
+      expect(scope.permits('rem:remove', 'b', [])).toBe(false);
+      expect(scope.permits('rem:removeTag', 'a', ['t', false])).toBe(false);
+      expect(scope.permits('rem:replaceChildren', 'a', [])).toBe(false);
+    });
+    expect(scope.permits('rem:remove', 'a', [])).toBe(false);
+    await expect(scope.run('rem:removeTag', 'a', ['t', true], async () => {})).rejects.toThrow(
+      'Unsupported'
+    );
+    await scope.run('rem:removeTag', 'a', ['t', false], async () => {
+      expect(scope.permits('rem:removeTag', 'a', ['t', false])).toBe(true);
+      expect(scope.permits('rem:removeTag', 'a', ['other', false])).toBe(false);
+      expect(scope.permits('rem:removeTag', 'a', ['t', true])).toBe(false);
+      expect(scope.permits('rem:remove', 'a', [])).toBe(false);
+    });
+    expect(scope.permits('rem:removeTag', 'a', ['t', false])).toBe(false);
+  });
   it('validates the live catalog digest, schema and unique capability identities', () => {
     const source = catalog();
     expect(verifiedCatalog(source)).toEqual(source);

@@ -81,7 +81,7 @@ below is the authorized private vault's absolute path.
 | Reconcile all bound IDs | `remnote-cli sync apply DIR --scope all`; no path filter, no new-root discovery |
 | Preview / approved plan | `remnote-cli sync plan DIR` has zero native writes; `sync apply DIR --plan-hash HASH` requires the same frozen plan and selectors |
 | Offline inspection | `remnote-cli sync diff DIR --path 'Folder'`; `sync lint DIR` and `sync status DIR` remain whole-vault |
-| Explicit deletion | `remnote-cli sync delete DIR --id ID --scope-root ID` previews; execution additionally requires `--apply --plan-hash HASH`, destructive authorization and live gates |
+| Local deletion | Remove bound content locally and run `remnote-cli sync apply DIR`; selected exact mirrored identities are removed after conflict and permission checks |
 | Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
 | Input-bound native audit | `remnote-cli sync apply DIR --path PATH --expected-file-hash HASH`; exactly one file, full native proof and output outline from this invocation |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
@@ -93,8 +93,9 @@ below is the authorized private vault's absolute path.
 
 Plan and apply share `--scope changed|all` (default `changed`) and repeatable
 `--path PATH`. Path selects files/directories; no path means the entire vault.
-Both scopes reconcile every bound ID in selected documents, including remote-only
-content and direct-tag edits. Changed scope first probes public snapshots and
+Changed scope reconciles bound IDs in selected locally dirty documents, including
+deleted identities and necessary verification dependencies. All scope reconciles
+every bound ID in selected documents, including remote-only content and direct-tag edits. Changed scope first probes public snapshots and
 `getTagRems` in bounded batches, reading full flags/cards only for changed Rems and
 write dependencies. All scope additionally audits full native snapshots for every
 selected Rem. A clean changed invocation performs no full card/history reads.
@@ -109,7 +110,8 @@ scope or refresh unpublished records and clocks.
 
 Paths are vault-relative Markdown files or directories, not globs or native IDs.
 Repeated/equivalent paths such as `Folder` and `./Folder` are normalized and
-deduplicated. Missing paths, paths outside the vault, symlinks and non-content
+deduplicated. Previously tracked missing Markdown files can be selected as deletion
+intent. Other missing paths, paths outside the vault, symlinks and non-content
 files are rejected. An existing directory with no content Markdown is a valid
 empty selection: it returns offline `unchanged`, `remoteChecked: false`, with no
 remote reads. Path filtering is not hunk selection; existing unsynced edits in a
@@ -119,8 +121,8 @@ baseline or overwritten by publication.
 Every selection still runs full-vault local lint, identity validation and frozen
 file checks. A scoped command cannot bypass invalid content elsewhere.
 `sync diff DIR` accepts the same path filter but is offline and has no scope selector.
-Status/lint inspect the whole vault. Delete has its own exact ID/root boundary,
-not scope/path filters. There are no root sync actions, push/pull aliases, force,
+Status/lint inspect the whole vault. Local deletions obey the same scope/path filters.
+There are no root sync actions, push/pull aliases, force,
 since, daemon or arbitrary conflict-winner options.
 
 ### Initial import and privacy
@@ -454,8 +456,8 @@ there is no set merge, name-based TODO exclusion or implicit tag acknowledgement
 
 Removal always calls `removeTag(tagId, false)`, retaining properties, Tag Rems,
 CardIDs and history. The existing Bridge marks this atomic method destructive:
-apply therefore requires explicit `--allow-destructive` plus its native replace
-gate even for association-only removal. `plan` lists exact `tagChanges` and
+apply authorizes only each exact planned mirror removal and requires both live plugin
+write gates. `plan` lists exact `tagChanges` and
 `requiredPermissions`. Without that gate the entire apply refuses before text,
 add-tag or other writes; it never changes plugin settings. Ordinary tag additions
 require only the normal write gate.
@@ -588,8 +590,8 @@ state, with live writes enabled for outgoing changes. Native content is never ac
 as replacement local source. SDK writes are
 sequential, not atomic; there is no server-side CAS or exactly-once guarantee.
 Unknown or partial journal outcomes remain blocked for exact-ID reconciliation;
-omitting `--plan-hash` is not a retry or recovery bypass. Deletion still requires
-its explicit ID, scope boundary and destructive permission gates.
+omitting `--plan-hash` is not a retry or recovery bypass. Mirror deletions still require
+the actual plugin write and replace permission gates.
 
 Only reads are parallel: up to 16 local file reads and 4 exact-ID remote batches
 of 50. Each native batch snapshots at most 4 Rems concurrently, each with up to
@@ -603,14 +605,15 @@ errors, never an empty-list fallback. Newly observed child IDs cause structural
 drift; they are not traversed or imported. Later additions are concurrent changes,
 not an invitation to expand an in-progress write.
 Cheap probes still omit Card/history and full native-flag reads.
-Ordinary `--scope changed` still initially probes **every selected bound ID** to
-discover remote-only changes; omitting `--path` selects the whole vault. It is not
-a remote changes-since API. Only the two later public checks are narrowed to the
+Ordinary `--scope changed` probes bound IDs in locally dirty selected documents
+and required dependencies. A clean invocation makes no remote calls and does not
+detect remote-only changes; use `--scope all` to reconcile them. It is not
+a remote changes-since API. Later public checks are narrowed to the
 actual publication/mutation set and its complete before/observed/intended
 dependency closure, including ancestors, references, tag paths and Portal/card
 relationships inside the selection. Full native/Card/permission/pre-mutation
-guards remain in force; unknown native flags remain unknown. `all`, guarded
-apply and explicit deletion retain their complete original proof scopes.
+guards remain in force; unknown native flags remain unknown. `all` and guarded
+apply retain their complete proof scopes.
 Read results retain input order; failures stop their pool and drain in-flight
 work before returning, without passing partial reads into writes. Parsed source
 and bytes are reused only within one operation. Full content hashes, safe paths,
@@ -655,19 +658,28 @@ A mutation-stage failure may also use status
 `conflict`, but carries `journalKey`, known `ids` and `steps` instead of the
 planning `remoteWrites: 0` guarantee: inspect that evidence before any next action.
 
-Deletion is explicit and separate from file absence. Keep the local outline
-intact for preview:
+Deleting a bound outline node or tracked document locally expresses deletion intent.
+`sync plan DIR` previews exact `deletion.roots` and descendant `deletion.ids`;
+`sync apply DIR` performs the selected deletion with fresh conflict checks and
+exact absence verification. A dirty parent document outside the selection blocks
+deletion of its mounted child until that parent is selected. Unknown identities,
+unverified parents, unsupported native structures, remote drift, disabled plugin
+gates and incomplete journal outcomes fail closed. The global `--allow-destructive`
+flag is not needed for mirror deletion or association-only tag removal; other SDK
+operations keep their existing permission rules.
+An unanchored new node beside a removed bound sibling is ambiguous with an
+accidentally lost anchor and stops before any native call. Give a deliberate new
+node an explicit new block anchor or split the edits. A sync is bounded to 100
+deleted identities; imported scope roots and targets referenced by surviving
+local nodes cannot be deleted.
 
-```bash
-remnote-cli sync delete /PRIVATE/vault --id CARD_ID --scope-root ROOT_ID
-remnote-cli --allow-destructive sync delete /PRIVATE/vault --id CARD_ID --scope-root ROOT_ID --apply --plan-hash PREVIEW_HASH
-```
+`sync read DIR PATH` always returns `deletion: {roots, ids}` for that exact
+tracked file. A missing tracked file returns `content: null`, `fileHash: hash(null)`
+and an empty outline. Guarded `sync apply DIR --path PATH --expected-file-hash HASH`
+returns `deleted` only after native absence verification. Its `deletionParents`
+contains each observed surviving parent; `verification.observedHashes` binds the
+same parent revision. Guarded resume rechecks absence and these observations.
 
-Delete previews by default; unlike `sync apply`, its execution requires both
-`--apply` and `--plan-hash`. It accepts no scope/path selectors.
-The target must be a strict descendant of the exact scope root. Review the
-bounded exact descendant IDs. Native Document/Folder deletion is unsupported;
-both live plugin write gates and global `--allow-destructive` are required.
 Deleting a Rem does not promise to purge all historical Card records. Never
 delete review history to make an acceptance test pass.
 

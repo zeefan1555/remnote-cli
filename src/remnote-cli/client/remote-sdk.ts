@@ -2,11 +2,48 @@ import type { ReactRNPlugin } from '@remnote/plugin-sdk';
 import type { Connection } from './connection.js';
 import type { CapabilityResult } from './sdk-capabilities.js';
 
+/** Authorization lives only for one exact workspace mirror SDK call. */
+export function createMirrorScope() {
+  let active: { capability: string; id: string; args: string } | undefined;
+  return {
+    permits(capability: string, id: string | undefined, args: unknown[]): boolean {
+      return (
+        active !== undefined &&
+        active.capability === capability &&
+        active.id === id &&
+        active.args === JSON.stringify(args)
+      );
+    },
+    async run<T>(
+      capability: string,
+      id: string,
+      args: unknown[],
+      fn: () => Promise<T>
+    ): Promise<T> {
+      const valid =
+        (capability === 'rem:remove' && args.length === 0) ||
+        (capability === 'rem:removeTag' &&
+          args.length === 2 &&
+          typeof args[0] === 'string' &&
+          args[1] === false);
+      if (!valid || !id) throw new Error('Unsupported mirror operation');
+      if (active) throw new Error('Concurrent mirror mutation is not allowed');
+      active = { capability, id, args: JSON.stringify(args) };
+      try {
+        return await fn();
+      } finally {
+        active = undefined;
+      }
+    },
+  };
+}
+
 /** Rehydrate official immutable SDK snapshots; only generated methods get remote call bindings. */
 export function remoteSdk(
   connection: Connection,
   catalog: CapabilityResult,
-  allowDestructive: boolean
+  allowDestructive:
+    boolean | ((capability: string, targetId: string | undefined, args: unknown[]) => boolean)
 ): ReactRNPlugin {
   const references = new WeakMap<object, { $ref: 'rem' | 'card'; id: string }>();
   const encode = (value: unknown): unknown => {
@@ -30,7 +67,10 @@ export function remoteSdk(
       capability,
       ...(targetId ? { targetId } : {}),
       args: encode(args),
-      allowDestructive,
+      allowDestructive:
+        typeof allowDestructive === 'function'
+          ? allowDestructive(capability, targetId, args)
+          : allowDestructive,
       expectedCatalogHash: catalog.sdkCatalogHash,
     })) as { capability: string; value: unknown };
     if (response.capability !== capability) throw new Error('SDK response capability mismatch');

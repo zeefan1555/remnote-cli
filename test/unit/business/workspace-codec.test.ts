@@ -295,7 +295,7 @@ describe('Obsidian Rem codec', () => {
     });
   });
 
-  it('rejects new embeds, unsupported quote shapes and missing YAML/block counterparts', () => {
+  it('rejects new embeds and unsupported quote shapes and recognizes explicit new anchors', () => {
     const source = renderDocument(
       'root',
       'Note.md',
@@ -316,10 +316,10 @@ describe('Obsidian Rem codec', () => {
         )
       ).diagnostics.length
     ).toBeGreaterThan(0);
+    const changed = parseDocument('Note.md', source.replace(`^${nativeBlockId('a')}`, '^missing'));
     expect(
-      parseDocument('Note.md', source.replace(`^${nativeBlockId('a')}`, '^missing')).diagnostics
-        .length
-    ).toBeGreaterThan(0);
+      changed.document.nodes.some((node) => node.key.startsWith('new:') && node.explicitNewAnchor)
+    ).toBe(true);
   });
 
   it('keeps escaped Wiki-looking literals and code literal while rejecting malformed or formatted links', () => {

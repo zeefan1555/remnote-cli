@@ -114,6 +114,8 @@ export type NodeKind = 'text' | 'multiline' | 'basic' | 'opaque' | 'mount';
 export interface OutlineNode {
   key: string;
   blockId: string;
+  /** Explicit local anchor distinguishes a new node from a lost identity. */
+  explicitNewAnchor?: true;
   parent: string | null;
   line: number;
   kind: NodeKind;
@@ -167,12 +169,12 @@ export interface WorkspacePlan {
   guarded?: { path: string; fileHash: string; beforeHash: string };
   files: Record<string, string>;
   changes: WorkspaceChange[];
-  deletion?: { rootId: string; scopeRoot: string; ids: string[] };
+  deletion?: { roots: Array<{ id: string; parent: string | null }>; ids: string[] };
   selection?: SyncSelection;
 }
 /** Outgoing intent, reconciliation candidates and verification dependencies are distinct sets. */
 export interface SyncSelection {
-  scope: 'changed' | 'all' | 'delete';
+  scope: 'changed' | 'all';
   paths: string[];
   files: string[];
   outgoingKeys: string[];
@@ -223,7 +225,12 @@ export interface PublicDiscovery {
 /** Adapter seam: atomic SDK operations, CLI-owned composition. */
 export interface WorkspaceBackend {
   journal: MetadataStore;
-  identity(): Promise<{ kbId: string; writable: boolean; destructive?: boolean }>;
+  identity(): Promise<{
+    kbId: string;
+    writable: boolean;
+    destructive?: boolean;
+    mirrorDestructive?: boolean;
+  }>;
   enumerate(): Promise<WorkspaceRem[]>;
   subtree(rootIds: string[]): Promise<WorkspaceRem[]>;
   discover(ids: string[]): Promise<PublicDiscovery>;
@@ -247,11 +254,13 @@ export interface WorkspaceBackend {
   writeField(id: string, field: 'text' | 'backText', value: unknown[]): Promise<void>;
   addTag(id: string, tagId: string): Promise<void>;
   removeTag(id: string, tagId: string): Promise<void>;
+  removeMirrorTag(id: string, tagId: string): Promise<void>;
   setParent(id: string, parent: string, position: number): Promise<void>;
   setCardItem(id: string, value: boolean): Promise<void>;
   setCardCluster(id: string): Promise<void>;
   cardFacts(id: string): Promise<Array<{ id: string; hash: string }>>;
   remove(id: string): Promise<void>;
+  removeMirror(id: string): Promise<void>;
   existingIds(ids: string[]): Promise<string[]>;
   feedbackFacts?(id: string): Promise<{
     isTodo: boolean;

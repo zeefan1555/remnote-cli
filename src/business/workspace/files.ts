@@ -161,7 +161,7 @@ export async function writePrivateOnce(root: string, name: string, content: stri
   }
 }
 
-/** Only explicit, verified sync deletions call this; missing files never request native deletion. */
+/** Remove only an exact verified local publication target. */
 export async function removePrivate(root: string, name: string): Promise<void> {
   const path = await safePath(root, name);
   const stat = await lstat(path);

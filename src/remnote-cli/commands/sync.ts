@@ -26,8 +26,6 @@ import {
 interface SyncOptions {
   apply?: boolean;
   planHash?: string;
-  deleteId?: string;
-  scopeRoot?: string;
   scope?: 'changed' | 'all';
   paths?: string[];
   rootId?: string;
@@ -259,30 +257,6 @@ export function registerSyncCommands(program: Command): void {
       execute('resume', directory, options)
     );
   workspace
-    .command('delete <directory>')
-    .description('Preview explicit deletion of an exact note/card and its bounded descendants')
-    .requiredOption('--id <id>', 'Exact note/card to delete')
-    .requiredOption('--scope-root <id>', 'Exact ancestor boundary for deletion')
-    .option('--apply', 'Apply the reviewed deletion with destructive authorization and live gates')
-    .option('--plan-hash <sha256>', 'Exact deletion preview hash required with --apply')
-    .action(
-      async (
-        directory: string,
-        { id, ...options }: SyncOptions & { id: string },
-        command: Command
-      ) => {
-        if (options.apply && !options.planHash)
-          command.error('sync delete --apply requires --plan-hash', {
-            code: 'commander.missingMandatoryOptionValue',
-          });
-        await execute('sync', directory, {
-          ...options,
-          apply: options.apply === true,
-          deleteId: id,
-        });
-      }
-    );
-  workspace
     .command('relocate <directory> <destination>')
     .description('Relocate a bound private workspace offline without changing note identities')
     .action(async (directory: string, destination: string) =>
@@ -306,7 +280,7 @@ export function registerSyncCommands(program: Command): void {
         import: 'Create the first baseline in an empty directory; use sync apply for later changes',
         status: 'Offline local-source status',
         lint: 'Offline native metadata, outline, card and identity validation',
-        diff: 'Offline supported changes; never infer deletion or movement',
+        diff: 'Offline supported changes and local deletion intent; no native movement',
         recover: 'Finish staged local publication without remote writes',
         format: 'Offline canonical formatting of a clean sealed publication as human Markdown',
       }[name]

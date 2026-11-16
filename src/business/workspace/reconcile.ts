@@ -20,6 +20,7 @@ import { mapReads } from './read-pool.js';
 import { verificationClosure } from './selection.js';
 import { nativeTagToken, tagSet } from './tags.js';
 import { contentChildren, contentTags, partitionRemote } from './feedback-partition.js';
+import { deletionPath } from './deletion.js';
 
 function batches(ids: string[]): string[][] {
   return Array.from({ length: Math.ceil(ids.length / 50) }, (_, index) =>
@@ -208,16 +209,20 @@ export function reconcile(
   const graph = new Map([...context.native, ...remote]);
   for (const id of local.selection?.reconcileIds ?? context.native.keys()) {
     const base = context.native.get(id)!,
-      { path, node } = nodes.get(id)!,
+      located = nodes.get(id),
+      deleting = local.deletion?.ids.includes(id) === true,
+      path = located?.path ?? deletionPath(context, id),
+      node = located?.node,
       current = remote.get(id);
+    if (!deleting && !node) throw new Error(`Missing selected local node: ${id}`);
     const desired =
-      node.kind === 'opaque'
+      deleting || node!.kind === 'opaque'
         ? base
         : {
             ...base,
-            text: node.text,
-            ...(node.kind === 'basic' ? { backText: node.backText } : {}),
-            ...(node.tags === undefined ? {} : { tags: node.tags }),
+            text: node!.text,
+            ...(node!.kind === 'basic' ? { backText: node!.backText } : {}),
+            ...(node!.tags === undefined ? {} : { tags: node!.tags }),
           };
     const content = (rem: WorkspaceRem) => ({
       ...contentProjection(rem),
@@ -246,7 +251,7 @@ export function reconcile(
         hash([current.parent, contentChildren(current), current.type]) ||
       (base.document !== null && base.document !== current.document) ||
       (base.folder !== null && base.folder !== current.folder) ||
-      nodeKind(current, graph) !== node.kind ||
+      (!deleting && nodeKind(current, graph) !== node!.kind) ||
       hash(sourceStructure(base)) !== hash(sourceStructure(current))
     ) {
       conflict('remote-structure');
@@ -257,6 +262,7 @@ export function reconcile(
       conflict('remote-content-drift');
       continue;
     }
+    if (deleting) continue;
     if (hash(base) !== hash(current)) metadataChanged.push(id);
     if (localHash === remoteHash && localHash !== baseHash) {
       plan.changes = plan.changes.filter((change) => change.key !== id);

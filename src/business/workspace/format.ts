@@ -70,6 +70,7 @@ export async function formatWorkspace(directory: string) {
       const local = await inspectLocal(root, previous, new Map(), input.inputs);
       if (local.diagnostics.length)
         throw new Error(`Format refused: ${local.diagnostics[0]!.code}`);
+      if (local.missing.length) throw new Error('Format refused: missing tracked documents');
       if (local.dirty.length)
         throw new Error('Format refuses locally edited source; preserve and reconcile edits first');
       sources = local.parsed;

@@ -4,6 +4,7 @@ import { isContentMarkdown } from './files.js';
 import type { LocalContext } from './local.js';
 import type { SyncSelection, WorkspacePlan, WorkspaceRem } from './types.js';
 import { registerTagIds } from './tags.js';
+import { deletionPath } from './deletion.js';
 
 export interface SelectionOptions {
   scope?: 'changed' | 'all';
@@ -12,9 +13,9 @@ export interface SelectionOptions {
 
 const sorted = (ids: Iterable<string>): string[] => [...new Set(ids)].sort();
 
-/** Select existing exact files/directories only. The preceding full scan rejects all symlinks. */
+/** Select tracked files, including missing ones, or existing directories. */
 export async function selectFiles(context: LocalContext, values: string[] = []) {
-  const files = [...context.parsed.keys()].sort();
+  const files = [...new Set([...context.parsed.keys(), ...context.missing])].sort();
   const paths = new Set<string>();
   for (const value of values) {
     if (
@@ -32,7 +33,14 @@ export async function selectFiles(context: LocalContext, values: string[] = []) 
     if (path !== '.') {
       const parts = path.split('/');
       for (let index = 1; index <= parts.length; index++) {
-        const stat = await lstat(join(context.state.directory, ...parts.slice(0, index)));
+        let stat;
+        try {
+          stat = await lstat(join(context.state.directory, ...parts.slice(0, index)));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT' && context.missing.includes(path))
+            break;
+          throw error;
+        }
         if (stat.isSymbolicLink() || (index < parts.length && !stat.isDirectory()))
           throw new Error('Unsafe --path selector');
         if (
@@ -174,37 +182,59 @@ export async function selectPlan(
     throw new Error('--scope must be changed or all');
   const selected = await selectFiles(context, options.paths);
   const changes = plan.changes.filter((change) => selected.files.includes(change.path));
-  const candidates =
-    plan.deletion?.ids ??
-    [...context.parsed]
-      .filter(([path]) => selected.files.includes(path))
+  const deletedIds = (plan.deletion?.ids ?? []).filter((id) =>
+    selected.files.includes(deletionPath(context, id))
+  );
+  const deleted = new Set(deletedIds);
+  for (const id of deletedIds)
+    if (context.native.get(id)!.children.some((child) => !deleted.has(child)))
+      throw new Error('Select all locally deleted descendant documents together');
+  const deletion = deletedIds.length
+    ? {
+        roots: deletedIds
+          .filter((id) => !deleted.has(context.native.get(id)!.parent ?? ''))
+          .map((id) => ({ id, parent: context.native.get(id)!.parent })),
+        ids: deletedIds,
+      }
+    : undefined;
+  const publicationFiles = new Set(selected.files);
+  for (const root of deletion?.roots ?? []) {
+    const parentPath =
+      root.parent && context.state.entries[root.parent]
+        ? deletionPath(context, root.parent)
+        : undefined;
+    if (parentPath && !publicationFiles.has(parentPath)) {
+      if (context.dirty.includes(parentPath))
+        throw new Error(
+          `Select the dirty parent document before deleting its mounted child: ${parentPath}`
+        );
+      publicationFiles.add(parentPath);
+    }
+  }
+  const candidates = [
+    ...deletedIds,
+    ...[...context.parsed]
+      .filter(
+        ([path]) =>
+          selected.files.includes(path) && (options.scope === 'all' || context.dirty.includes(path))
+      )
       .flatMap(([, doc]) =>
         doc.nodes
           .filter((node) => node.kind !== 'mount' && !node.key.startsWith('new:'))
           .map((node) => node.key)
-      );
+      ),
+  ];
   const reconcileIds = sorted(candidates);
   const selection: SyncSelection = {
-    scope: plan.deletion ? 'delete' : (options.scope ?? 'changed'),
-    paths: plan.deletion ? [] : selected.paths,
-    files: plan.deletion
-      ? sorted(
-          [...context.parsed]
-            .filter(([, document]) =>
-              document.nodes.some((node) => plan.deletion!.ids.includes(node.key))
-            )
-            .map(([path]) => path)
-        )
-      : selected.files,
+    scope: options.scope ?? 'changed',
+    paths: selected.paths,
+    files: sorted(publicationFiles),
     outgoingKeys: sorted(changes.map((change) => change.key)),
     reconcileIds,
-    verificationIds: verificationClosure(
-      context,
-      { ...plan, changes },
-      plan.deletion
-        ? reconcileIds
-        : changes.filter((change) => !change.key.startsWith('new:')).map((change) => change.key)
-    ).filter((id) => !reconcileIds.includes(id)),
+    verificationIds: verificationClosure(context, { ...plan, changes }, [
+      ...deletedIds,
+      ...changes.filter((change) => !change.key.startsWith('new:')).map((change) => change.key),
+    ]).filter((id) => !reconcileIds.includes(id)),
   };
   for (const [path, document] of context.parsed)
     if (
@@ -222,5 +252,12 @@ export async function selectPlan(
       ([token]) => !Object.hasOwn(context.state.tagIds ?? {}, token)
     )
   );
-  return { ...plan, changes, selection, ...(Object.keys(tagIds).length ? { tagIds } : {}) };
+  const { deletion: _allDeletions, ...rest } = plan;
+  return {
+    ...rest,
+    changes,
+    selection,
+    ...(deletion ? { deletion } : {}),
+    ...(Object.keys(tagIds).length ? { tagIds } : {}),
+  };
 }

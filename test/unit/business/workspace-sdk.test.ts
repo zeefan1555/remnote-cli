@@ -8,6 +8,7 @@ import { remoteEditedAt } from '../../../src/business/workspace/snapshots.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
 import { mapReads } from '../../../src/business/workspace/read-pool.js';
 import { isReferencePortal } from '../../../src/business/workspace/reference-projection.js';
+import { createMirrorScope } from '../../../src/remnote-cli/client/remote-sdk.js';
 import {
   importWorkspace,
   pushWorkspace,
@@ -15,7 +16,7 @@ import {
   saveWorkspace,
 } from '../../../src/business/workspace/workspace.js';
 import { loadState, localStore } from '../../../src/business/workspace/local.js';
-import { readPrivate } from '../../../src/business/workspace/files.js';
+import { readPrivate, writePrivate } from '../../../src/business/workspace/files.js';
 import type { Journal } from '../../../src/business/workspace/resume.js';
 
 function fixture(count = 2) {
@@ -113,6 +114,38 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('authorizes only scoped mirror removals while preserving real plugin gates and generic removal denial', async () => {
+    const f = fixture();
+    const scope = createMirrorScope();
+    const status = vi.fn(async () => ({
+      kbId: 'kb',
+      writable: true,
+      destructive: false,
+      mirrorDestructive: true,
+    }));
+    const backend = new SdkWorkspaceBackend(
+      f.plugin as unknown as ReactRNPlugin,
+      { getLocal: async () => undefined, setLocal: async () => {} },
+      status,
+      async (capability, id, args, fn) =>
+        scope.run(capability, id, args, async () => {
+          expect(scope.permits(capability, id, args)).toBe(true);
+          expect(scope.permits('rem:remove', 'unrelated', [])).toBe(false);
+          return fn();
+        })
+    );
+    await expect(backend.removeTag('r1', 'r0')).rejects.toThrow(/destructive|gate/i);
+    await backend.removeMirrorTag('r1', 'r0');
+    expect(f.flags.get('r1')!.removeTag).toHaveBeenCalledWith('r0', false);
+    status.mockResolvedValue({
+      kbId: 'kb',
+      writable: true,
+      destructive: false,
+      mirrorDestructive: false,
+    });
+    await expect(backend.removeMirror('r1')).rejects.toThrow(/plugin write gates/i);
+    expect(f.flags.get('r1')!.remove).not.toHaveBeenCalled();
+  });
   it('uses atomic checkbox/reference capabilities and blocks unknown facts or disabled writes', async () => {
     const f = fixture();
     expect(await f.backend.feedbackFacts('r1')).toEqual({
@@ -789,7 +822,7 @@ describe('entity structure sync gates through the actual SDK backend', () => {
     return { ...f, directory, apply };
   }
 
-  it('bounds default changed publication and later probes without narrowing initial discovery', async () => {
+  it('leaves clean changed sync offline and bounds publication probes', async () => {
     temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-publication-N200-')));
     vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
     const directory = join(temporary, 'vault'),
@@ -816,7 +849,7 @@ describe('entity structure sync gates through the actual SDK backend', () => {
     expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
       status: 'unchanged',
     });
-    expect(count()).toBe(42);
+    expect(count()).toBe(0);
     const read = await readWorkspace(directory, 'r0.md');
     await saveWorkspace(
       directory,
@@ -913,8 +946,12 @@ describe('entity structure sync gates through the actual SDK backend', () => {
     'rejects exact type 6 descendant additions in %s mode without importing them or writing',
     async (mode) => {
       const f = await imported();
-      const source = await readPrivate(f.directory, 'r0.md'),
-        identity = await readPrivate(f.directory, '.remnote/identity.json');
+      let source = await readPrivate(f.directory, 'r0.md');
+      if (mode === 'changed') {
+        source += '\n';
+        await writePrivate(f.directory, 'r0.md', source);
+      }
+      const identity = await readPrivate(f.directory, '.remnote/identity.json');
       const before = await loadState(f.directory);
       f.entityChildren.set('r1', ['r3']);
       Object.assign(f.objects.get('r3')!, { parent: 'r1', type: 6, children: ['r4'] });
@@ -945,7 +982,7 @@ describe('entity structure sync gates through the actual SDK backend', () => {
     const f = await imported();
     f.objects.get('r0')!.children = [];
     f.entityChildren.set('r0', ['r2', 'r1']);
-    expect(await f.apply()).toMatchObject({
+    expect(await f.apply({ scope: 'all' })).toMatchObject({
       status: 'conflict',
       complete: false,
       remoteWrites: 0,

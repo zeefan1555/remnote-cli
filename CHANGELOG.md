@@ -9,6 +9,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Mirror local deletion of bound notes, cards and tracked documents during normal
+  `sync apply`, with exact scoped authorization, frozen preflight and absence
+  verification. Scoped tag removals retain their property data. Both live plugin
+  gates remain mandatory; unrelated SDK operations gain no authority.
+- `--scope changed` reads locally dirty selected documents and dependencies; a
+  clean sync has `remoteChecked: false` and does not claim remote freshness.
 - Add explicit clean-source `sync feedback bind/capture/ack`. Exact non-card
   TODO/DONE attachments stay outside canonical source while physical order is
   preserved through insertion and recovery. Bind never rewrites Markdown or
@@ -63,7 +69,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   content, structure and later verification boundaries remain guarded. Unselected
   baselines and clocks are not refreshed by those observations.
 
-- Ordinary changed sync retains full selected-ID discovery but bounds later public
+- Ordinary changed sync limits discovery to locally dirty documents and bounds later public
   verification to actual publication/mutation dependencies. Unpublished records
   and clocks remain untouched; structural-only parents receive children only.
   Separate frozen native and complete projected-baseline proofs drive recovery,
@@ -171,9 +177,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   plans, validates, applies and verifies in one invocation, with optional exact
   `--plan-hash`. Both select `--scope changed|all` (default `changed`) and repeatable
   exact file/directory `--path` selectors. Root actions and misplaced write flags
-  are rejected, not retained as aliases. Explicit deletion is isolated in
-  `sync delete DIR --id ID --scope-root ID`, requiring `--apply --plan-hash` and
-  existing destructive/live gates for execution.
+  are rejected, not retained as aliases. Local deletion is mirrored by normal
+  apply using exact bound IDs and the two live plugin gates.
 - Incremental synchronization separates selected outgoing changes, reconciliation
   candidates and verification-only dependencies. Only candidates and actual
   parent-child mutations advance the native baseline; unselected source bytes,

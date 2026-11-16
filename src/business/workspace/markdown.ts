@@ -908,6 +908,7 @@ function parseOutline(
     const node: OutlineNode = {
       key,
       blockId,
+      ...(key.startsWith('new:') && anchor ? { explicitNewAnchor: true as const } : {}),
       parent,
       line,
       kind,
@@ -983,10 +984,13 @@ function parseOutline(
   }
   const [first, ...rest] = tree.children;
   content(first ? [first, ...rest] : [], null, true);
-  for (const key of Object.keys(metadata.rems))
-    if (!seen.has(key)) fail(1, 'MISSING_ID', `Existing identity ${key} has no real body node`);
   for (const block of Object.keys(frontmatter.attributes?.rems ?? {}))
-    if (!result.nodes.some((node) => node.blockId === block))
+    if (
+      !result.nodes.some((node) => node.blockId === block) &&
+      !Object.entries(metadata.rems).some(
+        ([key, entry]) => !key.startsWith('new:') && entry.block === block && !seen.has(key)
+      )
+    )
       fail(1, 'ATTRIBUTE_NODE_MISSING', `Attributes for ${block} have no body node`);
   return { document: result, diagnostics };
 }

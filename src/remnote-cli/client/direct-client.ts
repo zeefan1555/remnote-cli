@@ -10,7 +10,7 @@ import { resolveManagedImage } from '../../media.js';
 import { Connection } from './connection.js';
 import { connectionConfigPath, readConnectionConfig } from './connection-config.js';
 import { verifiedCatalog, type CapabilityResult } from './sdk-capabilities.js';
-import { remoteSdk } from './remote-sdk.js';
+import { createMirrorScope, remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
 import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
 
@@ -92,20 +92,36 @@ export class DirectClient {
     const kbKey = createHash('sha256').update(config.knowledgeBaseId).digest('hex');
     this.state = new LocalState(join(dirname(this.configPath), 'state', kbKey));
     const plugin = remoteSdk(this.connection, catalog, this.options.allowDestructive === true);
-    this.workspace = new SdkWorkspaceBackend(plugin, this.state, async () => {
-      const status = (await this.connection!.request('get_status', {})) as Record<string, unknown>;
-      if (
-        typeof status.knowledgeBaseId !== 'string' ||
-        typeof status.acceptWriteOperations !== 'boolean'
-      )
-        throw new Error('Incomplete live workspace status');
-      return {
-        kbId: status.knowledgeBaseId,
-        writable: status.acceptWriteOperations,
-        destructive:
-          status.acceptReplaceOperation === true && this.options.allowDestructive === true,
-      };
-    });
+    const mirrorScope = createMirrorScope();
+    const workspacePlugin = remoteSdk(
+      this.connection,
+      catalog,
+      (capability, targetId, args) =>
+        this.options.allowDestructive === true || mirrorScope.permits(capability, targetId, args)
+    );
+    this.workspace = new SdkWorkspaceBackend(
+      workspacePlugin,
+      this.state,
+      async () => {
+        const status = (await this.connection!.request('get_status', {})) as Record<
+          string,
+          unknown
+        >;
+        if (
+          typeof status.knowledgeBaseId !== 'string' ||
+          typeof status.acceptWriteOperations !== 'boolean'
+        )
+          throw new Error('Incomplete live workspace status');
+        return {
+          kbId: status.knowledgeBaseId,
+          writable: status.acceptWriteOperations,
+          destructive:
+            status.acceptReplaceOperation === true && this.options.allowDestructive === true,
+          mirrorDestructive: status.acceptReplaceOperation === true,
+        };
+      },
+      (capability, id, args, fn) => mirrorScope.run(capability, id, args, fn)
+    );
     this.adapter = new RemAdapter(
       plugin,
       {

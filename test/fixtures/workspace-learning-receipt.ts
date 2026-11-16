@@ -133,11 +133,13 @@ const backend: WorkspaceBackend = {
   writeField: forbidden,
   addTag: forbidden,
   removeTag: forbidden,
+  removeMirrorTag: forbidden,
   setParent: forbidden,
   setCardItem: forbidden,
   setCardCluster: forbidden,
   cardFacts: forbidden,
   remove: forbidden,
+  removeMirror: forbidden,
   existingIds: async (ids) => ids.filter((id) => rems.has(id)),
 };
 await importWorkspace(vault, 'synthetic-kb', async () => backend);

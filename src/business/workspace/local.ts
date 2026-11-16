@@ -366,8 +366,16 @@ export async function prepareSnapshot(
         }
         if (!value.rems || !removed.size) return [source.metadata!.root, value];
         // Attributes belong to document-local blocks, not globally unique block names.
+        const sourcePath =
+          source.metadata!.root && previous
+            ? Object.entries(previous.documents).find(
+                ([, document]) => document.rootId === source.metadata!.root
+              )?.[0]
+            : undefined;
         const deletedBlocks = new Set(
-          source.nodes.filter((node) => removed.has(node.key)).map((node) => node.blockId)
+          [...removed].flatMap((id) =>
+            previous?.entries[id]?.path === sourcePath ? [previous!.entries[id]!.blockId] : []
+          )
         );
         return [
           source.metadata!.root,
@@ -531,7 +539,9 @@ export async function prepareSnapshot(
         })),
       });
     const content =
-      current && semantic(current) === semantic(parsed.document)
+      current &&
+      semantic(current) === semantic(parsed.document) &&
+      hash(current.attributes ?? {}) === hash(options.attributes ?? {})
         ? await readPrivate(root, path)
         : renderDocument(id, path, byId, paths, options);
     if (state.documents[path]) throw new Error('Select every document involved in a path swap');
@@ -776,8 +786,12 @@ export async function inspectLocal(
   for (const [id, { path }] of expectedRoots)
     if (!paths.has(id)) {
       missing.push(path);
-      fail(path, 1, 'MISSING_FILE', 'Missing file is not a remote deletion');
+      dirty.push(path);
     }
+  const allPaths = new Map([
+    ...paths,
+    ...missing.map((path) => [state.documents[path]!.rootId, path] as const),
+  ]);
   const blocks = new Map(Object.entries(state.entries).map(([id, entry]) => [id, entry.blockId]));
   const originalIds = new Set(
     Object.entries(state.entries)
@@ -789,18 +803,26 @@ export async function inspectLocal(
       const value = currentFiles.get(path)!;
       value.prepared = bindPreparedDocument(
         value.prepared,
-        documentMetadata(rootId, native, paths, { blocks, originalIds })
+        documentMetadata(rootId, native, allPaths, { blocks, originalIds })
       );
     }
-  const links = new WorkspaceLinks(
-    [...currentFiles]
+  const links = new WorkspaceLinks([
+    ...[...currentFiles]
       .filter(([, value]) => value.prepared.frontmatter.metadata)
       .map(([path, value]) => ({
         path,
         metadata: value.prepared.frontmatter.metadata!,
         title: preparedTitle(value.prepared),
-      }))
-  );
+      })),
+    ...missing.map((path) => ({
+      path,
+      title: path.split('/').at(-1)!.replace(/\.md$/i, ''),
+      metadata: documentMetadata(state.documents[path]!.rootId, native, allPaths, {
+        blocks,
+        originalIds,
+      }),
+    })),
+  ]);
   for (const [rootId, path] of paths) {
     const doc = expectedRoots.get(rootId)!.doc;
     const { source, prepared } = currentFiles.get(path)!;
@@ -812,7 +834,7 @@ export async function inspectLocal(
     if (native.size !== Object.keys(state.entries).length) continue;
     const { title, aliases, tags } = frontmatter.metadata!;
     const display = { ...(title === undefined ? {} : { title }), aliases, tags };
-    const old = renderParsedDocument(doc.rootId, path, native, paths, {
+    const old = renderParsedDocument(doc.rootId, path, native, allPaths, {
       blocks,
       originalIds,
       display,
@@ -835,6 +857,7 @@ export async function inspectLocal(
         'Document root ID is immutable; heading does not convert the native Rem type'
       );
     const oldNodes = new Map(old.nodes.map((node) => [node.key, node]));
+    const currentKeys = new Set(current.document.nodes.map((node) => node.key));
     for (const node of current.document.nodes) {
       if (node.kind !== 'mount') {
         if (allKeys.has(node.key))
@@ -905,7 +928,10 @@ export async function inspectLocal(
             'OPAQUE_EDIT',
             'Opaque native content and document mounts are read only'
           );
-        if (hash(node.children.filter((id) => !id.startsWith('new:'))) !== hash(before.children))
+        if (
+          hash(node.children.filter((id) => !id.startsWith('new:'))) !==
+          hash(before.children.filter((id) => currentKeys.has(id)))
+        )
           fail(
             path,
             node.line,
@@ -916,10 +942,20 @@ export async function inspectLocal(
           fail(path, node.line, 'EMPTY_TEXT', 'Existing text/questions may not be erased');
       }
     }
-    const currentKeys = new Set(current.document.nodes.map((node) => node.key));
-    for (const node of old.nodes)
-      if (!currentKeys.has(node.key))
-        fail(path, 1, 'MISSING_ID', `Missing ${node.key} is not a remote deletion`);
+    for (const oldNode of old.nodes) {
+      if (currentKeys.has(oldNode.key) || oldNode.kind === 'mount') continue;
+      const lostAnchor = current.document.nodes.some(
+        (node) =>
+          node.key.startsWith('new:') && node.parent === oldNode.parent && !node.explicitNewAnchor
+      );
+      if (lostAnchor)
+        fail(
+          path,
+          1,
+          'MISSING_ID',
+          `Deletion and new content under the same parent are ambiguous for ${oldNode.key}; restore the anchor or split the edits`
+        );
+    }
     const unchangedReferences = new Map<string, number>();
     for (const node of old.nodes) {
       for (const part of [...node.text, ...node.backText]) {

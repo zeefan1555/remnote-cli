@@ -317,41 +317,6 @@ describe('sync command interface', () => {
     expect(backend).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])(
-    'routes exact deletion with apply=%s and preserves global authorization',
-    async (apply) => {
-      vi.spyOn(console, 'log').mockImplementation(() => {});
-      const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
-      const client = vi.spyOn(commandClient, 'createCommandClient');
-      await testProgram().program.parseAsync([
-        'node',
-        'remnote-cli',
-        ...(apply ? ['--allow-destructive'] : []),
-        'sync',
-        'delete',
-        '/private/tmp/sync',
-        '--id',
-        'card',
-        '--scope-root',
-        'root',
-        ...(apply ? ['--apply', '--plan-hash', 'a'.repeat(64)] : []),
-      ]);
-      expect(sync.pushWorkspace).toHaveBeenCalledExactlyOnceWith(
-        '/private/tmp/sync',
-        expect.any(Function),
-        {
-          deleteId: 'card',
-          scopeRoot: 'root',
-          apply,
-          ...(apply ? { planHash: 'a'.repeat(64) } : {}),
-        }
-      );
-      expect(client).toHaveBeenCalledTimes(1);
-      expect(client.mock.results[0]!.value.allowsDestructive()).toBe(apply);
-      expect(backend).not.toHaveBeenCalled();
-    }
-  );
-
   it('registers sync as a pure group and retains the bounded subcommands', () => {
     const command = createProgram('test').commands.find((item) => item.name() === 'sync')!;
     expect(command.registeredArguments).toEqual([]);
@@ -362,7 +327,6 @@ describe('sync command interface', () => {
       'apply',
       'baseline-align',
       'resume',
-      'delete',
       'relocate',
       'read',
       'save',

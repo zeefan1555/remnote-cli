@@ -133,6 +133,9 @@ const backend: WorkspaceBackend = {
   removeTag: async () => {
     throw new Error('Fixture never removes tags');
   },
+  removeMirrorTag: async () => {
+    throw new Error('Fixture never removes tags');
+  },
   setParent: async (id, parent, position) => {
     calls.push(`parent:${id}`);
     rems.get(id)!.parent = parent;
@@ -153,6 +156,9 @@ const backend: WorkspaceBackend = {
   cardFacts: async (id) =>
     cards(rems.get(id)!).map(({ id, remId, type }) => ({ id, hash: hash({ id, remId, type }) })),
   remove: async () => {
+    throw new Error('Fixture never deletes');
+  },
+  removeMirror: async () => {
     throw new Error('Fixture never deletes');
   },
   existingIds: async (ids) => ids.filter((id) => rems.has(id)),

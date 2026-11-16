@@ -122,10 +122,22 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
       kbId: string;
       writable: boolean;
       destructive?: boolean;
-    }>
+      mirrorDestructive?: boolean;
+    }>,
+    private readonly mirrorOperation?: <T>(
+      capability: string,
+      id: string,
+      args: unknown[],
+      fn: () => Promise<T>
+    ) => Promise<T>
   ) {}
 
-  async identity(): Promise<{ kbId: string; writable: boolean; destructive?: boolean }> {
+  async identity(): Promise<{
+    kbId: string;
+    writable: boolean;
+    destructive?: boolean;
+    mirrorDestructive?: boolean;
+  }> {
     const live = await this.status(),
       kb = await this.plugin.kb.getCurrentKnowledgeBaseData();
     if (!kb || kb._id !== live.kbId) throw new Error('Workspace live KB binding mismatch');
@@ -520,6 +532,16 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     await (await this.rem(id)).removeTag(idSchema.parse(tagId), false);
   }
 
+  async removeMirrorTag(id: string, tagId: string): Promise<void> {
+    const live = await this.identity();
+    if (!live.writable || !live.mirrorDestructive || !this.mirrorOperation)
+      throw new Error('Native mirror tag removal requires both live plugin write gates');
+    const tag = idSchema.parse(tagId);
+    await this.mirrorOperation('rem:removeTag', id, [tag, false], async () =>
+      (await this.rem(id)).removeTag(tag, false)
+    );
+  }
+
   async create(markdown?: string): Promise<string> {
     await this.writable();
     const rem =
@@ -552,6 +574,12 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     if (!live.writable || !live.destructive)
       throw new Error('Both write gates and --allow-destructive are required');
     await (await this.rem(id)).remove();
+  }
+  async removeMirror(id: string): Promise<void> {
+    const live = await this.identity();
+    if (!live.writable || !live.mirrorDestructive || !this.mirrorOperation)
+      throw new Error('Native mirror removal requires both live plugin write gates');
+    await this.mirrorOperation('rem:remove', id, [], async () => (await this.rem(id)).remove());
   }
   async existingIds(ids: string[]): Promise<string[]> {
     const rems = await this.plugin.rem.findMany(ids);

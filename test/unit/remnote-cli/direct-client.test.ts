@@ -23,7 +23,10 @@ vi.mock('../../../src/remnote-cli/client/connection.js', () => ({
     close = wire.close;
   },
 }));
-vi.mock('../../../src/remnote-cli/client/remote-sdk.js', () => ({ remoteSdk: () => wire.plugin }));
+vi.mock('../../../src/remnote-cli/client/remote-sdk.js', async (original) => ({
+  ...(await original()),
+  remoteSdk: () => wire.plugin,
+}));
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 
 let directory: string, client: DirectClient;
