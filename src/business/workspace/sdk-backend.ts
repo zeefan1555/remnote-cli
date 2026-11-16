@@ -271,13 +271,35 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   ): Promise<WorkspaceRem[]> {
     if (ids.length > 50) throw new Error('Exact-ID native read batch exceeds 50');
     const rems = await this.plugin.rem.findMany(ids);
+    const returnedIds = Array.isArray(rems) ? rems.map((rem) => rem?._id) : [];
     if (
       !Array.isArray(rems) ||
       rems.length !== ids.length ||
-      new Set(rems.map((rem) => rem._id)).size !== ids.length ||
-      rems.some((rem) => !ids.includes(rem._id))
-    )
-      throw new Error('Incomplete exact-ID native read');
+      new Set(returnedIds).size !== ids.length ||
+      returnedIds.some((id) => !ids.includes(id))
+    ) {
+      const validIds = returnedIds.filter((id) => idSchema.safeParse(id).success);
+      throw new Error(
+        `Incomplete exact-ID native read: ${JSON.stringify({
+          requestedCount: ids.length,
+          returnedCount: Array.isArray(rems) ? rems.length : null,
+          missingIds: ids.filter(
+            (id) => idSchema.safeParse(id).success && !returnedIds.includes(id)
+          ),
+          unexpectedIds: [...new Set(validIds.filter((id) => !ids.includes(id)))].slice(0, 50),
+          duplicateIds: [
+            ...new Set(validIds.filter((id, index) => validIds.indexOf(id) !== index)),
+          ].slice(0, 50),
+          malformed: {
+            responseType: Array.isArray(rems) ? 'array' : rems === null ? 'null' : typeof rems,
+            itemCount: returnedIds.length - validIds.length,
+            indexes: returnedIds
+              .flatMap((id, index) => (idSchema.safeParse(id).success ? [] : [index]))
+              .slice(0, 50),
+          },
+        })}`
+      );
+    }
     const byId = new Map(rems.map((rem) => [rem._id, rem]));
     return mapReads(ids, 4, async (id) => {
       const rem = byId.get(id)!,

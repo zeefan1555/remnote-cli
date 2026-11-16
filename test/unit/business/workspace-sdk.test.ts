@@ -310,6 +310,37 @@ describe('public SDK sync adapter', () => {
     ]);
   });
 
+  it('reports missing exact-read IDs without reading or skipping returned objects', async () => {
+    const f = fixture();
+    f.objects.delete('r1');
+    await expect(f.backend.read(['r0', 'r1'])).rejects.toThrow(
+      '"requestedCount":2,"returnedCount":1,"missingIds":["r1"],"unexpectedIds":[],"duplicateIds":[]'
+    );
+    expect(f.findMany).toHaveBeenCalledExactlyOnceWith(['r0', 'r1']);
+    expect(f.flags.get('r0')!.getCards).not.toHaveBeenCalled();
+  });
+
+  it('reports duplicate/unexpected IDs and safe malformed summaries without raw content', async () => {
+    const f = fixture();
+    f.findMany.mockResolvedValue([
+      { _id: 'other' },
+      { _id: 'other' },
+      { _id: { text: 'PRIVATE_BODY' } },
+    ]);
+    let message = '';
+    try {
+      await f.backend.read(['r0', 'r1']);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain(
+      '"requestedCount":2,"returnedCount":3,"missingIds":["r0","r1"],"unexpectedIds":["other"],"duplicateIds":["other"]'
+    );
+    expect(message).toContain('"malformed":{"responseType":"array","itemCount":1,"indexes":[2]}');
+    expect(message).not.toContain('PRIVATE_BODY');
+    expect(f.flags.get('r0')!.getCards).not.toHaveBeenCalled();
+  });
+
   it('bounds two concurrent full batches to eight snapshots and 32 in-flight native flags', async () => {
     const f = fixture(200);
     let active = 0,
