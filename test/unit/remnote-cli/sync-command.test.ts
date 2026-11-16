@@ -57,6 +57,25 @@ function testProgram() {
 }
 
 describe('sync command interface', () => {
+  it('routes explicit selected native-source adoption only through baseline alignment', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await testProgram().program.parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'baseline-align',
+      '/private/tmp/vault',
+      '--path',
+      'Day.md',
+      '--accept-native-source',
+    ]);
+    expect(baseline.alignWorkspaceBaseline).toHaveBeenCalledExactlyOnceWith(
+      '/private/tmp/vault',
+      expect.any(Function),
+      { paths: ['Day.md'], acceptNativeSource: true }
+    );
+    expect(sync.pushWorkspace).not.toHaveBeenCalled();
+  });
   it('routes exact new-child baseline acceptance without invoking the publisher', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     await testProgram().program.parseAsync([

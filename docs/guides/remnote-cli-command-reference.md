@@ -60,10 +60,11 @@ To prevent this:
 
 ## sync
 
-The private Obsidian vault and RemNote are both editable endpoints. Users in
-Obsidian and agents edit the **same Markdown files**; a user may also edit cards
-during RemNote review. The candidate uses a common baseline and per-Rem semantic
-three-way merging. The receipts below describe the current source contract;
+The private Obsidian vault is the content authority. Users in Obsidian and agents
+edit the **same Markdown files**; native review history remains RemNote-owned.
+Ordinary sync publishes local changes against a verified baseline. Native-only
+body, tag or child changes block publication rather than merge into local source.
+The receipts below describe the current source contract;
 offline tests are not native acceptance or a release claim. Legacy `pull`/`push`
 aliases are removed.
 
@@ -86,6 +87,7 @@ below is the authorized private vault's absolute path.
 | Input-bound native audit | `remnote-cli sync apply DIR --path PATH --expected-file-hash HASH`; exactly one file, full native proof and output outline from this invocation |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
 | Missing baseline observations | `remnote-cli sync baseline-align DIR [--path PATH]`; read-only native preview, then `--apply --plan-hash HASH` for exact local publication |
+| Explicit one-time native source adoption | `remnote-cli sync baseline-align DIR --accept-native-source --path 'Exact.md'`; exact approved files only, preview then exact `--apply --plan-hash HASH`, zero native writes |
 | Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
 | Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
 
@@ -95,7 +97,8 @@ Plan and apply share `--scope changed|all` (default `changed`) and repeatable
 `--path PATH`. Path selects files/directories; no path means the entire vault.
 Changed scope reconciles bound IDs in selected locally dirty documents, including
 deleted identities and necessary verification dependencies. All scope reconciles
-every bound ID in selected documents, including remote-only content and direct-tag edits. Changed scope first probes public snapshots and
+every bound ID in selected documents. Observed remote-only content and direct-tag
+edits are conflicts, not incoming edits. Changed scope first probes public snapshots and
 `getTagRems` in bounded batches, reading full flags/cards only for changed Rems and
 write dependencies. All scope additionally audits full native snapshots for every
 selected Rem. A clean changed invocation performs no full card/history reads.
@@ -105,7 +108,7 @@ Verification-only dependencies may have uncollected direct tags (absent/null),
 which are not an observed empty set. Changed sync freshly reads that membership
 and all newly reached sealed tag dependencies before either later public check.
 Known membership, content and structure still must match; missing dependency
-baselines fail closed. These proof observations do not expand the selected merge
+baselines fail closed. These proof observations do not expand the selected publication
 scope or refresh unpublished records and clocks.
 
 Paths are vault-relative Markdown files or directories, not globs or native IDs.
@@ -129,8 +132,9 @@ since, daemon or arbitrary conflict-winner options.
 
 `sync import` publishes the human-readable format by default. It requires explicit global `--kb-id` and a new directory without
 content or a prior manifest. It establishes the initial common baseline; even a
-clean existing vault cannot be re-imported. Later edits from either endpoint are
-inputs to three-way sync. Re-importing or overwriting a whole file is not a merge.
+clean existing vault cannot be re-imported. Later local edits are desired source;
+native-only source changes require a separate explicitly authorized adoption.
+Ordinary sync never selects a winner by timestamp or overwrites local source from native.
 
 | Import option | Scope |
 | --- | --- |
@@ -147,13 +151,12 @@ raw short codes do not certify writable semantics. The import receipt reports
 limited to the declared scope and snapshot time. Subtree or known-ID inspection
 cannot discover new top-level roots or prove current global completeness.
 
-Continuous sync probes bound IDs using public `findMany` batches of at most 50,
-then fully reads new descendants reached through selected Rems' exact child lists.
-Receipts report `discoveryScope: "bound-descendants"` when new IDs are found,
-otherwise `"bound-ids"`, and always `globalDiscoveryComplete: false`; this is
-distinct from the historic initial import receipt. Incomplete reads, missing
-objects and reparenting are explicit failures or conflicts, not silently omitted
-content. New top-level roots are not
+Ordinary sync probes bound IDs using public `findMany` batches of at most 50.
+New native descendants remain structural conflicts; they are not recursively read
+or imported by the publisher. Receipts report `discoveryScope: "bound-ids"` and
+`globalDiscoveryComplete: false`, distinct from the initial import receipt.
+Incomplete reads, missing objects and reparenting are explicit failures or
+conflicts, not silently omitted content. New top-level roots are not
 discoverable in this scope. Public `getAll` exceeds the current Bridge serializer's
 1,000-item limit, and empty siblings on parentless anchors do not enumerate roots.
 Global discovery needs a separately authorized Bridge change, release and device
@@ -492,6 +495,24 @@ and `planHash`, with fresh proof for the parent and all new leaves. Reapplying t
 set after publication refuses the now-bound IDs. This is not discovery, incoming
 sync, a timestamp merge, or permission to modify native Cards or history.
 
+When the user explicitly approves native source changes for entire named files,
+use `sync baseline-align DIR --accept-native-source --path 'Exact.md'` (repeat
+exact file paths as needed). This separate one-time mode requires clean local
+source; directories, implicit whole-vault selection and mixed acceptance modes
+are refused. It may replace the approved files with the current rendered native
+text, back text, tags, references and child order, including completely read new
+descendants inside those documents. Missing/deleted or reparented old nodes,
+new Document/Folder boundaries, cross-file additions, changed Card identities,
+existing content-kind changes and other immutable drift are refused. Existing
+Cards/history, facts, original records and block identities are retained; no
+outside file or verification-only dependency is adopted. Preview returns
+`sourceChangedIds`, `sourceChanges` (field names, added-child IDs and old-order
+changes), and `newIds`, never body text. Missing tag initialization is reported
+separately by `tagsAligned`. Review this exact scope before `--apply --plan-hash
+HASH`; fresh full observations and FrozenFiles still must match. Local staging
+and `sync recover` are shared with ordinary baseline alignment. This does not
+enable incoming/LWW behavior in subsequent ordinary sync.
+
 `sync format DIR` is an explicit offline conversion of a clean, sealed legacy
 publication to human Markdown, or canonical rendering of a clean already-human
 publication. It requires a complete manifest, no pending remote
@@ -532,7 +553,7 @@ records its native type and directly included Rem IDs; it does not grant Portal
 write support. Raw-record preservation, metadata mapping, writable support and
 live/UI verification are separate coverage claims.
 
-New native-only children are structural drift, not incoming source. No recursive
+In ordinary publication, new native-only children are structural drift, not incoming source. No recursive
 subtree discovery is performed during publication. Explicit import is available
 only as bootstrap into a new empty directory. Existing moves remain unsupported.
 

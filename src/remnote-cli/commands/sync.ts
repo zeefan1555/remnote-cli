@@ -36,6 +36,7 @@ interface SyncOptions {
   expectedFileHash?: string;
   acceptNewParent?: string;
   acceptNewChild?: string[];
+  acceptNativeSource?: boolean;
 }
 
 interface SelectionOptions {
@@ -222,6 +223,10 @@ export function registerSyncCommands(program: Command): void {
     )
     .option('--apply', 'Publish the exact reviewed local baseline alignment')
     .option('--plan-hash <sha256>', 'Exact preview hash required with --apply')
+    .option(
+      '--accept-native-source',
+      'Explicit one-time source adoption for exact --path files only; never write RemNote'
+    )
     .option(
       '--accept-new-parent <id>',
       'Explicitly accept exact new native leaves under this bound parent'

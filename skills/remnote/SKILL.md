@@ -140,6 +140,12 @@ Only when the user also authorizes exact native additions, add
 complete reviewed set). This accepts supported unbound leaves only, preserves
 old child order and parent kind, and rejects every other content/identity drift;
 never infer these IDs from a failed sync or use this as automatic conflict repair.
+For separately approved whole-file native source adoption, use
+`--accept-native-source --path 'Exact.md'` instead. Exact files and clean source
+are required; inspect `sourceChanges` and `newIds` before exact-hash apply. It may
+re-render only those approved files, preserving existing Cards/history/originals;
+deletion, reparenting, cross-file additions and existing kind changes still stop.
+This one-time operation never enables incoming changes in ordinary sync.
 This separate local publication makes zero native writes and is never an implicit
 step of bind, capture or ordinary sync. Capture also requires clean source, one separate direct
 physical non-card TODO subtree, and a preexisting exact native reference plus

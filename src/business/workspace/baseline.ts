@@ -1,5 +1,6 @@
 import { insertBaselineTags } from './baseline-tags.js';
 import { insertBaselineChildren, verifyNewChildren } from './baseline-children.js';
+import { nativeSourceChanges, readNativeSourceClosure } from './baseline-source.js';
 import { readPrivate, withWorkspaceLock, workspaceDirectory } from './files.js';
 import {
   IDENTITY,
@@ -105,11 +106,19 @@ export async function alignWorkspaceBaseline(
     planHash?: string;
     acceptNewParent?: string;
     acceptNewChild?: string[];
+    acceptNativeSource?: boolean;
   } = {}
 ) {
   if (options.apply && !/^[a-f0-9]{64}$/.test(options.planHash ?? ''))
     throw new Error('baseline-align --apply requires an exact --plan-hash');
-  const addedIds = options.acceptNewChild ?? [];
+  let addedIds = options.acceptNewChild ?? [];
+  if (
+    options.acceptNativeSource &&
+    (!options.paths?.length || options.acceptNewParent !== undefined || addedIds.length)
+  )
+    throw new Error(
+      'Native source adoption requires explicit exact --path files and cannot mix acceptance modes'
+    );
   if (options.acceptNewParent !== undefined || addedIds.length) {
     if (
       !idSchema.safeParse(options.acceptNewParent).success ||
@@ -134,6 +143,11 @@ export async function alignWorkspaceBaseline(
       throw new Error(`Baseline alignment refused: ${context.diagnostics[0]!.code}`);
     if (context.dirty.length || context.missing.length)
       throw new Error('Baseline alignment refuses unpublished local source edits');
+    if (
+      options.acceptNativeSource &&
+      options.paths!.some((path) => !Object.hasOwn(previous.documents, path))
+    )
+      throw new Error('Native source adoption requires exact bound file paths, never directories');
     const selection = await selectFiles(context, options.paths);
     if (!selection.files.length) throw new Error('Baseline alignment selected no bound documents');
     const ids = tagSet(selection.files.flatMap((path) => previous.documents[path]!.nodeIds));
@@ -159,6 +173,10 @@ export async function alignWorkspaceBaseline(
     if ((await backend.identity()).kbId !== previous.kbId)
       throw new Error('Native KB binding changed');
     const observed = await readExact(backend, [...ids, ...addedIds], context);
+    if (options.acceptNativeSource)
+      addedIds = await readNativeSourceClosure(context, selection.files, observed, (newIds) =>
+        readExact(backend, newIds, context)
+      );
     if (options.acceptNewParent)
       verifyNewChildren(
         context.native.get(options.acceptNewParent)!,
@@ -188,7 +206,18 @@ export async function alignWorkspaceBaseline(
       }
       const before = context.native.get(id)!;
       const next = alignRecord(
-        id === options.acceptNewParent ? { ...before, children: current.children } : before,
+        options.acceptNativeSource && ids.includes(id)
+          ? {
+              ...before,
+              text: current.text,
+              backText: current.backText,
+              children: current.children,
+              tags: current.tags,
+              references: current.references,
+            }
+          : id === options.acceptNewParent
+            ? { ...before, children: current.children }
+            : before,
         current
       );
       if (ids.includes(id)) nextNative.set(id, next);
@@ -199,6 +228,13 @@ export async function alignWorkspaceBaseline(
         nodeKind(nextNative.get(options.acceptNewParent)!, nextNative)
     )
       throw new Error('Exact new children would change the existing parent content kind');
+    if (options.acceptNativeSource)
+      for (const id of ids)
+        if (
+          nodeKind(context.native.get(id)!, context.native) !==
+          nodeKind(nextNative.get(id)!, nextNative)
+        )
+          throw new Error(`Native source adoption cannot change an existing content kind: ${id}`);
     const next = structuredClone(previous);
     next.tagIds = registerTagIds(nextNative, neededTags, previous.tagIds);
     const paths = new Map(
@@ -247,7 +283,11 @@ export async function alignWorkspaceBaseline(
         const rem = nextNative.get(node.key)!;
         if (original.tags == null) {
           tagsAligned++;
-          if (node.tags?.length && hash(tagSet(node.tags)) !== hash(tagSet(rem.tags!)))
+          if (
+            !options.acceptNativeSource &&
+            node.tags?.length &&
+            hash(tagSet(node.tags)) !== hash(tagSet(rem.tags!))
+          )
             throw new Error(
               `Existing local tags disagree with native observation: ${path}/${node.key}`
             );
@@ -266,7 +306,15 @@ export async function alignWorkspaceBaseline(
             portalFieldsAligned++;
       }
       const source = await context.inputs.read(path);
-      let content = insertBaselineTags(path, source, rootTags, blockTags);
+      let content = options.acceptNativeSource
+        ? renderDocument(rootId, path, nextNative, paths, {
+            blocks,
+            tagIds: next.tagIds,
+            links,
+            attributes: before.attributes,
+            source: before,
+          })
+        : insertBaselineTags(path, source, rootTags, blockTags);
       const accepting =
         options.acceptNewParent && previous.entries[options.acceptNewParent]!.path === path;
       let renderedNodes = new Map<string, OutlineNode>();
@@ -305,18 +353,19 @@ export async function alignWorkspaceBaseline(
       );
       if (
         parsed.diagnostics.length ||
-        hash(
-          before.nodes.map((node) =>
-            authored(
-              node.key === options.acceptNewParent
-                ? { ...node, children: nextNative.get(node.key)!.children }
-                : node
-            )
-          )
-        ) !==
+        (!options.acceptNativeSource &&
           hash(
-            parsed.document.nodes.filter((node) => !addedIds.includes(node.key)).map(authored)
-          ) ||
+            before.nodes.map((node) =>
+              authored(
+                node.key === options.acceptNewParent
+                  ? { ...node, children: nextNative.get(node.key)!.children }
+                  : node
+              )
+            )
+          ) !==
+            hash(
+              parsed.document.nodes.filter((node) => !addedIds.includes(node.key)).map(authored)
+            )) ||
         (accepting &&
           addedIds.some(
             (id) =>
@@ -355,7 +404,7 @@ export async function alignWorkspaceBaseline(
             rawPath,
             rawHash: hash(raw),
             nativeHash: hash(rem),
-            editable: true,
+            editable: node.kind !== 'opaque',
           };
           if (rem.public) {
             const publicText = JSON.stringify(rem.public, null, 2) + '\n';
@@ -391,16 +440,27 @@ export async function alignWorkspaceBaseline(
               tags: rem.tags,
               powerupPresence: rem.powerupPresence,
               ...nativeProof(rem),
-              ...(addedIds.includes(id) ? { acceptedRecordHash: hash(rem) } : {}),
+              ...(addedIds.includes(id) || options.acceptNativeSource
+                ? { acceptedRecordHash: hash(rem) }
+                : {}),
             },
           ])
       );
     const nativeBefore = proof(observed);
+    const sourceChanges = options.acceptNativeSource
+      ? ids
+          .map((id) => ({
+            ...nativeSourceChanges(context.native.get(id)!, observed.get(id)!),
+            path: previous.entries[id]!.path,
+          }))
+          .filter((change) => change.fields.length)
+      : [];
     const planHash = hash({
       previous,
       files: frozen.hashes(),
       selection,
       acceptedChildren: { parent: options.acceptNewParent ?? null, ids: addedIds },
+      acceptNativeSource: options.acceptNativeSource === true,
       nativeBefore,
       next,
       writes: [...writes],
@@ -417,6 +477,10 @@ export async function alignWorkspaceBaseline(
       portalFieldsAligned,
       sealsAligned,
       childrenAccepted: addedIds.length,
+      sourceFilesAccepted: options.acceptNativeSource ? selection.files.length : 0,
+      sourceChangedIds: sourceChanges.map((change) => change.id),
+      sourceChanges,
+      newIds: addedIds,
       localFilesChanged: writes.size,
       nativeProofHash: hash(nativeBefore),
       documentIdentityHash: hash(workspaceIdentity(next).documents),
