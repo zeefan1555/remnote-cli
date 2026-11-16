@@ -6,6 +6,7 @@ import { LocalState } from '../../remnote-cli/client/local-state.js';
 import {
   allFiles,
   assertFileSize,
+  directoryIdentity,
   isContentMarkdown,
   MAX_METADATA_BYTES,
   OFFICIAL_MANIFEST,
@@ -639,8 +640,8 @@ export class InspectionInputs {
     this.documents.set(path, { source, prepared });
     return prepared;
   }
-  freeze(): Promise<FrozenFiles> {
-    return FrozenFiles.capture(this.root, this.paths, this.read);
+  freeze(requiredDirectories: string[] = []): Promise<FrozenFiles> {
+    return FrozenFiles.capture(this.root, this.paths, this.read, requiredDirectories);
   }
 }
 
@@ -787,7 +788,37 @@ export async function inspectLocal(
     if (!paths.has(id)) {
       missing.push(path);
       dirty.push(path);
+      if ([...currentFiles.keys()].some((current) => pathKey(current) === pathKey(path)))
+        fail(
+          path,
+          1,
+          'PATH_IDENTITY_COLLISION',
+          'Missing document path is occupied by another identity'
+        );
+      try {
+        await directoryIdentity(root, dirname(path));
+      } catch {
+        fail(
+          path,
+          1,
+          'MISSING_DIRECTORY',
+          'Missing or unsafe parent directory cannot prove deletion intent'
+        );
+      }
     }
+  const directories = new Map<string, string[]>();
+  for (const { path } of expectedRoots.values()) {
+    const parent = dirname(path);
+    directories.set(parent, [...(directories.get(parent) ?? []), path]);
+  }
+  for (const [parent, tracked] of directories)
+    if (tracked.length > 1 && tracked.every((path) => missing.includes(path)))
+      fail(
+        tracked[0]!,
+        1,
+        'AMBIGUOUS_DIRECTORY',
+        `All tracked documents disappeared from ${parent}; possible directory or mount failure`
+      );
   const allPaths = new Map([
     ...paths,
     ...missing.map((path) => [state.documents[path]!.rootId, path] as const),

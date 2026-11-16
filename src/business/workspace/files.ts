@@ -67,6 +67,22 @@ export async function workspaceDirectory(input: string, create = false): Promise
   return realpath(path);
 }
 
+/** Bind every ancestor of a missing document to an existing non-symlink directory. */
+export async function directoryIdentity(root: string, name: string): Promise<string> {
+  if (isAbsolute(name) || name.split('/').includes('..'))
+    throw new Error('Unsafe workspace directory');
+  let current = root;
+  const result: string[] = [];
+  for (const part of ['', ...name.split('/').filter((part) => part && part !== '.')]) {
+    if (part) current = join(current, part);
+    const stat = await lstat(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0)
+      throw new Error('Unsafe workspace directory');
+    result.push(`${stat.dev}:${stat.ino}`);
+  }
+  return result.join('/');
+}
+
 async function safePath(root: string, name: string, createParents = false): Promise<string> {
   const path = resolve(root, name),
     rel = relative(root, path);

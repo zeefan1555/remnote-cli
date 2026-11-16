@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import {
   allFiles,
   readPrivate,
@@ -665,7 +666,7 @@ export async function resumeWorkspace(
           status: 'verified',
           complete: true,
           resumed: true,
-          existingCardsPreserved: true,
+          ...(journal.final!.deleted.length ? {} : { existingCardsPreserved: true }),
           planHash,
           ids: journal.ids,
           deleted: journal.final!.deleted,
@@ -787,7 +788,8 @@ async function synchronizeWorkspace(
       await saveState(root, state);
       stateHash = hash(state);
     }
-    const frozen = await context.inputs.freeze();
+    const frozen = await context.inputs.freeze(context.missing.map((path) => dirname(path)));
+    localPlan.deletionDirectoriesHash = hash(frozen.directoryHashes());
     localPlan.inputHash = hash(frozen.hashes());
     const store = localStore(state.kbId);
     if (!resuming) await requirePreviewOnly(state);
@@ -1230,7 +1232,7 @@ async function synchronizeWorkspace(
         ((plan.deletion || removesTags) && !identity.mirrorDestructive)
       )
         throw new Error('Live KB/write permission changed');
-      if (!checkedWriteBoundary) {
+      if (!checkedWriteBoundary || plan.deletion || removesTags) {
         // Expire inspection caches after the final native guard, before the first mutation.
         await frozen.check();
         if (hash(await loadState(root)) !== stateHash)
@@ -1518,7 +1520,11 @@ async function synchronizeWorkspace(
         metadataRefresh: metadataChanged,
         deleted: plan.deletion?.ids ?? [],
         nativeCards: newCards,
-        ...(resuming ? { existingCardsPreserved: true } : { cardsPreserved: true }),
+        ...(plan.deletion
+          ? { checkedSurvivingCardIdentitiesPreserved: true, checkedSurvivingRemIds: protectedIds }
+          : resuming
+            ? { existingCardsPreserved: true }
+            : { cardsPreserved: true }),
         remoteWrites,
         ...(resuming
           ? {

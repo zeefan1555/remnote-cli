@@ -1,5 +1,6 @@
 import type { LocalContext } from './local.js';
 import type { WorkspacePlan } from './types.js';
+import { nodeKind } from './markdown.js';
 
 /** Follow a bound document identity through a local rename without guessing by filename. */
 export function deletionPath(context: LocalContext, id: string): string {
@@ -21,6 +22,14 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
   for (const path of context.missing)
     for (const id of context.state.documents[path]!.nodeIds) missing.add(id);
   if (!missing.size) return undefined;
+  if (
+    [...context.parsed.values()].some((doc) =>
+      doc.nodes.some((node) => node.key.startsWith('new:') && !node.explicitNewAnchor)
+    )
+  )
+    throw new Error(
+      'Ambiguous deletion with an unanchored new node; restore its identity or add an explicit new anchor'
+    );
 
   for (const id of missing) {
     const rem = context.native.get(id);
@@ -29,6 +38,12 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
     if (rem.unsupported) throw new Error(`Cannot delete unsupported native content: ${id}`);
     if (context.state.rootIds.includes(id))
       throw new Error(`Cannot delete an imported scope root: ${id}`);
+    if (rem.parent && !missing.has(rem.parent)) {
+      const parent = context.native.get(rem.parent);
+      if (!parent) throw new Error(`Cannot verify external deletion parent: ${id}`);
+      if (rem.cardItem === true || nodeKind(parent, context.native) === 'multiline')
+        throw new Error(`Cannot delete an individual answer from an existing card: ${id}`);
+    }
     for (const child of rem.children)
       if (!missing.has(child))
         throw new Error(
@@ -45,7 +60,17 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
   for (const [path, document] of context.parsed)
     for (const node of document.nodes) {
       if (node.kind === 'mount' || missing.has(node.key)) continue;
-      const target = referencedIds([node.text, node.backText]).find((id) => missing.has(id));
+      const native = context.native.get(node.key);
+      const target = [
+        ...referencedIds([
+          node.text,
+          node.backText,
+          ...(node.kind === 'opaque' && native ? [native.text, native.backText] : []),
+        ]),
+        ...(node.readonlyLinks ?? []).map((link) => link.id),
+        ...(node.kind === 'opaque' ? (native?.references ?? []) : []),
+        ...(node.kind === 'opaque' ? (native?.portal?.directlyIncludedRemIds ?? []) : []),
+      ].find((id) => missing.has(id));
       if (target)
         throw new Error(`Local reference in ${path} still points to deleted identity ${target}`);
     }

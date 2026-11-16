@@ -625,7 +625,7 @@ Current receipt fields (arrays contain exact Rem IDs unless noted):
 | Status | Fields and meaning |
 | --- | --- |
 | `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `converged`, `outgoing`, `metadataRefresh`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
-| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `converged`, native-ID `outgoing`, `metadataRefresh`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
+| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `converged`, native-ID `outgoing`, `metadataRefresh`, `deleted`, `nativeCards`, `atomic: false`. A deletion reports `checkedSurvivingCardIdentitiesPreserved` and exact `checkedSurvivingRemIds`; a non-deletion may report `cardsPreserved`. |
 | `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
 | planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `remoteWrites: 0`; no apply is authorized by this receipt |
 
@@ -667,11 +667,29 @@ unverified parents, unsupported native structures, remote drift, disabled plugin
 gates and incomplete journal outcomes fail closed. The global `--allow-destructive`
 flag is not needed for mirror deletion or association-only tag removal; other SDK
 operations keep their existing permission rules.
-An unanchored new node beside a removed bound sibling is ambiguous with an
+An unanchored new node anywhere in a deletion batch is ambiguous with an
 accidentally lost anchor and stops before any native call. Give a deliberate new
 node an explicit new block anchor or split the edits. A sync is bounded to 100
 deleted identities; imported scope roots and targets referenced by surviving
-local nodes cannot be deleted.
+local nodes cannot be deleted. Individual answers of a surviving multiline card
+cannot be deleted: native Card identity preservation has not been proven. Delete
+the whole card when intended; do not claim its deleted history is preserved.
+Missing or replaced parent directories, identity collisions, and the loss of all
+tracked documents in a directory containing multiple documents are ambiguous and
+stop before native writes. Directory deletion is not supported.
+The parent directory identity and complete file set are rechecked before and
+after every destructive mutation; a mid-batch change stops the remainder and
+leaves its journal for exact reconciliation. These checks are optimistic, not an
+atomic filesystem/native transaction. A missing single document in an existing
+directory remains authorized deletion intent, not proof against every possible
+mount failure that predates inspection.
+
+Local reference checks include surviving opaque projections, but do not discover
+remote-only references in unselected or unbound Rems. `partial` and
+`globalDiscoveryComplete: false` explicitly prevent a full-KB safety claim.
+`checkedSurvivingCardIdentitiesPreserved` covers id/remId/type only for the exact
+`checkedSurvivingRemIds`, not deleted cards, unselected content or review history;
+guarded deletion resume does not make this preservation claim.
 
 `sync read DIR PATH` always returns `deletion: {roots, ids}` for that exact
 tracked file. A missing tracked file returns `content: null`, `fileHash: hash(null)`

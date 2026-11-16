@@ -48,6 +48,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Fail closed on ambiguous identity loss or path replacement, missing directory
+  evidence, surviving opaque references and answer-only deletion; recheck
+  frozen local files and directory identity at each destructive boundary. Delete
+  receipts describe only checked surviving Card identities, never deleted history.
 - Preserve exact-target readonly reference labels when a local referenced title
   changes, including whole-document rendering, format, resume and publication
   recovery. Keep full opaque projection hashes and native reference/Portal guards;

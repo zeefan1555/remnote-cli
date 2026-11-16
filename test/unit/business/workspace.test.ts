@@ -42,6 +42,7 @@ import {
   inspectLocal,
   publicationStore,
   prepareSnapshot,
+  writeSnapshot,
 } from '../../../src/business/workspace/local.js';
 import { LocalState } from '../../../src/remnote-cli/client/local-state.js';
 import * as fileOps from '../../../src/business/workspace/files.js';
@@ -5508,6 +5509,12 @@ describe('controlled RemNote workspace', () => {
     const parent = read.deletion.roots[0]!.parent!;
     expect(result.status).toBe('verified');
     expect(result.deleted).toEqual(read.deletion.ids);
+    expect(result).not.toHaveProperty('cardsPreserved');
+    expect(result).not.toHaveProperty('existingCardsPreserved');
+    expect(result).toMatchObject({
+      checkedSurvivingCardIdentitiesPreserved: true,
+      checkedSurvivingRemIds: expect.not.arrayContaining(['question', 'answer', 'subdoc']),
+    });
     expect(result.verification.fileHash).toBe(read.fileHash);
     expect(result.deletionParents[parent]!.observed.children).not.toContain('question');
     expect(result.verification.observedHashes[parent]).toBe(
@@ -5541,13 +5548,17 @@ describe('controlled RemNote workspace', () => {
     expect(result.verification.observedHashes[parent]).toBe(
       result.deletionParents[parent]!.observed.revisionHash
     );
-    expect(await resumeWorkspace(directory, async () => f.backend, result.planHash)).toMatchObject({
+    const recovered = await resumeWorkspace(directory, async () => f.backend, result.planHash);
+    expect(recovered).toMatchObject({
       status: 'verified',
       deleted: ['subdoc'],
       remoteWrites: 0,
       outline: { path, nodes: {} },
       deletionParents: { [parent]: { observed: { revisionHash: expect.any(String) } } },
     });
+    expect(recovered).not.toHaveProperty('cardsPreserved');
+    expect(recovered).not.toHaveProperty('existingCardsPreserved');
+    expect(recovered).not.toHaveProperty('checkedSurvivingCardIdentitiesPreserved');
     f.rems.set('subdoc', native('subdoc'));
     await expect(
       resumeWorkspace(directory, async () => f.backend, result.planHash)
@@ -5612,6 +5623,138 @@ describe('controlled RemNote workspace', () => {
     expect(f.calls).toEqual([]);
   });
 
+  it('blocks cross-parent movement with a lost anchor before native access', async () => {
+    const f = await prepare((fixture) => {
+      fixture.rems.get('question')!.children.push('answer2');
+      fixture.rems.set(
+        'answer2',
+        native('answer2', ['Also'], { parent: 'question', cardItem: true })
+      );
+    });
+    await edit(
+      f.path,
+      (source) =>
+        source.replace(`    - Because ^${f.state.entries.answer!.blockId}\n`, '') + '\n- Because\n'
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+      'unanchored new node'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('blocks deletion if a surviving opaque native node references its target', async () => {
+    const f = await prepare((fixture) => {
+      fixture.rems.get('opaque')!.text = [
+        { i: 'm', text: 'Cloze', cId: 'cloze-1' },
+        { i: 'q', _id: 'question' },
+      ];
+    });
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+      'still points to deleted identity'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('does not interpret an absent tracked parent directory as deletion', async () => {
+    const f = await prepare();
+    await rename(join(directory, 'HOME'), join(temporary, 'offline-home'));
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+      'MISSING_DIRECTORY'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('blocks loss of every tracked document in an existing multi-document directory', async () => {
+    const f = await prepare((fixture) => {
+      fixture.rems.get('daily')!.children.push('subdoc2');
+      fixture.rems.set(
+        'subdoc2',
+        native('subdoc2', ['Another child'], { document: true, parent: 'daily' })
+      );
+    });
+    await rm(join(directory, f.state.entries.subdoc!.path));
+    await rm(join(directory, f.state.entries.subdoc2!.path));
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+      'AMBIGUOUS_DIRECTORY'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+
+  it('does not treat another document occupying the original path as deletion', async () => {
+    const rems = [native('A', ['A'], { document: true }), native('B', ['B'], { document: true })];
+    await mkdir(directory, { mode: 0o700 });
+    const state = await writeSnapshot(directory, 'kb', rems);
+    const a = state.entries.A!.path,
+      b = state.entries.B!.path;
+    await rename(join(directory, a), join(temporary, 'held-original'));
+    await rename(join(directory, b), join(directory, a));
+    const factory = vi.fn(async () => {
+      throw new Error('Must stay offline');
+    });
+    await expect(syncWorkspace(directory, factory, { apply: true, paths: [a] })).rejects.toThrow(
+      'PATH_IDENTITY_COLLISION'
+    );
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the missing file parent directory after remote reads and before removal', async () => {
+    const f = await prepare(),
+      path = f.state.entries.subdoc!.path;
+    await rm(join(directory, path));
+    const original = f.backend.readProbe;
+    f.backend.readProbe = vi.fn(async (...args) => {
+      await rename(join(directory, 'HOME/Today'), join(temporary, 'offline-empty-parent'));
+      f.backend.readProbe = original;
+      return original(...args);
+    });
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [path] })
+    ).rejects.toThrow();
+    expect(f.backend.remove).not.toHaveBeenCalled();
+    expect(f.rems.has('subdoc')).toBe(true);
+  });
+
+  it('stops the deletion batch when a missing local file reappears after the first remove', async () => {
+    const f = await prepare((fixture) => {
+      fixture.rems.get('home')!.children.push('subdoc2');
+      fixture.rems.set(
+        'subdoc2',
+        native('subdoc2', ['Another child'], { document: true, parent: 'home' })
+      );
+    });
+    const a = f.state.entries.subdoc!.path,
+      b = f.state.entries.subdoc2!.path;
+    const source = await readPrivate(directory, a);
+    await rm(join(directory, a));
+    await rm(join(directory, b));
+    const original = f.backend.removeMirror;
+    f.backend.removeMirror = vi.fn(async (id) => {
+      await original(id);
+      await writePrivate(directory, a, source);
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, { apply: true });
+    expect(result).toMatchObject({ status: 'unknown', complete: false, remoteWrites: 1 });
+    expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+    expect(f.rems.has('subdoc2')).toBe(true);
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true })
+    ).rejects.toThrow();
+    expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts a deliberate anchored new sibling and deletion under the same parent', async () => {
     const f = await prepare();
     await edit(f.path, (source) =>
@@ -5666,7 +5809,7 @@ describe('controlled RemNote workspace', () => {
     expect(f.backend.remove).not.toHaveBeenCalled();
   });
 
-  it('automatically mirrors a removed answer while preserving the surviving card', async () => {
+  it('blocks answer-only removal before a backend that would replace the surviving card identity', async () => {
     const f = await prepare((fixture) => {
       fixture.rems.get('question')!.children.push('answer2');
       fixture.rems.set(
@@ -5677,13 +5820,29 @@ describe('controlled RemNote workspace', () => {
     await edit(f.path, (source) =>
       source.replace(`    - Because ^${f.state.entries.answer!.blockId}\n`, '')
     );
-    expect(
-      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-    ).toMatchObject({
-      status: 'verified',
-      deleted: ['answer'],
+    f.backend.removeMirror = vi.fn(async () => {
+      f.rems.get('question')!.cards = [
+        {
+          id: 'replacement-card',
+          remId: 'question',
+          type: 'forward',
+          createdAt: 1,
+          repetitionHistory: [],
+          nextRepetitionTime: null,
+          lastRepetitionTime: null,
+          timesWrongInRow: null,
+        },
+      ];
+      f.rems.delete('answer');
     });
-    expect(f.rems.get('question')!.children).toEqual(['answer2']);
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('individual answer');
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.backend.removeMirror).not.toHaveBeenCalled();
+    expect(f.rems.has('answer')).toBe(true);
+    expect(f.rems.get('question')!.children).toEqual(['answer', 'answer2']);
     expect(await f.backend.cardFacts('question')).toEqual([
       expect.objectContaining({ id: 'card_question' }),
     ]);

@@ -155,6 +155,7 @@ export interface WorkspaceChange {
   tags?: { before: string[]; after: string[] };
 }
 export interface WorkspacePlan {
+  deletionDirectoriesHash?: string;
   contentAuthority: 'local';
   version: 1;
   directory: string;
