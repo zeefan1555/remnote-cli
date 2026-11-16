@@ -48,7 +48,10 @@ export async function readNativeSourceClosure(
     if (before.feedback)
       throw new Error(`Native source adoption refuses feedback-partitioned nodes: ${id}`);
     if (
-      (before.type === 6 || current.type === 6) &&
+      (before.type === 6 ||
+        current.type === 6 ||
+        before.portal != null ||
+        current.portal != null) &&
       hash(before.children) !== hash(current.children)
     )
       throw new Error(`Native source adoption cannot traverse changed Portal children: ${id}`);
@@ -57,6 +60,10 @@ export async function readNativeSourceClosure(
     const pending = new Map<string, { parent: string; path: string }>();
     for (const [id, path] of owners) {
       const rem = observed.get(id)!;
+      const before = context.native.get(id);
+      // A Portal is a reference boundary, never a source of newly traversed nodes.
+      if (rem.type === 6 || rem.portal != null || before?.type === 6 || before?.portal != null)
+        continue;
       if (new Set(rem.children).size !== rem.children.length)
         throw new Error(`Native source adoption refuses duplicate children: ${id}`);
       for (const child of rem.children) {
@@ -83,6 +90,7 @@ export async function readNativeSourceClosure(
       if (
         rem.parent !== owner.parent ||
         rem.type === 6 ||
+        rem.portal != null ||
         rem.document !== false ||
         rem.folder !== false ||
         typeof rem.cardItem !== 'boolean' ||

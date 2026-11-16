@@ -60,6 +60,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Require exact bound TODO/DONE roles and freshly observed empty physical feedback
+  partitions before mirrored deletion; unknown or changed feedback stops mutation.
+- Never discover native descendants through a Portal during explicit source adoption, including when
+  either sealed or fresh type is unknown but Portal metadata is present.
 - Fail closed on ambiguous identity loss or path replacement, missing directory
   evidence, any known surviving native references and answer-only deletion; recheck
   frozen local files and directory identity at each destructive boundary. Delete

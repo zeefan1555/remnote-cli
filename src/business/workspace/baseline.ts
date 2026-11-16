@@ -139,6 +139,8 @@ export async function alignWorkspaceBaseline(
       throw new Error(
         'Baseline alignment requires a complete baseline with no pending native journal'
       );
+    if (previous.feedbackRoles && (options.acceptNativeSource || parents.length || addedIds.length))
+      throw new Error('Native source adoption requires completion before feedback roles are bound');
     const context = await inspectLocal(root, previous);
     if (context.diagnostics.length)
       throw new Error(`Baseline alignment refused: ${context.diagnostics[0]!.code}`);

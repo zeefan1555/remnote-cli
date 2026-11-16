@@ -43,7 +43,7 @@ import { nodeKind } from './markdown.js';
 import { partitionRemote } from './feedback-partition.js';
 import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
-import { deletionPath, planDeletion } from './deletion.js';
+import { deletionPath, planDeletion, requireEmptyDeletionFeedback } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
 import {
   foldResume,
@@ -905,6 +905,30 @@ async function synchronizeWorkspace(
     const remote =
       rebuiltRemote ??
       (await readRemote(context, localPlan, backend, knownPowerupCodes(context.native)));
+    if (localPlan.deletion && state.feedbackRoles)
+      for (const role of [state.feedbackRoles.todoTagId, state.feedbackRoles.doneTagId])
+        for (let id: string | null = role; id; id = context.native.get(id)?.parent ?? null) {
+          const before = context.native.get(id),
+            current = remote.get(id);
+          if (
+            !before ||
+            !current ||
+            publicationRevisionHash(withNativeSnapshot(before, current)) !==
+              publicationRevisionHash(before)
+          )
+            throw new Error(`Feedback role identity or content changed: ${id}`);
+        }
+    const feedbackDeletionIds = [
+      ...new Set([
+        ...(localPlan.deletion?.ids ?? []),
+        ...(localPlan.deletion?.roots ?? []).flatMap((root) => (root.parent ? [root.parent] : [])),
+      ]),
+    ];
+    for (const id of feedbackDeletionIds) {
+      const rem = remote.get(id);
+      if (!rem) throw new Error(`Missing native deletion feedback evidence: ${id}`);
+      requireEmptyDeletionFeedback(rem, state.feedbackRoles);
+    }
     const nativeBefore = proofPath
       ? (resuming?.proof?.nativeBefore ??
         Object.fromEntries([...remote].map(([id, rem]) => [id, nativeProof(rem)])))
@@ -1092,7 +1116,6 @@ async function synchronizeWorkspace(
         const parent = expected.get(root.parent)!;
         if (
           parent.unsupported ||
-          parent.feedback ||
           nodeKind(parent, new Map([...context.native, ...expected])) === 'opaque'
         )
           throw new Error(`Deletion parent lacks verified native structure: ${root.parent}`);
@@ -1203,7 +1226,10 @@ async function synchronizeWorkspace(
       const fresh = await readExact(
         backend,
         scopedIds.filter((id) => !createdIds.has(id)),
-        { powerupCodes: knownPowerupCodes(expected) }
+        {
+          powerupCodes: knownPowerupCodes(expected),
+          ...(plan.deletion && state.feedbackRoles ? { tags: true } : {}),
+        }
       );
       if (resuming) {
         for (const [id, rem] of await readExact(
@@ -1219,6 +1245,13 @@ async function synchronizeWorkspace(
         state.feedbackRoles,
         backend
       );
+      if (plan.deletion && (!step || step.endsWith(':delete')))
+        for (const id of feedbackDeletionIds) {
+          if (!expected.has(id)) continue;
+          const rem = fresh.get(id);
+          if (!rem) throw new Error(`Missing fresh deletion feedback evidence: ${id}`);
+          requireEmptyDeletionFeedback(rem, state.feedbackRoles);
+        }
       for (const id of scopedIds) {
         const rem = expected.get(id)!;
         const current = withNativeSnapshot(rem, fresh.get(id)!);

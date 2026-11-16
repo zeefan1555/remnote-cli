@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { idSchema, IDENTITY, workspaceIdentity } from './identity.js';
 import { withWorkspaceLock, workspaceDirectory } from './files.js';
-import { inspectLocal, localStore, prepareSnapshot } from './local.js';
+import { inspectLocal, localStore } from './local.js';
 import { requireNoPublication, stageSnapshot } from './publication.js';
 import { feedbackRolesSchema, feedbackRevision, readAttachment } from './feedback-partition.js';
 import { hash, type FeedbackRoles, type WorkspaceBackend, type WorkspaceRem } from './types.js';
@@ -103,10 +103,6 @@ export async function bindFeedbackRoles(
         throw new Error('Feedback roles are already bound to different IDs');
       return { status: 'bound', roles, remoteWrites: 0 };
     }
-    if ([...context.native.values()].some((rem) => !Array.isArray(rem.tags)))
-      throw new Error(
-        'Missing initial direct-tag evidence; feedback binding cannot initialize native baselines'
-      );
     const roleIds = [roles.todoTagId, roles.doneTagId];
     if (roleIds.some((id) => !context.native.has(id)))
       throw new Error('Roles require existing exact sealed native IDs');
@@ -128,36 +124,11 @@ export async function bindFeedbackRoles(
         publicationRevisionHash(context.native.get(id)!)
       )
         throw new Error('Feedback role identity changed since the sealed baseline');
-    const native = [...context.native.values()].map((rem) => ({
-      ...rem,
-      feedback: { roles, attachmentIds: [] },
-    }));
-    const prepared = await prepareSnapshot(
-      root,
-      state.kbId,
-      native,
-      state,
-      state,
-      frozen,
-      undefined,
-      undefined,
-      [],
-      context.parsed
-    );
-    prepared.state.feedbackRoles = roles;
-    prepared.state.tagIds = tagIds;
-    for (const [path, doc] of Object.entries(state.documents)) {
-      if (prepared.state.documents[path]?.fileHash !== doc.fileHash)
-        throw new Error(
-          `Feedback binding would change source bytes: ${path}; explicit source alignment required`
-        );
-      prepared.writes.delete(path);
-    }
-    prepared.writes.set(
-      IDENTITY,
-      JSON.stringify(workspaceIdentity(prepared.state), null, 2) + '\n'
-    );
-    await stageSnapshot(root, prepared.state, state, prepared.writes, frozen);
+    // Binding names roles only: no per-Rem partition is established or inferred.
+    // The selected operation must prove physical feedback independently.
+    const next = { ...state, feedbackRoles: roles, tagIds };
+    const writes = new Map([[IDENTITY, JSON.stringify(workspaceIdentity(next), null, 2) + '\n']]);
+    await stageSnapshot(root, next, state, writes, frozen);
     const after = await inspectLocal(root);
     if (after.diagnostics.length || after.dirty.length)
       throw new Error('Feedback binding local readback failed');

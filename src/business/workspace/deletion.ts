@@ -1,6 +1,25 @@
 import type { LocalContext } from './local.js';
-import type { WorkspacePlan } from './types.js';
+import { hash, type FeedbackRoles, type WorkspacePlan, type WorkspaceRem } from './types.js';
 import { nodeKind } from './markdown.js';
+
+/** Only exact, observed empty feedback partitions may participate in deletion. */
+export function requireEmptyDeletionFeedback(rem: WorkspaceRem, roles?: FeedbackRoles): void {
+  if (!roles) {
+    throw new Error(
+      'Deletion requires bound exact TODO/DONE feedback roles; no native writes were started'
+    );
+  }
+  if (
+    !rem.feedback ||
+    hash(rem.feedback.roles) !== hash(roles) ||
+    !Array.isArray(rem.feedback.attachmentIds) ||
+    rem.feedback.attachmentIds.length ||
+    !Array.isArray(rem.tags) ||
+    rem.tags.includes(roles.todoTagId) ||
+    rem.tags.includes(roles.doneTagId)
+  )
+    throw new Error(`Feedback or unknown feedback partition prevents deletion: ${rem.id}`);
+}
 
 /** Follow a bound document identity through a local rename without guessing by filename. */
 export function deletionPath(context: LocalContext, id: string): string {
@@ -26,14 +45,13 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
   for (const id of missing) {
     const rem = context.native.get(id);
     if (!rem) throw new Error(`Deleted local identity has no sealed native baseline: ${id}`);
-    if (rem.feedback) throw new Error(`Cannot delete feedback-partitioned source: ${id}`);
     if (rem.unsupported) throw new Error(`Cannot delete unsupported native content: ${id}`);
     if (context.state.rootIds.includes(id))
       throw new Error(`Cannot delete an imported scope root: ${id}`);
     if (rem.parent && !missing.has(rem.parent)) {
       const parent = context.native.get(rem.parent);
       if (!parent) throw new Error(`Cannot verify external deletion parent: ${id}`);
-      if (parent.unsupported || nodeKind(parent, context.native) === 'opaque' || parent.feedback)
+      if (parent.unsupported || nodeKind(parent, context.native) === 'opaque')
         throw new Error(
           `Cannot verify deletion parent native identity and structure: ${rem.parent}`
         );
@@ -86,4 +104,32 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
   if (ids.length > 100)
     throw new Error('One sync is limited to 100 deleted identities; split the local deletion');
   return { roots: roots.map((id) => ({ id, parent: context.native.get(id)!.parent })), ids };
+}
+
+/** Apply feedback guards only to selected deletions, not unrelated local edits. */
+export function requireSelectedDeletionFeedback(
+  context: LocalContext,
+  deletion: NonNullable<WorkspacePlan['deletion']>
+): void {
+  const roles = context.state.feedbackRoles;
+  if (!roles)
+    throw new Error(
+      'Deletion requires bound exact TODO/DONE feedback roles; no native writes were started'
+    );
+  if (deletion.ids.some((id) => id === roles.todoTagId || id === roles.doneTagId))
+    throw new Error('Cannot delete a bound TODO/DONE feedback role');
+  for (const id of [
+    ...deletion.ids,
+    ...deletion.roots.flatMap((root) => (root.parent ? [root.parent] : [])),
+  ]) {
+    const rem = context.native.get(id)!;
+    if (
+      !Array.isArray(rem.tags) ||
+      rem.tags.includes(roles.todoTagId) ||
+      rem.tags.includes(roles.doneTagId)
+    )
+      throw new Error(`Feedback or unknown feedback partition prevents deletion: ${id}`);
+    // Missing feedback is unproven, not empty. Live reads must prove it before writes.
+    if (rem.feedback) requireEmptyDeletionFeedback(rem, roles);
+  }
 }

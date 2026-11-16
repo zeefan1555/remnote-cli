@@ -76,6 +76,9 @@ import {
 } from '../../../src/business/workspace/publication.js';
 import type { Journal } from '../../../src/business/workspace/resume.js';
 import { formatWorkspace } from '../../../src/business/workspace/format.js';
+import { alignWorkspaceBaseline } from '../../../src/business/workspace/baseline.js';
+import { requireEmptyDeletionFeedback } from '../../../src/business/workspace/deletion.js';
+import { partitionRemote } from '../../../src/business/workspace/feedback-partition.js';
 import {
   bindFeedbackRoles,
   captureFeedback,
@@ -337,11 +340,289 @@ async function prepare(setup?: (f: ReturnType<typeof fixture>) => void) {
     path = state.entries.answer!.path;
   return { ...f, state, path };
 }
+async function bindDeletionRoles(f: Awaited<ReturnType<typeof prepare>>) {
+  await bindFeedbackRoles(directory, async () => f.backend, {
+    todoTagId: 'todo',
+    doneTagId: 'done',
+  });
+  f.calls.length = 0;
+  return { ...f, state: await loadState(directory) };
+}
+async function prepareDeletion(setup?: (f: ReturnType<typeof fixture>) => void) {
+  const f = await prepare((base) => {
+    setup?.(base);
+    base.rems.set('todo', native('todo', ['TODO']));
+    base.rems.set('done', native('done', ['DONE']));
+  });
+  return bindDeletionRoles(f);
+}
 async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
 }
 
 describe('exact feedback partition regression', () => {
+  async function boundWithoutFeedback() {
+    return prepareDeletion();
+  }
+
+  it('blocks deletion without bound exact roles before connecting or writing', async () => {
+    const f = await prepare();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Deletion requires bound exact TODO/DONE feedback roles');
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.rems.has('question')).toBe(true);
+    expect(f.rems.has('answer')).toBe(true);
+  });
+
+  it('rejects sealed nonempty, unknown, mismatched and lifecycle-tag feedback evidence', () => {
+    const roles = { todoTagId: 'todo', doneTagId: 'done' };
+    const empty = native('target', ['target'], { feedback: { roles, attachmentIds: [] } });
+    expect(() => requireEmptyDeletionFeedback(empty, roles)).not.toThrow();
+    for (const rem of [
+      { ...empty, feedback: { roles, attachmentIds: ['feedback'] } },
+      { ...empty, feedback: undefined },
+      { ...empty, feedback: { roles: { ...roles, doneTagId: 'other' }, attachmentIds: [] } },
+      { ...empty, tags: undefined },
+      { ...empty, tags: ['todo'] },
+      { ...empty, tags: ['done'] },
+    ])
+      expect(() => requireEmptyDeletionFeedback(rem, roles)).toThrow('Feedback or unknown');
+  });
+
+  it('leaves 144 unknown unselected records byte-identical while binding and deleting selected known content', async () => {
+    const f = await prepare((base) => {
+      base.rems.set('todo', native('todo', ['TODO']));
+      base.rems.set('done', native('done', ['DONE']));
+      for (let i = 0; i < 144; i++) {
+        const id = `unknown_${i}`;
+        base.rems.get('subdoc')!.children.push(id);
+        const rem = native(id, [id], { parent: 'subdoc' });
+        delete rem.tags;
+        base.rems.set(id, rem);
+      }
+    });
+    const before = await Promise.all(
+      Array.from({ length: 144 }, (_, i) =>
+        readPrivate(directory, f.state.entries[`unknown_${i}`]!.rawPath)
+      )
+    );
+    const knownBefore = await readPrivate(directory, f.state.entries.question!.rawPath);
+    await bindFeedbackRoles(directory, async () => f.backend, {
+      todoTagId: 'todo',
+      doneTagId: 'done',
+    });
+    expect(await readPrivate(directory, f.state.entries.question!.rawPath)).toBe(knownBefore);
+    for (let i = 0; i < 144; i++)
+      expect(await readPrivate(directory, f.state.entries[`unknown_${i}`]!.rawPath)).toBe(
+        before[i]
+      );
+    const local = await inspectLocal(directory);
+    expect(local.native.get('unknown_0')!.tags).toBeUndefined();
+    expect(local.native.get('unknown_0')!.feedback).toBeUndefined();
+    expect(local.native.get('question')!.feedback).toBeUndefined();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'verified', deleted: ['answer', 'question'] });
+    expect(f.rems.has('unknown_0')).toBe(true);
+  }, 15000);
+
+  it('never traverses a Portal even when its native type is unknown', async () => {
+    const f = fixture();
+    const portal = native('portal', ['portal'], {
+      type: null,
+      children: ['external'],
+      portal: { type: null, directlyIncludedRemIds: [], query: null, filter: null },
+    });
+    await expect(
+      partitionRemote(
+        new Map([['portal', portal]]),
+        new Set(['portal']),
+        { todoTagId: 'todo', doneTagId: 'done' },
+        f.backend
+      )
+    ).rejects.toThrow('Portal');
+    expect(f.backend.read).not.toHaveBeenCalled();
+  });
+
+  it('blocks deletion when an exact role identity has drifted', async () => {
+    const f = await boundWithoutFeedback();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    f.rems.get('todo')!.text = ['renamed'];
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Feedback role identity or content changed');
+    expect(f.backend.remove).not.toHaveBeenCalled();
+    expect(f.rems.has('question')).toBe(true);
+  });
+
+  it('never deletes an exact bound role', async () => {
+    const f = await prepare((base) => {
+      base.rems.get('chapter')!.children.push('todo', 'done');
+      base.rems.set('todo', native('todo', ['TODO'], { parent: 'chapter' }));
+      base.rems.set('done', native('done', ['DONE'], { parent: 'chapter' }));
+    });
+    await bindDeletionRoles(f);
+    const path = f.state.entries.todo!.path;
+    await edit(path, (source) =>
+      source.replace(`  - TODO ^${f.state.entries.todo!.blockId}\n`, '')
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true, paths: [path] })).rejects.toThrow(
+      'Cannot delete a bound TODO/DONE feedback role'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.rems.has('todo')).toBe(true);
+  });
+
+  it('rejects changing a bound role in the same deletion batch before connecting', async () => {
+    const f = await boundWithoutFeedback();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const rolePath = f.state.entries.todo!.path;
+    await edit(rolePath, (source) => source.replace('# TODO', '# Renamed TODO'));
+    const factory = vi.fn(async () => f.backend);
+    await expect(
+      syncWorkspace(directory, factory, { apply: true, paths: [f.path, rolePath] })
+    ).rejects.toThrow('Cannot change a feedback role or its ancestor');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('mirrors a full card deletion after binding when all physical feedback partitions are observed empty', async () => {
+    const f = await boundWithoutFeedback();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'verified', deleted: ['answer', 'question'] });
+    expect(f.calls).toEqual(['answer:delete', 'question:delete']);
+    expect(f.rems.has('question')).toBe(false);
+    expect(f.rems.has('todo')).toBe(true);
+    expect(f.rems.has('done')).toBe(true);
+  });
+
+  it.each([
+    'todo-child',
+    'done-child',
+    'unknown-child',
+    'target-todo-tag',
+    'parent-feedback',
+  ] as const)(
+    'blocks deletion before any remove when fresh physical evidence has %s',
+    async (kind) => {
+      const f = await boundWithoutFeedback();
+      const parent = kind === 'parent-feedback' ? 'chapter' : 'question';
+      if (kind === 'target-todo-tag') f.rems.get('question')!.tags = ['todo'];
+      else {
+        f.rems.get(parent)!.children.push('feedback-new');
+        f.rems.set(
+          'feedback-new',
+          native('feedback-new', ['feedback'], {
+            parent,
+            tags: kind === 'unknown-child' ? [] : [kind === 'done-child' ? 'done' : 'todo'],
+            cards: [],
+          })
+        );
+      }
+      await removeQuestion(
+        f.path,
+        f.state.entries.question!.blockId,
+        f.state.entries.answer!.blockId
+      );
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).rejects.toThrow();
+      expect(f.backend.remove).not.toHaveBeenCalled();
+      expect(f.rems.has('question')).toBe(true);
+      if (kind !== 'target-todo-tag') expect(f.rems.has('feedback-new')).toBe(true);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('stops before the next delete when feedback appears after the first mutation', async () => {
+    const f = await boundWithoutFeedback();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const remove = f.backend.removeMirror;
+    f.backend.removeMirror = vi.fn(async (id) => {
+      await remove(id);
+      f.rems.get('question')!.children.push('feedback-race');
+      f.rems.set(
+        'feedback-race',
+        native('feedback-race', ['feedback'], { parent: 'question', tags: ['todo'], cards: [] })
+      );
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({ status: 'unknown', complete: false, remoteWrites: 1 });
+    expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+    expect(f.rems.has('question')).toBe(true);
+    expect(f.rems.has('feedback-race')).toBe(true);
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow();
+    expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks before the first removal when feedback appears between reads', async () => {
+    const f = await boundWithoutFeedback();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const read = f.backend.read;
+    let reads = 0;
+    f.backend.read = vi.fn(async (ids, options) => {
+      if (ids.includes('question') && ++reads === 2) {
+        f.rems.get('question')!.children.push('feedback-before');
+        f.rems.set(
+          'feedback-before',
+          native('feedback-before', ['feedback'], {
+            parent: 'question',
+            tags: ['todo'],
+            cards: [],
+          })
+        );
+      }
+      return read(ids, options);
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    }).catch(() => null);
+    if (result) expect(result).toMatchObject({ remoteWrites: 0 });
+    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(f.backend.remove).not.toHaveBeenCalled();
+    expect(f.rems.has('question')).toBe(true);
+    expect(f.rems.has('feedback-before')).toBe(true);
+  });
   async function feedbackFixture() {
     const f = await prepare((f) => {
       f.rems.set('todo', native('todo', ['TODO']));
@@ -540,23 +821,30 @@ describe('exact feedback partition regression', () => {
     expect(await readPrivate(directory, IDENTITY)).toBe(identity);
     expect(f.calls).toEqual([]);
   });
-  it('refuses missing initial direct-tag evidence without repairing it', async () => {
-    await prepare(({ rems }) => {
+  it('binds exact roles without interpreting unknown tag evidence as an empty partition', async () => {
+    const f = await prepare(({ rems }) => {
       rems.set('todo', native('todo', ['TODO']));
       rems.set('done', native('done', ['DONE']));
       delete rems.get('chapter')!.tags;
     });
-    const state = await loadState(directory);
-    await expect(
-      bindFeedbackRoles(
-        directory,
-        async () => {
-          throw new Error('Must not connect');
-        },
-        { todoTagId: 'todo', doneTagId: 'done' }
-      )
-    ).rejects.toThrow('Missing initial direct-tag evidence');
-    expect(await loadState(directory)).toEqual(state);
+    await bindFeedbackRoles(directory, async () => f.backend, {
+      todoTagId: 'todo',
+      doneTagId: 'done',
+    });
+    const context = await inspectLocal(directory);
+    expect(context.native.get('chapter')!.tags).toBeUndefined();
+    expect(context.native.get('chapter')!.feedback).toBeUndefined();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const factory = vi.fn(async () => f.backend);
+    await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+      'unknown feedback partition'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
   });
   it.each([
     'plain-no-link',
@@ -3486,7 +3774,7 @@ describe('selected incremental sync', () => {
   it.each(['missing', 'batch-failed'] as const)(
     'rejects a %s deletion dependency before any mutation',
     async (failure) => {
-      const f = await prepare(),
+      const f = await prepareDeletion(),
         options = { paths: [f.path] };
       await removeQuestion(
         f.path,
@@ -3513,7 +3801,7 @@ describe('selected incremental sync', () => {
   );
 
   it('publishes bounded deletion through the current layout without absorbing dependency content', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       renamed = 'HOME/Renamed.md',
       options = { paths: [renamed] };
     await rename(join(directory, f.path), join(directory, renamed));
@@ -3556,7 +3844,7 @@ describe('selected incremental sync', () => {
   it.each(['apply', 'recover'] as const)(
     'publishes deletion attributes through %s without dropping surviving attributes or replaying deletes',
     async (mode) => {
-      const f = await prepare(),
+      const f = await prepareDeletion(),
         options = { paths: [f.path] },
         kept = {
           title: 'Kept display title',
@@ -3660,7 +3948,7 @@ describe('selected incremental sync', () => {
   });
 
   it('recovers verified deletion without absorbing its parent dependency or replaying remove', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       options = { paths: [f.path] };
     await removeQuestion(
       f.path,
@@ -5449,8 +5737,46 @@ describe('controlled RemNote workspace', () => {
       'another KB'
     );
   });
+  it('preserves adopted identities through local deletion of their subtree', async () => {
+    const f = await prepare((base) => {
+      base.rems.set('todo', native('todo', ['TODO']));
+      base.rems.set('done', native('done', ['DONE']));
+    });
+    f.rems.get('chapter')!.children.push('adopted');
+    f.rems.set(
+      'adopted',
+      native('adopted', ['adopted'], { parent: 'chapter', children: ['leaf'] })
+    );
+    f.rems.set('leaf', native('leaf', ['leaf'], { parent: 'adopted' }));
+    const cardsBefore = await f.backend.cardFacts('question');
+    const options = { paths: [f.path], acceptNativeSource: true };
+    const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
+    expect(preview.newIds).toEqual(['adopted', 'leaf']);
+    await alignWorkspaceBaseline(directory, async () => f.backend, {
+      ...options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    await bindDeletionRoles(f);
+    const state = await loadState(directory),
+      before = await readPrivate(directory, f.path);
+    const selected = `\n  - adopted ^${state.entries.adopted!.blockId}\n    - leaf ^${state.entries.leaf!.blockId}`;
+    const after = before.replace(selected, '');
+    expect(after).not.toBe(before);
+    await writePrivate(directory, f.path, after);
+    f.calls.length = 0;
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ status: 'verified', deleted: ['leaf', 'adopted'] });
+    expect(f.calls).toEqual(['leaf:delete', 'adopted:delete']);
+    expect(f.rems.has('adopted')).toBe(false);
+    expect(f.rems.has('leaf')).toBe(false);
+    expect(await f.backend.cardFacts('question')).toEqual(cardsBefore);
+    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+  });
+
   it('automatically mirrors an explicitly removed local card without a separate delete command', async () => {
-    const f = await prepare();
+    const f = await prepareDeletion();
     await edit(f.path, (source) =>
       source.replace(
         new RegExp(
@@ -5480,7 +5806,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('provides a fixed local deletion receipt and guarded native parent proof', async () => {
-    const f = await prepare();
+    const f = await prepareDeletion();
     expect((await workspace.readWorkspace(directory, f.path)).deletion).toEqual({
       roots: [],
       ids: [],
@@ -5523,7 +5849,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('guards a locally missing file and reports its parent after verified deletion', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       path = f.state.entries.subdoc!.path;
     await rm(join(directory, path));
     const read = await workspace.readWorkspace(directory, path);
@@ -5777,7 +6103,7 @@ describe('controlled RemNote workspace', () => {
   ] as const)(
     'blocks deletion if the fresh %s parent becomes unverified on its %s read',
     async (mode, when) => {
-      const f = await prepare();
+      const f = await prepareDeletion();
       const path = mode === 'inline' ? f.path : f.state.entries.subdoc!.path;
       const parentId = mode === 'inline' ? 'chapter' : 'daily';
       if (mode === 'inline')
@@ -5887,7 +6213,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('rechecks the missing file parent directory after remote reads and before removal', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       path = f.state.entries.subdoc!.path;
     await rm(join(directory, path));
     const original = f.backend.readProbe;
@@ -5904,7 +6230,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('stops the deletion batch when a missing local file reappears after the first remove', async () => {
-    const f = await prepare((fixture) => {
+    const f = await prepareDeletion((fixture) => {
       fixture.rems.get('home')!.children.push('subdoc2');
       fixture.rems.set(
         'subdoc2',
@@ -5961,7 +6287,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('preserves remote edits on a locally deleted card as a conflict', async () => {
-    const f = await prepare();
+    const f = await prepareDeletion();
     await edit(f.path, (source) =>
       source.replace(
         new RegExp(
@@ -6020,7 +6346,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('automatically mirrors a deleted bound document in the selected scope', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       path = f.state.entries.subdoc!.path;
     await rm(join(directory, path));
     expect(
@@ -6035,7 +6361,7 @@ describe('controlled RemNote workspace', () => {
   });
 
   it('previews and deletes only the locally removed subtree within scope', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       options = { paths: [f.path] };
     await edit(f.path, (source) =>
       source.replace(
@@ -6065,7 +6391,7 @@ describe('controlled RemNote workspace', () => {
     expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
   });
   it('refuses deletion when a new descendant appears after preview', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       options = { paths: [f.path] };
     await edit(f.path, (source) =>
       source.replace(
@@ -6086,11 +6412,11 @@ describe('controlled RemNote workspace', () => {
         apply: true,
         planHash: preview.planHash,
       })
-    ).rejects.toThrow('frozen');
+    ).rejects.toThrow('not an exact TODO/DONE feedback attachment');
     expect(f.backend.remove).not.toHaveBeenCalled();
   });
   it('requires both destructive gates and never retries an unknown deletion', async () => {
-    const f = await prepare(),
+    const f = await prepareDeletion(),
       options = { paths: [f.path] };
     await edit(f.path, (source) =>
       source.replace(
@@ -6179,25 +6505,28 @@ describe('controlled RemNote workspace', () => {
     expect(f.backend.enumerate).toHaveBeenCalledTimes(1);
     expect(f.backend.subtree).not.toHaveBeenCalled();
   });
-  it('deletes within a scoped root whose real parent is outside the working copy', async () => {
+  it('refuses deletion in a scoped root if exact role ancestors are outside its sealed scope', async () => {
     const f = fixture();
+    f.rems.get('chapter')!.children.push('todo', 'done');
+    f.rems.set('todo', native('todo', ['TODO'], { parent: 'chapter' }));
+    f.rems.set('done', native('done', ['DONE'], { parent: 'chapter' }));
     await importWorkspace(directory, 'kb', async () => f.backend, { rootId: 'chapter' });
+    await expect(
+      bindFeedbackRoles(directory, async () => f.backend, {
+        todoTagId: 'todo',
+        doneTagId: 'done',
+      })
+    ).rejects.toThrow('Unmapped native tag ancestor daily');
     const state = await loadState(directory);
     const path = state.entries.question!.path;
     await removeQuestion(path, state.entries.question!.blockId, state.entries.answer!.blockId);
-    const options = { paths: [path] };
-    const preview = (await pushWorkspace(directory, async () => f.backend, options)) as {
-      planHash: string;
-    };
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        ...options,
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({ complete: true });
+    const factory = vi.fn(async () => f.backend);
+    await expect(pushWorkspace(directory, factory, { paths: [path], apply: true })).rejects.toThrow(
+      'bound exact TODO/DONE'
+    );
+    expect(factory).not.toHaveBeenCalled();
     expect(f.rems.get('chapter')?.parent).toBe('daily');
-    expect(f.rems.has('question')).toBe(false);
+    expect(f.rems.has('question')).toBe(true);
     expect(f.rems.has('daily')).toBe(true);
     expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
   });

@@ -102,6 +102,12 @@ methods are unsupported; do not substitute arbitrary JavaScript.
 
 ## Authorized Writes
 
+For content bound to a local-authoritative sync workspace, edit the local file
+and publish it with `sync apply`; do not use direct native write commands on that
+content. Exact feedback capture and post-publication acknowledgement follow the
+separate procedure below. The direct commands in this section apply only outside
+that mirrored content.
+
 First check [ADR 0003](../../docs/adr/0003-disable-unsafe-native-transactions.md):
 native transactions are disabled. Atomic update/replace/property/TODO apply commands
 are unavailable. Additive create/journal/insert commands retain per-attempt recovery
@@ -130,7 +136,8 @@ Ack never publishes content; retry the same ack after an unknown outcome, not th
 publisher. It recognizes only the exact recorded after-state and otherwise stops.
 
 This path requires prior `sync feedback bind DIR --todo-tag-id ID --done-tag-id ID`:
-clean, already-aligned source and known sealed direct tags. Bind never edits
+clean, already-aligned source and exact sealed role identities. Bind records roles
+only; unknown per-Rem tags and partitions remain unknown. Bind never edits
 Markdown or initializes missing native evidence; existing authored role tokens
 are a reported blocker. Only with explicit baseline-initialization authorization,
 use `sync baseline-align DIR [--path PATH]` to preview missing observations, then
@@ -335,6 +342,12 @@ Rem identity; missing tracked local nodes or files are deletion intent within th
 selected scope. `sync apply DIR` removes the exact verified mirror identities;
 remote absence or drift is not inferred as local deletion. Both plugin write gates
 remain mandatory, unknown outcomes are never retried automatically.
+Deletion requires existing, exact TODO/DONE roles bound in advance, with observed
+empty feedback partitions and no TODO/DONE tag on every deleted Rem and surviving
+parent; unknown or changed evidence stops deletion. Never guess or create tags to
+bypass this. Complete separately authorized native-source adoption before binding;
+adoption currently rejects bound feedback roles. Ordinary edits do not
+require feedback binding. These checks are optimistic, not atomic CAS.
 Missing directories, identity collisions, and an entire multi-document directory
 disappearing fail closed; directory deletion is unsupported. Any new nodes
 alongside deletion are ambiguous and must be synchronized separately; deleting only an existing multiline answer

@@ -101,7 +101,7 @@ export async function partitionRemote(
     const attachmentIds = rem.children.filter((child) => !canonical.has(child));
     if (new Set(rem.children).size !== rem.children.length)
       throw new Error('Duplicate physical children in feedback partition');
-    if (attachmentIds.length && (rem.type === 6 || rem.unsupported))
+    if (attachmentIds.length && (rem.type === 6 || rem.portal != null || rem.unsupported))
       throw new Error('Feedback under opaque/Portal parents is unsupported');
     for (const child of attachmentIds)
       await readAttachment(backend, child, id, roles, canonical, owned);

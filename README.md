@@ -94,7 +94,9 @@ identical local/native content converges. Other native body or direct-tag drift
 archives both versions and blocks the entire batch before any writes. Native-only
 children are structural conflicts, not an import request. No timestamp picks a winner.
 Review history, scheduling and native runtime facts remain RemNote-owned and are
-never written back from snapshots. Missing content does not imply deletion.
+never written back from snapshots. Removing bound local content requests deletion
+of its mirror during the next selected sync, subject to the safeguards in the
+[command reference](docs/guides/remnote-cli-command-reference.md#sync).
 
 Daily editing needs one `sync apply DIR` invocation: it validates, plans,
 applies and verifies without a manual read/save/lint/diff/preview pipeline.

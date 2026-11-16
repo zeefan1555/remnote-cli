@@ -4,7 +4,7 @@ import { isContentMarkdown } from './files.js';
 import type { LocalContext } from './local.js';
 import type { SyncSelection, WorkspacePlan, WorkspaceRem } from './types.js';
 import { registerTagIds } from './tags.js';
-import { deletionPath } from './deletion.js';
+import { deletionPath, requireSelectedDeletionFeedback } from './deletion.js';
 
 export interface SelectionOptions {
   scope?: 'changed' | 'all';
@@ -205,6 +205,7 @@ export async function selectPlan(
         ids: deletedIds,
       }
     : undefined;
+  if (deletion) requireSelectedDeletionFeedback(context, deletion);
   const publicationFiles = new Set(selected.files);
   for (const root of deletion?.roots ?? []) {
     const parentPath =
@@ -233,15 +234,31 @@ export async function selectPlan(
       ),
   ];
   const reconcileIds = sorted(candidates);
+  const feedbackRoleIds =
+    deletion && context.state.feedbackRoles
+      ? [context.state.feedbackRoles.todoTagId, context.state.feedbackRoles.doneTagId]
+      : [];
+  if (deletion) {
+    const roleLineage = new Set<string>();
+    for (const role of feedbackRoleIds)
+      for (let id: string | null = role; id; id = context.native.get(id)?.parent ?? null)
+        roleLineage.add(id);
+    if (changes.some((change) => roleLineage.has(change.key)))
+      throw new Error('Cannot change a feedback role or its ancestor in a deletion batch');
+  }
   const selection: SyncSelection = {
     scope: options.scope ?? 'changed',
     paths: selected.paths,
     files: sorted(publicationFiles),
     outgoingKeys: sorted(changes.map((change) => change.key)),
     reconcileIds,
-    verificationIds: verificationClosure(context, { ...plan, changes }, [
-      ...deletedIds,
-      ...changes.filter((change) => !change.key.startsWith('new:')).map((change) => change.key),
+    verificationIds: sorted([
+      ...feedbackRoleIds,
+      ...verificationClosure(context, { ...plan, changes }, [
+        ...deletedIds,
+        ...feedbackRoleIds,
+        ...changes.filter((change) => !change.key.startsWith('new:')).map((change) => change.key),
+      ]),
     ]).filter((id) => !reconcileIds.includes(id)),
   };
   for (const [path, document] of context.parsed)

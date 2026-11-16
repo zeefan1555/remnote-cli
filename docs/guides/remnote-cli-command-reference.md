@@ -695,6 +695,16 @@ unverified parents, unsupported native structures, remote drift, disabled plugin
 gates and incomplete journal outcomes fail closed. The global `--allow-destructive`
 flag is not needed for mirror deletion or association-only tag removal; other SDK
 operations keep their existing permission rules.
+Deletion also requires previously bound exact TODO/DONE feedback roles. Bind only
+existing, positively identified role IDs; never guess or create tags to bypass this
+check. Each deleted Rem and surviving parent must have an observed empty feedback
+partition and no TODO/DONE tag, rechecked at each mutation boundary. Unknown,
+nonempty or drifting feedback stops deletion. Ordinary edits do not require this
+binding. Binding records role identities only: missing per-Rem partition evidence
+stays unknown until fresh selected reads prove it. Unknown direct tags on unselected
+Rems do not prevent binding, but an affected Rem with unknown sealed tags cannot
+be deleted. Complete separately authorized native-source adoption before binding:
+adoption currently rejects bound feedback roles.
 Any new node alongside a deletion is ambiguous with a lost or mistyped identity
 and stops before any native call, even if the new node has an anchor. Restore the
 identity or separate deletion and creation into different synchronizations. An
@@ -1182,7 +1192,8 @@ remnote-cli --allow-destructive sync feedback ack DIR --receipt CAPTURE_HASH --p
 ```
 
 `bind` requires complete, clean, already-aligned local source, existing sealed role
-IDs and known direct-tag evidence. It only seals exact roles and necessary private
+IDs. It records exact roles without initializing per-Rem feedback partitions;
+unknown direct-tag evidence remains unknown. It seals necessary private
 metadata; zero Markdown and zero native writes. Authored role tokens are rejected
 with their paths. It does not initialize or repair missing native baselines.
 
