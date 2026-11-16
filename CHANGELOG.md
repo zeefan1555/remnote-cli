@@ -42,6 +42,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Report unavailable repetition history as `unknown` in review-stat and search
+  text output; a search total is unknown if any included card history is unknown.
 - Guard affected surviving Card IDs and fresh SDK-returned repetition histories
   before any sync mutation; bind and compare the exact proof through recovery.
 - Disable native-source and exact-child adoption before connecting, because

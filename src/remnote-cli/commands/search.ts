@@ -80,17 +80,21 @@ function formatSearchText(data: unknown): string {
       }
       let reviewSuffix = '';
       if (Array.isArray(note.cards)) {
-        const repetitions = note.cards.reduce(
-          (total, card) =>
-            total +
-            (card &&
-            typeof card === 'object' &&
-            Array.isArray((card as Record<string, unknown>).repetitionHistory)
-              ? ((card as Record<string, unknown>).repetitionHistory as unknown[]).length
-              : 0),
-          0
-        );
-        reviewSuffix = ` | cards: ${note.cards.length}, repetitions: ${repetitions}`;
+        let repetitions = 0;
+        let known = true;
+        for (const card of note.cards) {
+          if (
+            !card ||
+            typeof card !== 'object' ||
+            !('repetitionHistory' in card) ||
+            !Array.isArray(card.repetitionHistory)
+          ) {
+            known = false;
+            break;
+          }
+          repetitions += card.repetitionHistory.length;
+        }
+        reviewSuffix = ` | cards: ${note.cards.length}, repetitions: ${known ? repetitions : 'unknown'}`;
       }
       return `${i + 1}. ${typeTag}${headline}${aliasesSuffix}${tagsSuffix}${parentSuffix}${ancestorSuffix}${reviewSuffix} [${note.remId}]`;
     })

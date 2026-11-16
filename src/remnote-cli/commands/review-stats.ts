@@ -31,7 +31,7 @@ function formatReviewStatsText(data: unknown): string {
         const lines = [
           `Rem ${remId}: card ${String(card.cardId)} (${formatCardType(card.type)})`,
           `  createdAt: ${String(card.createdAt)}`,
-          `  repetitions: ${Array.isArray(card.repetitionHistory) ? card.repetitionHistory.length : 0}`,
+          `  repetitions: ${Array.isArray(card.repetitionHistory) ? card.repetitionHistory.length : 'unknown'}`,
         ];
         for (const field of ['lastRepetitionTime', 'nextRepetitionTime', 'timesWrongInRow']) {
           if (card[field] !== undefined) lines.push(`  ${field}: ${String(card[field])}`);

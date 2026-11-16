@@ -229,6 +229,32 @@ describe('command text output', () => {
     executeSpy.mockRestore();
   });
 
+  it('distinguishes unknown and known review histories in review statistics', async () => {
+    const { output, executeSpy } = await runTextCommand(['review-stats', 'rem-1'], {
+      results: [
+        {
+          remId: 'rem-1',
+          cards: [
+            { cardId: 'null', type: 'forward', createdAt: 1, repetitionHistory: null },
+            { cardId: 'missing', type: 'forward', createdAt: 1 },
+            { cardId: 'invalid', type: 'forward', createdAt: 1, repetitionHistory: 'invalid' },
+            { cardId: 'empty', type: 'forward', createdAt: 1, repetitionHistory: [] },
+            { cardId: 'known', type: 'forward', createdAt: 1, repetitionHistory: [{}, {}] },
+          ],
+        },
+      ],
+    });
+
+    for (const cardId of ['null', 'missing', 'invalid']) {
+      expect(output).toContain(
+        `Rem rem-1: card ${cardId} (forward)\n  createdAt: 1\n  repetitions: unknown`
+      );
+    }
+    expect(output).toContain('card empty (forward)\n  createdAt: 1\n  repetitions: 0');
+    expect(output).toContain('card known (forward)\n  createdAt: 1\n  repetitions: 2');
+    executeSpy.mockRestore();
+  });
+
   it('formats outline and todo workflow results', async () => {
     const outline = await runTextCommand(['outline', 'collapse', '--today'], {
       rootRemId: 'daily-1',
@@ -380,6 +406,36 @@ describe('command text output', () => {
     );
 
     expect(output).toContain('cards: 1, repetitions: 1');
+    executeSpy.mockRestore();
+  });
+
+  it('does not report a certain search review total when any history is unknown', async () => {
+    const { output, executeSpy } = await runTextCommand(
+      ['search', 'cards', '--include-review-stats'],
+      {
+        results: [
+          { remId: 'empty', title: 'Empty', cards: [{ repetitionHistory: [] }] },
+          { remId: 'known', title: 'Known', cards: [{ repetitionHistory: [{}, {}] }] },
+          { remId: 'none', title: 'No cards', cards: [] },
+          { remId: 'null', title: 'Null', cards: [{ repetitionHistory: null }] },
+          { remId: 'missing', title: 'Missing', cards: [{}] },
+          { remId: 'invalid', title: 'Invalid', cards: [{ repetitionHistory: 'invalid' }] },
+          {
+            remId: 'mixed',
+            title: 'Mixed',
+            cards: [{ repetitionHistory: [{}] }, { repetitionHistory: null }],
+          },
+        ],
+      }
+    );
+
+    expect(output).toContain('Empty | cards: 1, repetitions: 0 [empty]');
+    expect(output).toContain('Known | cards: 1, repetitions: 2 [known]');
+    expect(output).toContain('No cards | cards: 0, repetitions: 0 [none]');
+    expect(output).toContain('Null | cards: 1, repetitions: unknown [null]');
+    expect(output).toContain('Missing | cards: 1, repetitions: unknown [missing]');
+    expect(output).toContain('Invalid | cards: 1, repetitions: unknown [invalid]');
+    expect(output).toContain('Mixed | cards: 2, repetitions: unknown [mixed]');
     executeSpy.mockRestore();
   });
 
