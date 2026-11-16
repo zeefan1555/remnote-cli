@@ -463,13 +463,32 @@ describe('exact feedback partition regression', () => {
       expect(f.calls).toEqual([]);
     }
   );
-  it('before roles are bound, preserves a baseline tag and then refuses to bind it as lifecycle', async () => {
+  it.each(['todo', 'done', 'basic'] as const)(
+    'before roles are bound, refuses to import unclassified native tag %s',
+    async (tag) => {
+      const f = await prepare(({ rems }) => {
+        rems.set('todo', native('todo', ['TODO']));
+        rems.set('done', native('done', ['DONE']));
+        delete rems.get('question')!.tags;
+      });
+      f.rems.get('question')!.tags = [tag];
+      const options = { paths: [f.path] };
+      const state = await loadState(directory),
+        source = await readPrivate(directory, f.path);
+      await expect(
+        alignWorkspaceBaseline(directory, async () => f.backend, options)
+      ).rejects.toThrow('Feedback roles must be bound before importing unknown native tags');
+      expect(await loadState(directory)).toEqual(state);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPublication(directory)).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('before roles are bound, aligns an explicitly observed empty tag set', async () => {
     const f = await prepare(({ rems }) => {
-      rems.set('todo', native('todo', ['TODO']));
-      rems.set('done', native('done', ['DONE']));
       delete rems.get('question')!.tags;
     });
-    f.rems.get('question')!.tags = ['todo'];
+    f.rems.get('question')!.tags = [];
     const options = { paths: [f.path] };
     const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
     await alignWorkspaceBaseline(directory, async () => f.backend, {
@@ -477,15 +496,81 @@ describe('exact feedback partition regression', () => {
       apply: true,
       planHash: preview.planHash,
     });
-    const state = await loadState(directory),
-      source = await readPrivate(directory, f.path);
-    await expect(
-      bindFeedbackRoles(directory, async () => f.backend, { todoTagId: 'todo', doneTagId: 'done' })
-    ).rejects.toThrow('Feedback role tokens require explicit source alignment');
-    expect(await loadState(directory)).toEqual(state);
-    expect(await readPrivate(directory, f.path)).toBe(source);
+    const local = await inspectLocal(directory);
+    expect(local.native.get('question')!.tags).toEqual([]);
+    expect(local.native.get('question')!.feedback).toBeUndefined();
+    expect(local.state.feedbackRoles).toBeUndefined();
     expect(f.calls).toEqual([]);
   });
+  it.each([
+    ['source', false],
+    ['source', true],
+    ['child', false],
+    ['child', true],
+  ] as const)(
+    'blocks %s adoption with bound roles=%s before any connection or local write',
+    async (mode, bound) => {
+      const f = await prepare(({ rems }) => {
+        rems.set('todo', native('todo', ['TODO']));
+        rems.set('done', native('done', ['DONE']));
+      });
+      if (bound)
+        await bindFeedbackRoles(directory, async () => f.backend, {
+          todoTagId: 'todo',
+          doneTagId: 'done',
+        });
+      const state = await loadState(directory),
+        source = await readPrivate(directory, f.path);
+      const factory = vi.fn(async () => f.backend);
+      const options =
+        mode === 'source'
+          ? { paths: [f.path], acceptNativeSource: true }
+          : { paths: [f.path], acceptNewParent: ['chapter'], acceptNewChild: ['unknown'] };
+      await expect(alignWorkspaceBaseline(directory, factory, options)).rejects.toThrow(
+        'Native content adoption is disabled'
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(await loadState(directory)).toEqual(state);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPublication(directory)).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it.each(['tagged-todo', 'untagged-checkbox', 'portal'] as const)(
+    'never reads or imports an unknown %s descendant',
+    async (kind) => {
+      const f = await prepare();
+      f.rems.get('chapter')!.children.push('unknown');
+      f.rems.set(
+        'unknown',
+        native('unknown', ['feedback'], {
+          parent: 'chapter',
+          ...(kind === 'tagged-todo' ? { tags: ['todo'] } : {}),
+          ...(kind === 'untagged-checkbox'
+            ? { tags: [], facts: { isTodo: true, todoStatus: 'Unfinished' } }
+            : {}),
+          ...(kind === 'portal'
+            ? { type: 6, portal: { type: null, directlyIncludedRemIds: [] } }
+            : {}),
+        })
+      );
+      const factory = vi.fn(async () => f.backend);
+      const state = await loadState(directory),
+        source = await readPrivate(directory, f.path);
+      for (const options of [
+        { paths: [f.path], acceptNativeSource: true },
+        { paths: [f.path], acceptNewParent: ['chapter'], acceptNewChild: ['unknown'] },
+      ])
+        await expect(alignWorkspaceBaseline(directory, factory, options)).rejects.toThrow(
+          'Native content adoption is disabled'
+        );
+      expect(factory).not.toHaveBeenCalled();
+      expect(await loadState(directory)).toEqual(state);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(f.rems.has('unknown')).toBe(true);
+      expect(f.calls).toEqual([]);
+    }
+  );
   it.each(['todo', 'child'] as const)(
     'refuses %s feedback drift at the final alignment read',
     async (change) => {
@@ -6006,7 +6091,7 @@ describe('controlled RemNote workspace', () => {
       'another KB'
     );
   });
-  it('preserves adopted identities through local deletion of their subtree', async () => {
+  it('does not adopt an unproven native subtree before local deletion', async () => {
     const f = await prepare((base) => {
       base.rems.set('todo', native('todo', ['TODO']));
       base.rems.set('done', native('done', ['DONE']));
@@ -6017,31 +6102,16 @@ describe('controlled RemNote workspace', () => {
       native('adopted', ['adopted'], { parent: 'chapter', children: ['leaf'] })
     );
     f.rems.set('leaf', native('leaf', ['leaf'], { parent: 'adopted' }));
-    const cardsBefore = await f.backend.cardFacts('question');
     const options = { paths: [f.path], acceptNativeSource: true };
-    const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
-    expect(preview.newIds).toEqual(['adopted', 'leaf']);
-    await alignWorkspaceBaseline(directory, async () => f.backend, {
-      ...options,
-      apply: true,
-      planHash: preview.planHash,
-    });
-    await bindDeletionRoles(f);
-    const state = await loadState(directory),
-      before = await readPrivate(directory, f.path);
-    const selected = `\n  - adopted ^${state.entries.adopted!.blockId}\n    - leaf ^${state.entries.leaf!.blockId}`;
-    const after = before.replace(selected, '');
-    expect(after).not.toBe(before);
-    await writePrivate(directory, f.path, after);
-    f.calls.length = 0;
-    expect(
-      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-    ).toMatchObject({ status: 'verified', deleted: ['leaf', 'adopted'] });
-    expect(f.calls).toEqual(['leaf:delete', 'adopted:delete']);
-    expect(f.rems.has('adopted')).toBe(false);
-    expect(f.rems.has('leaf')).toBe(false);
-    expect(await f.backend.cardFacts('question')).toEqual(cardsBefore);
-    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
+    const source = await readPrivate(directory, f.path);
+    const factory = vi.fn(async () => f.backend);
+    await expect(alignWorkspaceBaseline(directory, factory, options)).rejects.toThrow(
+      'Native content adoption is disabled'
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(f.rems.has('adopted')).toBe(true);
+    expect(f.rems.has('leaf')).toBe(true);
   });
 
   it('automatically mirrors an explicitly removed local card without a separate delete command', async () => {

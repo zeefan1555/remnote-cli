@@ -87,7 +87,7 @@ below is the authorized private vault's absolute path.
 | Input-bound native audit | `remnote-cli sync apply DIR --path PATH --expected-file-hash HASH`; exactly one file, full native proof and output outline from this invocation |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
 | Missing baseline observations | `remnote-cli sync baseline-align DIR [--path PATH]`; read-only native preview, then `--apply --plan-hash HASH` for exact local publication |
-| Explicit one-time native source adoption | `remnote-cli sync baseline-align DIR --accept-native-source --path 'Exact.md'`; exact approved files only, preview then exact `--apply --plan-hash HASH`, zero native writes |
+| Native source or new-child adoption | Disabled: feedback ownership cannot currently be proven; no native connection or local publication |
 | Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
 | Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
 
@@ -133,7 +133,7 @@ since, daemon or arbitrary conflict-winner options.
 `sync import` publishes the human-readable format by default. It requires explicit global `--kb-id` and a new directory without
 content or a prior manifest. It establishes the initial common baseline; even a
 clean existing vault cannot be re-imported. Later local edits are desired source;
-native-only source changes require a separate explicitly authorized adoption.
+native-only source changes are not automatically imported.
 Ordinary sync never selects a winner by timestamp or overwrites local source from native.
 
 | Import option | Scope |
@@ -485,46 +485,13 @@ After feedback roles are bound, each selected Rem must have fresh known direct
 tags without TODO/DONE, no sealed nonempty feedback attachment partition, and
 unchanged physical children. Unknown or drifting evidence refuses before local
 publication. Lifecycle tags are never imported as authored source. Before role
-binding, their identity is unknown: later binding refuses any matching authored
-role tokens and requires explicit source alignment.
+binding, nonempty unknown native tags cannot be classified and are refused; an
+observed empty set can be aligned.
 
-Only with explicit authorization to accept an already-reviewed exact set of new
-native leaves, repeat `--accept-new-parent ID` and `--accept-new-child ID` for
-the complete parent and child sets. Every parent must be bound in the selected
-files and have at least one supplied child; every supplied child must be unbound,
-a supported leaf and directly parented to a selected parent. The original
-children must remain an ordered subsequence, and the complete difference must
-equal the supplied set. The parent's content kind cannot change. New leaves are
-inserted at their exact native positions using renderer-produced bullets while
-all existing source bytes and node identities remain intact. Other drift still
-blocks. Known or observed Portal parents are rejected before reading any new
-children, including on apply verification. When the SDK omits the supplemental
-reference list, an already known list is preserved; explicit drift still blocks.
-Preview reports `childrenAccepted`; apply requires the same exact options
-and `planHash`, with fresh proof for the parent and all new leaves. Reapplying the
-set after publication refuses the now-bound IDs. This is not discovery, incoming
-sync, a timestamp merge, or permission to modify native Cards or history.
-
-When the user explicitly approves native source changes for entire named files,
-use `sync baseline-align DIR --accept-native-source --path 'Exact.md'` (repeat
-exact file paths as needed). This separate one-time mode requires clean local
-source; directories, implicit whole-vault selection and mixed acceptance modes
-are refused. It may replace the approved files with the current rendered native
-text, back text, tags, references and child order, including completely read new
-descendants inside those documents. Missing/deleted or reparented old nodes,
-new Document/Folder boundaries, cross-file additions, changed Card identities,
-existing content-kind changes and other immutable drift are refused. Existing
-Cards/history, facts, original records and block identities are retained; no
-outside file or verification-only dependency is adopted. Existing local body bytes
-must match a lossless rendering of the old baseline and unchanged nodes must
-remain unchanged; otherwise adoption refuses rather than normalize formatting.
-YAML comments and unrelated fields are retained. Preview returns
-`sourceChangedIds`, `sourceChanges` (field names, added-child IDs and old-order
-changes), and `newIds`, never body text. Missing tag initialization is reported
-separately by `tagsAligned`. Review this exact scope before `--apply --plan-hash
-HASH`; fresh full observations and FrozenFiles still must match. Local staging
-and `sync recover` are shared with ordinary baseline alignment. This does not
-enable incoming/LWW behavior in subsequent ordinary sync.
+Native source adoption and exact-new-child acceptance are disabled before any
+native connection: current observations cannot prove feedback ownership of
+unbound content, including untagged checkbox TODOs. Do not treat local or native
+history as reconciled until a separately validated method exists.
 
 `sync format DIR` is an explicit offline conversion of a clean, sealed legacy
 publication to human Markdown, or canonical rendering of a clean already-human
@@ -709,8 +676,7 @@ nonempty or drifting feedback stops deletion. Ordinary edits do not require this
 binding. Binding records role identities only: missing per-Rem partition evidence
 stays unknown until fresh selected reads prove it. Unknown direct tags on unselected
 Rems do not prevent binding, but an affected Rem with unknown sealed tags cannot
-be deleted. Complete separately authorized native-source adoption before binding:
-adoption currently rejects bound feedback roles.
+be deleted. Native-source adoption is disabled regardless of role binding.
 Any new node alongside a deletion is ambiguous with a lost or mistyped identity
 and stops before any native call, even if the new node has an anchor. Restore the
 identity or separate deletion and creation into different synchronizations. An

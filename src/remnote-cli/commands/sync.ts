@@ -223,18 +223,15 @@ export function registerSyncCommands(program: Command): void {
     )
     .option('--apply', 'Publish the exact reviewed local baseline alignment')
     .option('--plan-hash <sha256>', 'Exact preview hash required with --apply')
-    .option(
-      '--accept-native-source',
-      'Explicit one-time source adoption for exact --path files only; never write RemNote'
-    )
+    .option('--accept-native-source', 'Disabled: native feedback ownership cannot be proven')
     .option(
       '--accept-new-parent <id>',
-      'Explicitly accept exact new native leaves under this bound parent; repeatable',
+      'Disabled: native feedback ownership cannot be proven',
       (value: string, ids: string[] = []) => ids.concat(value)
     )
     .option(
       '--accept-new-child <id>',
-      'Exact unbound leaf ID to accept; repeat for the complete new-child set',
+      'Disabled: native feedback ownership cannot be proven',
       (value: string, ids: string[] = []) => ids.concat(value)
     )
     .action(

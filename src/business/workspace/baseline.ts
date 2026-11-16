@@ -1,16 +1,6 @@
 import { insertBaselineTags } from './baseline-tags.js';
-import { insertBaselineChildren, verifyNewChildren } from './baseline-children.js';
-import { nativeSourceChanges, readNativeSourceClosure } from './baseline-source.js';
-import { preserveSourceHeader } from './baseline-source-header.js';
 import { readPrivate, withWorkspaceLock, workspaceDirectory } from './files.js';
-import {
-  IDENTITY,
-  idSchema,
-  originalPath,
-  recordPath,
-  shortBlockId,
-  workspaceIdentity,
-} from './identity.js';
+import { IDENTITY, workspaceIdentity } from './identity.js';
 import { inspectLocal, loadState, type LocalContext } from './local.js';
 import { WorkspaceLinks } from './links.js';
 import {
@@ -18,8 +8,6 @@ import {
   documentMetadata,
   parsePreparedDocument,
   prepareDocument,
-  nodeKind,
-  renderDocument,
   titleOf,
 } from './markdown.js';
 import { knownPowerupCodes, nativeProof } from './outline.js';
@@ -112,25 +100,14 @@ export async function alignWorkspaceBaseline(
 ) {
   if (options.apply && !/^[a-f0-9]{64}$/.test(options.planHash ?? ''))
     throw new Error('baseline-align --apply requires an exact --plan-hash');
-  let addedIds = options.acceptNewChild ?? [];
-  const parents = options.acceptNewParent ?? [];
-  if (options.acceptNativeSource && (!options.paths?.length || parents.length || addedIds.length))
+  if (
+    options.acceptNativeSource ||
+    options.acceptNewParent?.length ||
+    options.acceptNewChild?.length
+  )
     throw new Error(
-      'Native source adoption requires explicit exact --path files and cannot mix acceptance modes'
+      'Native content adoption is disabled: feedback boundaries cannot be proven safely'
     );
-  if (parents.length || addedIds.length) {
-    if (
-      !parents.length ||
-      parents.some((id) => !idSchema.safeParse(id).success) ||
-      new Set(parents).size !== parents.length ||
-      !addedIds.length ||
-      addedIds.some((id) => !idSchema.safeParse(id).success) ||
-      new Set(addedIds).size !== addedIds.length
-    )
-      throw new Error(
-        'Exact child acceptance requires unique parents and a nonempty unique new-child ID list'
-      );
-  }
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
@@ -139,34 +116,14 @@ export async function alignWorkspaceBaseline(
       throw new Error(
         'Baseline alignment requires a complete baseline with no pending native journal'
       );
-    if (previous.feedbackRoles && (options.acceptNativeSource || parents.length || addedIds.length))
-      throw new Error('Native source adoption requires completion before feedback roles are bound');
     const context = await inspectLocal(root, previous);
     if (context.diagnostics.length)
       throw new Error(`Baseline alignment refused: ${context.diagnostics[0]!.code}`);
     if (context.dirty.length || context.missing.length)
       throw new Error('Baseline alignment refuses unpublished local source edits');
-    if (
-      options.acceptNativeSource &&
-      options.paths!.some((path) => !Object.hasOwn(previous.documents, path))
-    )
-      throw new Error('Native source adoption requires exact bound file paths, never directories');
     const selection = await selectFiles(context, options.paths);
     if (!selection.files.length) throw new Error('Baseline alignment selected no bound documents');
     const ids = tagSet(selection.files.flatMap((path) => previous.documents[path]!.nodeIds));
-    if (parents.some((id) => !ids.includes(id)))
-      throw new Error('Exact new-child parent must be bound in the selected documents');
-    const rejectPortalParents = (records: Map<string, WorkspaceRem>) => {
-      for (const parent of parents) {
-        const rem = records.get(parent)!;
-        if (rem.type === 6 || rem.portal)
-          throw new Error(`Exact new-child acceptance cannot traverse a Portal: ${parent}`);
-      }
-    };
-    rejectPortalParents(context.native);
-    for (const id of addedIds)
-      if (context.native.has(id) || previous.entries[id])
-        throw new Error(`New child is already bound: ${id}`);
     const frozen = await context.inputs.freeze();
     // The old native projection, never the source itself, establishes an absent readonly seal.
     for (const path of selection.files) {
@@ -184,6 +141,15 @@ export async function alignWorkspaceBaseline(
     if ((await backend.identity()).kbId !== previous.kbId)
       throw new Error('Native KB binding changed');
     const observed = await readExact(backend, ids, context);
+    if (!previous.feedbackRoles)
+      for (const id of ids) {
+        const before = context.native.get(id)!,
+          current = observed.get(id)!;
+        if (before.tags == null && Array.isArray(current.tags) && current.tags.length)
+          throw new Error(
+            `Feedback roles must be bound before importing unknown native tags: ${id}`
+          );
+      }
     if (previous.feedbackRoles) {
       const roles = previous.feedbackRoles;
       for (const id of ids) {
@@ -202,19 +168,6 @@ export async function alignWorkspaceBaseline(
           throw new Error(`Physical feedback partition changed during baseline alignment: ${id}`);
       }
     }
-    rejectPortalParents(observed);
-    for (const [id, rem] of await readExact(backend, addedIds, context)) observed.set(id, rem);
-    if (options.acceptNativeSource)
-      addedIds = await readNativeSourceClosure(context, selection.files, observed, (newIds) =>
-        readExact(backend, newIds, context)
-      );
-    if (parents.length && addedIds.some((id) => !parents.includes(observed.get(id)!.parent ?? '')))
-      throw new Error('Every exact new child must belong to a selected parent');
-    for (const parent of parents) {
-      const children = addedIds.filter((id) => observed.get(id)!.parent === parent);
-      if (!children.length) throw new Error(`Exact parent has no selected child: ${parent}`);
-      verifyNewChildren(context.native.get(parent)!, observed.get(parent)!, children, observed);
-    }
     const neededTags = tagSet([...observed.values()].flatMap((rem) => rem.tags ?? []));
     const dependencies = new Set<string>();
     for (const tag of neededTags) {
@@ -231,49 +184,10 @@ export async function alignWorkspaceBaseline(
       observed.set(id, rem);
     const nextNative = new Map(context.native);
     for (const [id, current] of observed) {
-      if (addedIds.includes(id)) {
-        nextNative.set(id, structuredClone(current));
-        continue;
-      }
       const before = context.native.get(id)!;
-      // The SDK does not always collect this supplemental relationship list.
-      // Preserve an old known observation when absent; inline references are in text/backText.
-      const sourceCurrent =
-        (options.acceptNativeSource || parents.length > 0) &&
-        ids.includes(id) &&
-        current.references == null
-          ? { ...current, references: before.references }
-          : current;
-      const next = alignRecord(
-        options.acceptNativeSource && ids.includes(id)
-          ? {
-              ...before,
-              text: current.text,
-              backText: current.backText,
-              children: current.children,
-              tags: current.tags,
-              references: sourceCurrent.references,
-            }
-          : parents.includes(id)
-            ? { ...before, children: current.children }
-            : before,
-        sourceCurrent
-      );
+      const next = alignRecord(before, current);
       if (ids.includes(id)) nextNative.set(id, next);
     }
-    for (const parent of parents)
-      if (
-        nodeKind(context.native.get(parent)!, context.native) !==
-        nodeKind(nextNative.get(parent)!, nextNative)
-      )
-        throw new Error('Exact new children would change the existing parent content kind');
-    if (options.acceptNativeSource)
-      for (const id of ids)
-        if (
-          nodeKind(context.native.get(id)!, context.native) !==
-          nodeKind(nextNative.get(id)!, nextNative)
-        )
-          throw new Error(`Native source adoption cannot change an existing content kind: ${id}`);
     const next = structuredClone(previous);
     next.tagIds = registerTagIds(nextNative, neededTags, previous.tagIds);
     const paths = new Map(
@@ -282,12 +196,6 @@ export async function alignWorkspaceBaseline(
     const blocks = new Map(
       Object.entries(previous.entries).map(([id, entry]) => [id, entry.blockId])
     );
-    const usedBlocks = new Set(blocks.values());
-    for (const id of addedIds) {
-      const block = shortBlockId(id, usedBlocks);
-      blocks.set(id, block);
-      usedBlocks.add(block);
-    }
     const originalIds = new Set(
       Object.entries(previous.entries)
         .filter(([, entry]) => entry.originalHash)
@@ -308,17 +216,6 @@ export async function alignWorkspaceBaseline(
         title: context.parsed.get(path)!.metadata!.title ?? titleOf(nextNative.get(id)!),
       }))
     );
-    const oldLinks = new WorkspaceLinks(
-      [...paths].map(([id, path]) => ({
-        path,
-        metadata: documentMetadata(id, context.native, paths, {
-          blocks,
-          originalIds,
-          display: context.parsed.get(path)!.metadata!,
-        }),
-        title: context.parsed.get(path)!.metadata!.title ?? titleOf(context.native.get(id)!),
-      }))
-    );
     const writes = new Map<string, string | null>();
     let tagsAligned = 0,
       portalFieldsAligned = 0,
@@ -333,11 +230,7 @@ export async function alignWorkspaceBaseline(
         const rem = nextNative.get(node.key)!;
         if (original.tags == null) {
           tagsAligned++;
-          if (
-            !options.acceptNativeSource &&
-            node.tags?.length &&
-            hash(tagSet(node.tags)) !== hash(tagSet(rem.tags!))
-          )
+          if (node.tags?.length && hash(tagSet(node.tags)) !== hash(tagSet(rem.tags!)))
             throw new Error(
               `Existing local tags disagree with native observation: ${path}/${node.key}`
             );
@@ -356,108 +249,16 @@ export async function alignWorkspaceBaseline(
             portalFieldsAligned++;
       }
       const source = await context.inputs.read(path);
-      if (options.acceptNativeSource) {
-        const oldRendered = renderDocument(rootId, path, context.native, paths, {
-          blocks,
-          tagIds: previous.tagIds,
-          links: oldLinks,
-          attributes: before.attributes,
-          source: before,
-        });
-        if (preserveSourceHeader(path, source, oldRendered, before.metadata?.tags ?? []) !== source)
-          throw new Error(
-            `Cannot preserve existing local source bytes during native adoption: ${path}`
-          );
-      }
-      let content = options.acceptNativeSource
-        ? renderDocument(rootId, path, nextNative, paths, {
-            blocks,
-            tagIds: next.tagIds,
-            links,
-            attributes: before.attributes,
-            source: before,
-          })
-        : insertBaselineTags(path, source, rootTags, blockTags);
-      if (options.acceptNativeSource)
-        content = preserveSourceHeader(
-          path,
-          source,
-          content,
-          renderTags(nextNative.get(rootId)!.tags ?? [], next.tagIds)
-        );
-      const pathParents = parents.filter((parent) => previous.entries[parent]!.path === path);
-      const pathAdded = addedIds.filter((id) =>
-        pathParents.includes(observed.get(id)!.parent ?? '')
-      );
-      const accepting = pathParents.length > 0;
-      let renderedNodes = new Map<string, OutlineNode>();
-      if (accepting) {
-        const rendered = renderDocument(rootId, path, nextNative, paths, {
-          blocks,
-          tagIds: next.tagIds,
-          links,
-        });
-        const canonical = parsePreparedDocument(
-          bindPreparedDocument(prepareDocument(path, rendered), metadata(rootId)),
-          links,
-          next.tagIds,
-          nextNative
-        );
-        if (canonical.diagnostics.length)
-          throw new Error(`New children have no supported source projection: ${path}`);
-        renderedNodes = new Map(canonical.document.nodes.map((node) => [node.key, node]));
-        for (const parent of pathParents)
-          content = insertBaselineChildren(
-            path,
-            content,
-            rendered,
-            { block: blocks.get(parent)!, root: parent === rootId },
-            nextNative.get(parent)!.children.map((id) => blocks.get(id)!),
-            new Set(pathAdded.map((id) => blocks.get(id)!))
-          );
-      }
+      const content = insertBaselineTags(path, source, rootTags, blockTags);
       const parsed = parsePreparedDocument(
         bindPreparedDocument(prepareDocument(path, content), metadata(rootId)),
         links,
         next.tagIds,
         nextNative
       );
-      if (options.acceptNativeSource) {
-        const afterNodes = new Map(parsed.document.nodes.map((node) => [node.key, node]));
-        for (const node of before.nodes) {
-          const oldRem = context.native.get(node.key);
-          const newRem = nextNative.get(node.key);
-          const changed = oldRem && newRem && nativeSourceChanges(oldRem, newRem).fields;
-          const ownChanged =
-            changed?.some((field) => field !== 'children') ||
-            (oldRem?.tags == null && newRem?.tags?.length);
-          if (!ownChanged && node.contentHash !== afterNodes.get(node.key)?.contentHash)
-            throw new Error(
-              `Cannot preserve unchanged source content during native adoption: ${path}/${node.key}`
-            );
-        }
-      }
       if (
         parsed.diagnostics.length ||
-        (!options.acceptNativeSource &&
-          hash(
-            before.nodes.map((node) =>
-              authored(
-                parents.includes(node.key)
-                  ? { ...node, children: nextNative.get(node.key)!.children }
-                  : node
-              )
-            )
-          ) !==
-            hash(
-              parsed.document.nodes.filter((node) => !addedIds.includes(node.key)).map(authored)
-            )) ||
-        (accepting &&
-          pathAdded.some(
-            (id) =>
-              hash(authored(renderedNodes.get(id)!)) !==
-              hash(authored(parsed.document.nodes.find((node) => node.key === id)!))
-          ))
+        hash(before.nodes.map(authored)) !== hash(parsed.document.nodes.map(authored))
       )
         throw new Error(
           `Baseline alignment changed existing authored content or structure: ${path}`
@@ -475,29 +276,6 @@ export async function alignWorkspaceBaseline(
         const node = parsedNodes.get(id)!;
         if (!node || hash(tagSet(node.tags ?? [])) !== hash(tagSet(rem.tags ?? [])))
           throw new Error(`Native tags have no exact source projection: ${path}/${id}`);
-        if (addedIds.includes(id)) {
-          const rawPath = recordPath(id);
-          if (
-            Object.hasOwn(frozen.hashes(), rawPath) ||
-            Object.hasOwn(frozen.hashes(), originalPath('public', id))
-          )
-            throw new Error(`Unbound child would overwrite existing private evidence: ${id}`);
-          const raw = JSON.stringify(rem, null, 2) + '\n';
-          writes.set(rawPath, raw);
-          next.entries[id] = {
-            path,
-            blockId: blocks.get(id)!,
-            rawPath,
-            rawHash: hash(raw),
-            nativeHash: hash(rem),
-            editable: node.kind !== 'opaque',
-          };
-          if (rem.public) {
-            const publicText = JSON.stringify(rem.public, null, 2) + '\n';
-            writes.set(originalPath('public', id), publicText);
-            next.entries[id]!.publicHash = hash(publicText);
-          }
-        }
         const entry = next.entries[id]!;
         if (hash(rem) !== entry.nativeHash) {
           const raw = JSON.stringify(rem, null, 2) + '\n';
@@ -526,27 +304,14 @@ export async function alignWorkspaceBaseline(
               tags: rem.tags,
               powerupPresence: rem.powerupPresence,
               ...nativeProof(rem),
-              ...(addedIds.includes(id) || options.acceptNativeSource
-                ? { acceptedRecordHash: hash(rem) }
-                : {}),
             },
           ])
       );
     const nativeBefore = proof(observed);
-    const sourceChanges = options.acceptNativeSource
-      ? ids
-          .map((id) => ({
-            ...nativeSourceChanges(context.native.get(id)!, observed.get(id)!),
-            path: previous.entries[id]!.path,
-          }))
-          .filter((change) => change.fields.length)
-      : [];
     const planHash = hash({
       previous,
       files: frozen.hashes(),
       selection,
-      acceptedChildren: { parents, ids: addedIds },
-      acceptNativeSource: options.acceptNativeSource === true,
       nativeBefore,
       next,
       writes: [...writes],
@@ -562,11 +327,6 @@ export async function alignWorkspaceBaseline(
       tagsAligned,
       portalFieldsAligned,
       sealsAligned,
-      childrenAccepted: addedIds.length,
-      sourceFilesAccepted: options.acceptNativeSource ? selection.files.length : 0,
-      sourceChangedIds: sourceChanges.map((change) => change.id),
-      sourceChanges,
-      newIds: addedIds,
       localFilesChanged: writes.size,
       nativeProofHash: hash(nativeBefore),
       documentIdentityHash: hash(workspaceIdentity(next).documents),
@@ -580,14 +340,7 @@ export async function alignWorkspaceBaseline(
     }
     if (options.planHash !== planHash)
       throw new Error('Baseline alignment preview changed; review a fresh plan hash');
-    const verified = await readExact(
-      backend,
-      [...observed.keys()].filter((id) => !parents.length || !addedIds.includes(id)).sort(),
-      context
-    );
-    rejectPortalParents(verified);
-    if (parents.length)
-      for (const [id, rem] of await readExact(backend, addedIds, context)) verified.set(id, rem);
+    const verified = await readExact(backend, [...observed.keys()].sort(), context);
     if (hash(proof(verified)) !== hash(nativeBefore))
       throw new Error('Native observations changed before baseline publication');
     await frozen.check();

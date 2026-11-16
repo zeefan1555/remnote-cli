@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { alignWorkspaceBaseline } from '../../../src/business/workspace/baseline.js';
+import { bindFeedbackRoles } from '../../../src/business/workspace/feedback.js';
 import { insertBaselineTags } from '../../../src/business/workspace/baseline-tags.js';
 import {
   inspectLocal,
@@ -73,8 +74,10 @@ async function fixture(portal = false) {
     }),
     native('home', { text: ['HOME'] }),
     native('term', { text: ['term'] }),
+    native('todo', { text: ['TODO'] }),
+    native('done', { text: ['DONE'] }),
   ];
-  const state = await writeSnapshot(directory, 'kb', old);
+  let state = await writeSnapshot(directory, 'kb', old);
   delete state.entries.child!.readonlyHash;
   await saveState(directory, state);
   const rems = new Map(old.map((rem) => [rem.id, structuredClone(rem)]));
@@ -87,6 +90,9 @@ async function fixture(portal = false) {
     read: vi.fn(async (ids: string[]) => ids.map((id) => structuredClone(rems.get(id)!))),
   } as unknown as WorkspaceBackend;
   const connect = vi.fn(async () => backend);
+  await bindFeedbackRoles(directory, connect, { todoTagId: 'todo', doneTagId: 'done' });
+  state = await loadState(directory);
+  connect.mockClear();
   return { state, rems, backend, connect, path: state.entries.day!.path };
 }
 
@@ -108,7 +114,12 @@ describe('explicit missing-observation baseline alignment', () => {
     const current = await inspectLocal(directory);
     expect(current.diagnostics).toEqual([]);
     expect(current.dirty).toEqual([]);
-    expect(current.state.tagIds).toEqual({ HOME: 'home', term: 'term' });
+    expect(current.state.tagIds).toEqual({
+      HOME: 'home',
+      term: 'term',
+      TODO: 'todo',
+      DONE: 'done',
+    });
     expect(await files.readPrivate(directory, f.path)).toBe(
       insertBaselineTags(
         f.path,

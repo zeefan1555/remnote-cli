@@ -144,22 +144,9 @@ use `sync baseline-align DIR [--path PATH]` to preview missing observations, the
 the same selectors with `--apply --plan-hash HASH`; see the command reference.
 After role binding, alignment refuses TODO/DONE lifecycle tags, unknown direct
 tags, nonempty feedback partitions and physical-child drift before local writes.
-Only when the user also authorizes exact native additions, add
-`--accept-new-parent ID --accept-new-child ID` (repeat both options for the
-complete reviewed sets). Every selected parent must have a selected child. This
-accepts supported unbound leaves only, preserves
-old child order and parent kind, and rejects every other content/identity drift;
-never infer these IDs from a failed sync or use this as automatic conflict repair.
-For separately approved whole-file native source adoption, use
-`--accept-native-source --path 'Exact.md'` instead. Exact files and clean source
-are required; inspect `sourceChanges` and `newIds` before exact-hash apply. It may
-re-render only those approved files if the prior body is losslessly renderable;
-otherwise it refuses without changing source. It preserves YAML comments and
-unchanged nodes as well as existing Cards/history/originals;
-deletion, reparenting, cross-file additions and existing kind changes still stop.
-This one-time operation never enables incoming changes in ordinary sync.
-This separate local publication makes zero native writes and is never an implicit
-step of bind, capture or ordinary sync. Capture also requires clean source, one separate direct
+Before role binding, alignment refuses unknown nonempty native tags; an observed
+empty set is allowed. Native-source and exact-new-child adoption are disabled:
+unbound content can be TODO feedback even without a tag. Capture requires clean source, one separate direct
 physical non-card TODO subtree, and a preexisting exact native reference plus
 reciprocal backlink to each canonical target in one file. Plain feedback without
 that native link, canonical TODO nodes, Portals/cards, and no-change confirmation
@@ -347,8 +334,7 @@ remain mandatory, unknown outcomes are never retried automatically.
 Deletion requires existing, exact TODO/DONE roles bound in advance, with observed
 empty feedback partitions and no TODO/DONE tag on every deleted Rem and surviving
 parent; unknown or changed evidence stops deletion. Never guess or create tags to
-bypass this. Complete separately authorized native-source adoption before binding;
-adoption currently rejects bound feedback roles. Ordinary edits do not
+bypass this. Native-source adoption is disabled regardless of binding. Ordinary edits do not
 require feedback binding. These checks are optimistic, not atomic CAS.
 Missing directories, identity collisions, and an entire multi-document directory
 disappearing fail closed; directory deletion is unsupported. Any new nodes

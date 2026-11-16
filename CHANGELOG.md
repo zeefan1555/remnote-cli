@@ -15,16 +15,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   gates remain mandatory; unrelated SDK operations gain no authority.
 - `--scope changed` reads locally dirty selected documents and dependencies; a
   clean sync has `remoteChecked: false` and does not claim remote freshness.
-- Add explicit one-time `sync baseline-align --accept-native-source --path FILE`
-  adoption for approved exact documents. Preview lists changed IDs/fields and
-  new descendants without body text; exact-hash apply re-renders only those
-  files through local recovery with zero native writes. Preserve existing
-  Rem/Card identities, history and originals; reject deletion, reparenting,
-  cross-document additions, card-kind changes and other immutable drift.
-  Reject non-losslessly-renderable prior Markdown and unrelated node rewrites;
-  retain source YAML comments and unrelated fields.
-  Ordinary sync remains strictly local-authoritative, without incoming/LWW.
-
 - Add explicit clean-source `sync feedback bind/capture/ack`. Exact non-card
   TODO/DONE attachments stay outside canonical source while physical order is
   preserved through insertion and recovery. Bind never rewrites Markdown or
@@ -38,14 +28,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   rejects known drift and local edits, inserts exact YAML/bullet tag tokens without
   rerendering authored Markdown, and uses recoverable local publication. It never
   creates or changes native Rems, Cards or review history.
-- Extend that explicit initializer with repeated `--accept-new-parent ID` and
-  `--accept-new-child ID` for exact authorized sets of unbound native leaves.
-  Preserve old child order, parent content kind, source bytes and Card/history
-  records; reject other drift. Reject known or observed Portal parents before
-  reading new children and retain known references when the SDK omits them.
-  Bind the exact set and fresh leaf snapshots into
-  the preview hash and use the same zero-native-write local recovery path.
-
 - Workspace publishing is local-authoritative after explicit empty-vault import.
   Local edits publish against the verified baseline; identical content converges.
   Other native body/tag drift archives both versions and blocks every write; new
@@ -60,12 +42,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Disable native-source and exact-child adoption before connecting, because
+  unbound content may be feedback even without lifecycle tags. Unclassified
+  nonempty native tags require exact role binding before alignment.
 - Refuse baseline alignment when bound feedback roles appear on selected Rems,
   or their feedback attachment and physical-child evidence is unsafe.
 - Require exact bound TODO/DONE roles and freshly observed empty physical feedback
   partitions before mirrored deletion; unknown or changed feedback stops mutation.
-- Never discover native descendants through a Portal during explicit source adoption, including when
-  either sealed or fresh type is unknown but Portal metadata is present.
 - Fail closed on ambiguous identity loss or path replacement, missing directory
   evidence, any known surviving native references and answer-only deletion; recheck
   frozen local files and directory identity at each destructive boundary. Delete
