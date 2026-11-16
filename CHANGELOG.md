@@ -21,6 +21,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   files through local recovery with zero native writes. Preserve existing
   Rem/Card identities, history and originals; reject deletion, reparenting,
   cross-document additions, card-kind changes and other immutable drift.
+  Reject non-losslessly-renderable prior Markdown and unrelated node rewrites;
+  retain source YAML comments and unrelated fields.
   Ordinary sync remains strictly local-authoritative, without incoming/LWW.
 
 - Add explicit clean-source `sync feedback bind/capture/ack`. Exact non-card
@@ -36,8 +38,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   rejects known drift and local edits, inserts exact YAML/bullet tag tokens without
   rerendering authored Markdown, and uses recoverable local publication. It never
   creates or changes native Rems, Cards or review history.
-- Extend that explicit initializer with `--accept-new-parent ID` and repeated
-  `--accept-new-child ID` for one exact authorized set of unbound native leaves.
+- Extend that explicit initializer with repeated `--accept-new-parent ID` and
+  `--accept-new-child ID` for exact authorized sets of unbound native leaves.
   Preserve old child order, parent content kind, source bytes and Card/history
   records; reject other drift. Bind the exact set and fresh leaf snapshots into
   the preview hash and use the same zero-native-write local recovery path.

@@ -136,14 +136,17 @@ are a reported blocker. Only with explicit baseline-initialization authorization
 use `sync baseline-align DIR [--path PATH]` to preview missing observations, then
 the same selectors with `--apply --plan-hash HASH`; see the command reference.
 Only when the user also authorizes exact native additions, add
-`--accept-new-parent ID --accept-new-child ID` (repeat the child option for the
-complete reviewed set). This accepts supported unbound leaves only, preserves
+`--accept-new-parent ID --accept-new-child ID` (repeat both options for the
+complete reviewed sets). Every selected parent must have a selected child. This
+accepts supported unbound leaves only, preserves
 old child order and parent kind, and rejects every other content/identity drift;
 never infer these IDs from a failed sync or use this as automatic conflict repair.
 For separately approved whole-file native source adoption, use
 `--accept-native-source --path 'Exact.md'` instead. Exact files and clean source
 are required; inspect `sourceChanges` and `newIds` before exact-hash apply. It may
-re-render only those approved files, preserving existing Cards/history/originals;
+re-render only those approved files if the prior body is losslessly renderable;
+otherwise it refuses without changing source. It preserves YAML comments and
+unchanged nodes as well as existing Cards/history/originals;
 deletion, reparenting, cross-file additions and existing kind changes still stop.
 This one-time operation never enables incoming changes in ordinary sync.
 This separate local publication makes zero native writes and is never an implicit

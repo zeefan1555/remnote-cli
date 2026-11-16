@@ -105,7 +105,7 @@ export async function alignWorkspaceBaseline(
     paths?: string[];
     apply?: boolean;
     planHash?: string;
-    acceptNewParent?: string;
+    acceptNewParent?: string[];
     acceptNewChild?: string[];
     acceptNativeSource?: boolean;
   } = {}
@@ -113,22 +113,22 @@ export async function alignWorkspaceBaseline(
   if (options.apply && !/^[a-f0-9]{64}$/.test(options.planHash ?? ''))
     throw new Error('baseline-align --apply requires an exact --plan-hash');
   let addedIds = options.acceptNewChild ?? [];
-  if (
-    options.acceptNativeSource &&
-    (!options.paths?.length || options.acceptNewParent !== undefined || addedIds.length)
-  )
+  const parents = options.acceptNewParent ?? [];
+  if (options.acceptNativeSource && (!options.paths?.length || parents.length || addedIds.length))
     throw new Error(
       'Native source adoption requires explicit exact --path files and cannot mix acceptance modes'
     );
-  if (options.acceptNewParent !== undefined || addedIds.length) {
+  if (parents.length || addedIds.length) {
     if (
-      !idSchema.safeParse(options.acceptNewParent).success ||
+      !parents.length ||
+      parents.some((id) => !idSchema.safeParse(id).success) ||
+      new Set(parents).size !== parents.length ||
       !addedIds.length ||
       addedIds.some((id) => !idSchema.safeParse(id).success) ||
       new Set(addedIds).size !== addedIds.length
     )
       throw new Error(
-        'Exact child acceptance requires one parent and a nonempty unique new-child ID list'
+        'Exact child acceptance requires unique parents and a nonempty unique new-child ID list'
       );
   }
   const root = await workspaceDirectory(directory);
@@ -152,7 +152,7 @@ export async function alignWorkspaceBaseline(
     const selection = await selectFiles(context, options.paths);
     if (!selection.files.length) throw new Error('Baseline alignment selected no bound documents');
     const ids = tagSet(selection.files.flatMap((path) => previous.documents[path]!.nodeIds));
-    if (options.acceptNewParent && !ids.includes(options.acceptNewParent))
+    if (parents.some((id) => !ids.includes(id)))
       throw new Error('Exact new-child parent must be bound in the selected documents');
     for (const id of addedIds)
       if (context.native.has(id) || previous.entries[id])
@@ -178,13 +178,13 @@ export async function alignWorkspaceBaseline(
       addedIds = await readNativeSourceClosure(context, selection.files, observed, (newIds) =>
         readExact(backend, newIds, context)
       );
-    if (options.acceptNewParent)
-      verifyNewChildren(
-        context.native.get(options.acceptNewParent)!,
-        observed.get(options.acceptNewParent)!,
-        addedIds,
-        observed
-      );
+    if (parents.length && addedIds.some((id) => !parents.includes(observed.get(id)!.parent ?? '')))
+      throw new Error('Every exact new child must belong to a selected parent');
+    for (const parent of parents) {
+      const children = addedIds.filter((id) => observed.get(id)!.parent === parent);
+      if (!children.length) throw new Error(`Exact parent has no selected child: ${parent}`);
+      verifyNewChildren(context.native.get(parent)!, observed.get(parent)!, children, observed);
+    }
     const neededTags = tagSet([...observed.values()].flatMap((rem) => rem.tags ?? []));
     const dependencies = new Set<string>();
     for (const tag of neededTags) {
@@ -222,19 +222,19 @@ export async function alignWorkspaceBaseline(
               tags: current.tags,
               references: sourceCurrent.references,
             }
-          : id === options.acceptNewParent
+          : parents.includes(id)
             ? { ...before, children: current.children }
             : before,
         sourceCurrent
       );
       if (ids.includes(id)) nextNative.set(id, next);
     }
-    if (
-      options.acceptNewParent &&
-      nodeKind(context.native.get(options.acceptNewParent)!, context.native) !==
-        nodeKind(nextNative.get(options.acceptNewParent)!, nextNative)
-    )
-      throw new Error('Exact new children would change the existing parent content kind');
+    for (const parent of parents)
+      if (
+        nodeKind(context.native.get(parent)!, context.native) !==
+        nodeKind(nextNative.get(parent)!, nextNative)
+      )
+        throw new Error('Exact new children would change the existing parent content kind');
     if (options.acceptNativeSource)
       for (const id of ids)
         if (
@@ -276,6 +276,17 @@ export async function alignWorkspaceBaseline(
         title: context.parsed.get(path)!.metadata!.title ?? titleOf(nextNative.get(id)!),
       }))
     );
+    const oldLinks = new WorkspaceLinks(
+      [...paths].map(([id, path]) => ({
+        path,
+        metadata: documentMetadata(id, context.native, paths, {
+          blocks,
+          originalIds,
+          display: context.parsed.get(path)!.metadata!,
+        }),
+        title: context.parsed.get(path)!.metadata!.title ?? titleOf(context.native.get(id)!),
+      }))
+    );
     const writes = new Map<string, string | null>();
     let tagsAligned = 0,
       portalFieldsAligned = 0,
@@ -313,6 +324,19 @@ export async function alignWorkspaceBaseline(
             portalFieldsAligned++;
       }
       const source = await context.inputs.read(path);
+      if (options.acceptNativeSource) {
+        const oldRendered = renderDocument(rootId, path, context.native, paths, {
+          blocks,
+          tagIds: previous.tagIds,
+          links: oldLinks,
+          attributes: before.attributes,
+          source: before,
+        });
+        if (preserveSourceHeader(path, source, oldRendered, before.metadata?.tags ?? []) !== source)
+          throw new Error(
+            `Cannot preserve existing local source bytes during native adoption: ${path}`
+          );
+      }
       let content = options.acceptNativeSource
         ? renderDocument(rootId, path, nextNative, paths, {
             blocks,
@@ -329,8 +353,11 @@ export async function alignWorkspaceBaseline(
           content,
           renderTags(nextNative.get(rootId)!.tags ?? [], next.tagIds)
         );
-      const accepting =
-        options.acceptNewParent && previous.entries[options.acceptNewParent]!.path === path;
+      const pathParents = parents.filter((parent) => previous.entries[parent]!.path === path);
+      const pathAdded = addedIds.filter((id) =>
+        pathParents.includes(observed.get(id)!.parent ?? '')
+      );
+      const accepting = pathParents.length > 0;
       let renderedNodes = new Map<string, OutlineNode>();
       if (accepting) {
         const rendered = renderDocument(rootId, path, nextNative, paths, {
@@ -347,17 +374,15 @@ export async function alignWorkspaceBaseline(
         if (canonical.diagnostics.length)
           throw new Error(`New children have no supported source projection: ${path}`);
         renderedNodes = new Map(canonical.document.nodes.map((node) => [node.key, node]));
-        content = insertBaselineChildren(
-          path,
-          content,
-          rendered,
-          {
-            block: blocks.get(options.acceptNewParent!)!,
-            root: options.acceptNewParent === rootId,
-          },
-          nextNative.get(options.acceptNewParent!)!.children.map((id) => blocks.get(id)!),
-          new Set(addedIds.map((id) => blocks.get(id)!))
-        );
+        for (const parent of pathParents)
+          content = insertBaselineChildren(
+            path,
+            content,
+            rendered,
+            { block: blocks.get(parent)!, root: parent === rootId },
+            nextNative.get(parent)!.children.map((id) => blocks.get(id)!),
+            new Set(pathAdded.map((id) => blocks.get(id)!))
+          );
       }
       const parsed = parsePreparedDocument(
         bindPreparedDocument(prepareDocument(path, content), metadata(rootId)),
@@ -365,13 +390,28 @@ export async function alignWorkspaceBaseline(
         next.tagIds,
         nextNative
       );
+      if (options.acceptNativeSource) {
+        const afterNodes = new Map(parsed.document.nodes.map((node) => [node.key, node]));
+        for (const node of before.nodes) {
+          const oldRem = context.native.get(node.key);
+          const newRem = nextNative.get(node.key);
+          const changed = oldRem && newRem && nativeSourceChanges(oldRem, newRem).fields;
+          const ownChanged =
+            changed?.some((field) => field !== 'children') ||
+            (oldRem?.tags == null && newRem?.tags?.length);
+          if (!ownChanged && node.contentHash !== afterNodes.get(node.key)?.contentHash)
+            throw new Error(
+              `Cannot preserve unchanged source content during native adoption: ${path}/${node.key}`
+            );
+        }
+      }
       if (
         parsed.diagnostics.length ||
         (!options.acceptNativeSource &&
           hash(
             before.nodes.map((node) =>
               authored(
-                node.key === options.acceptNewParent
+                parents.includes(node.key)
                   ? { ...node, children: nextNative.get(node.key)!.children }
                   : node
               )
@@ -381,7 +421,7 @@ export async function alignWorkspaceBaseline(
               parsed.document.nodes.filter((node) => !addedIds.includes(node.key)).map(authored)
             )) ||
         (accepting &&
-          addedIds.some(
+          pathAdded.some(
             (id) =>
               hash(authored(renderedNodes.get(id)!)) !==
               hash(authored(parsed.document.nodes.find((node) => node.key === id)!))
@@ -473,7 +513,7 @@ export async function alignWorkspaceBaseline(
       previous,
       files: frozen.hashes(),
       selection,
-      acceptedChildren: { parent: options.acceptNewParent ?? null, ids: addedIds },
+      acceptedChildren: { parents, ids: addedIds },
       acceptNativeSource: options.acceptNativeSource === true,
       nativeBefore,
       next,

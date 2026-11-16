@@ -111,6 +111,18 @@ async function fixture(knownObservations = false) {
   };
 }
 describe('explicit selected native source adoption', () => {
+  it('refuses whole-page adoption if an unrelated source format cannot be preserved', async () => {
+    const f = await fixture();
+    const source = (await files.readPrivate(directory, f.path)).replace('- old ', '-   old  ');
+    await files.writePrivate(directory, f.path, source);
+    f.state.documents[f.path]!.fileHash = hash(source);
+    await saveState(directory, f.state);
+    await expect(alignWorkspaceBaseline(directory, f.connect, f.options)).rejects.toThrow(
+      'preserv'
+    );
+    expect(await files.readPrivate(directory, f.path)).toBe(source);
+    expect(await loadState(directory)).toEqual(f.state);
+  });
   it('preserves uncollected references and YAML comments when an approved root tag is removed', async () => {
     const f = await fixture(true);
     delete f.rems.get('question')!.references;
@@ -246,7 +258,7 @@ describe('explicit selected native source adoption', () => {
     if (kind === 'no-path') f.options.paths = [];
     if (kind === 'directory') f.options.paths = ['.'];
     if (kind === 'mixed-mode')
-      Object.assign(f.options, { acceptNewParent: 'question', acceptNewChild: ['new'] });
+      Object.assign(f.options, { acceptNewParent: ['question'], acceptNewChild: ['new'] });
     if (kind === 'deletion') f.rems.get('doc')!.children = ['question', 'new'];
     if (kind === 'missing') f.rems.delete('answer');
     if (kind === 'reparent') f.rems.get('answer')!.parent = 'new';

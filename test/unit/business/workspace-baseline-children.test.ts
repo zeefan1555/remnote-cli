@@ -109,13 +109,75 @@ async function fixture(multiline = false) {
   const connect = vi.fn(async () => backend);
   const options = {
     paths: [path],
-    acceptNewParent: 'parent',
+    acceptNewParent: ['parent'],
     acceptNewChild: additions.map((r) => r.id),
   };
   return { old, state, path, rems, backend, connect, options };
 }
 
 describe('explicit exact new children baseline initialization', () => {
+  it('inserts under two exact parents without changing any existing source bytes', async () => {
+    const f = await fixture();
+    const additions = ['added_0', 'sibling_added'];
+    f.rems.get('parent')!.children = ['first', 'last', 'added_0'];
+    f.rems.get('sibling')!.children = ['sibling_added'];
+    f.rems.set('sibling_added', native('sibling_added', { parent: 'sibling' }));
+    f.options.acceptNewParent = ['parent', 'sibling'];
+    f.options.acceptNewChild = additions;
+    const source = (await files.readPrivate(directory, f.path)).replace('- last ', '-   last  ');
+    await files.writePrivate(directory, f.path, source);
+    f.state.documents[f.path]!.fileHash = hash(source);
+    await saveState(directory, f.state);
+    const preview = await alignWorkspaceBaseline(directory, f.connect, f.options);
+    await alignWorkspaceBaseline(directory, f.connect, {
+      ...f.options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    const after = await inspectLocal(directory);
+    const written = await files.readPrivate(directory, f.path);
+    expect(
+      written
+        .split('\n')
+        .filter(
+          (line) => !additions.some((id) => line.includes(`^${after.state.entries[id]!.blockId}`))
+        )
+        .join('\n')
+    ).toBe(source);
+    expect(after.diagnostics).toEqual([]);
+    expect(after.dirty).toEqual([]);
+  });
+  it.each(['extra', 'order', 'body', 'wrong-parent', 'empty-parent', 'stale'] as const)(
+    'rejects %s in a multi-parent acceptance',
+    async (kind) => {
+      const f = await fixture();
+      f.rems.get('parent')!.children = ['first', 'last', 'added_0'];
+      f.rems.get('sibling')!.children = ['sibling_added'];
+      f.rems.set('sibling_added', native('sibling_added', { parent: 'sibling' }));
+      f.options.acceptNewParent = ['parent', 'sibling'];
+      f.options.acceptNewChild = ['added_0', 'sibling_added'];
+      if (kind === 'extra') f.rems.get('parent')!.children.push('added_1');
+      if (kind === 'order') f.rems.get('parent')!.children = ['last', 'first', 'added_0'];
+      if (kind === 'body') f.rems.get('sibling')!.text = ['unexpected edit'];
+      if (kind === 'wrong-parent') f.rems.get('sibling_added')!.parent = 'parent';
+      if (kind === 'empty-parent') {
+        f.options.acceptNewParent.push('first');
+      }
+      if (kind === 'stale') {
+        const preview = await alignWorkspaceBaseline(directory, f.connect, f.options);
+        f.options.acceptNewParent.reverse();
+        await expect(
+          alignWorkspaceBaseline(directory, f.connect, {
+            ...f.options,
+            apply: true,
+            planHash: preview.planHash,
+          })
+        ).rejects.toThrow();
+      } else
+        await expect(alignWorkspaceBaseline(directory, f.connect, f.options)).rejects.toThrow();
+      expect(await loadState(directory)).toEqual(f.state);
+    }
+  );
   it('keeps a multiline parent and all original cards while accepting twelve answer leaves including six empty leaves', async () => {
     const f = await fixture(true);
     const source = (await files.readPrivate(directory, f.path)).replace(/\n/g, '\r\n');

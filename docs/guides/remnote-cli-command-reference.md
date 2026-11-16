@@ -483,9 +483,10 @@ records; its history count reports only freshly known histories, never claims
 that unknown history is empty. Interrupted local publication uses `sync recover`.
 
 Only with explicit authorization to accept an already-reviewed exact set of new
-native leaves, add `--accept-new-parent ID` and repeat `--accept-new-child ID` for
-every new child. The parent must be bound in the selected files; every supplied
-child must be unbound, a supported leaf and directly parented there. The original
+native leaves, repeat `--accept-new-parent ID` and `--accept-new-child ID` for
+the complete parent and child sets. Every parent must be bound in the selected
+files and have at least one supplied child; every supplied child must be unbound,
+a supported leaf and directly parented to a selected parent. The original
 children must remain an ordered subsequence, and the complete difference must
 equal the supplied set. The parent's content kind cannot change. New leaves are
 inserted at their exact native positions using renderer-produced bullets while
@@ -505,7 +506,10 @@ descendants inside those documents. Missing/deleted or reparented old nodes,
 new Document/Folder boundaries, cross-file additions, changed Card identities,
 existing content-kind changes and other immutable drift are refused. Existing
 Cards/history, facts, original records and block identities are retained; no
-outside file or verification-only dependency is adopted. Preview returns
+outside file or verification-only dependency is adopted. Existing local body bytes
+must match a lossless rendering of the old baseline and unchanged nodes must
+remain unchanged; otherwise adoption refuses rather than normalize formatting.
+YAML comments and unrelated fields are retained. Preview returns
 `sourceChangedIds`, `sourceChanges` (field names, added-child IDs and old-order
 changes), and `newIds`, never body text. Missing tag initialization is reported
 separately by `tagsAligned`. Review this exact scope before `--apply --plan-hash

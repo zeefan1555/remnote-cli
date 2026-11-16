@@ -34,7 +34,7 @@ interface SyncOptions {
   editableRootId?: string;
   contentFile?: string;
   expectedFileHash?: string;
-  acceptNewParent?: string;
+  acceptNewParent?: string[];
   acceptNewChild?: string[];
   acceptNativeSource?: boolean;
 }
@@ -229,7 +229,8 @@ export function registerSyncCommands(program: Command): void {
     )
     .option(
       '--accept-new-parent <id>',
-      'Explicitly accept exact new native leaves under this bound parent'
+      'Explicitly accept exact new native leaves under this bound parent; repeatable',
+      (value: string, ids: string[] = []) => ids.concat(value)
     )
     .option(
       '--accept-new-child <id>',

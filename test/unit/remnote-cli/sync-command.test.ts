@@ -88,6 +88,8 @@ describe('sync command interface', () => {
       'Day.md',
       '--accept-new-parent',
       'parent',
+      '--accept-new-parent',
+      'second',
       '--accept-new-child',
       'one',
       '--accept-new-child',
@@ -101,7 +103,7 @@ describe('sync command interface', () => {
       expect.any(Function),
       {
         paths: ['Day.md'],
-        acceptNewParent: 'parent',
+        acceptNewParent: ['parent', 'second'],
         acceptNewChild: ['one', 'two'],
         apply: true,
         planHash: 'a'.repeat(64),
