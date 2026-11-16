@@ -13,6 +13,21 @@ import {
 } from './types.js';
 import { nativeProof } from './outline.js';
 import type { ContentVersion } from './types.js';
+import type { LocalState } from '../../remnote-cli/client/local-state.js';
+
+/** Workspace locking serializes captures and executions; gaps after interruption are safe. */
+export async function publisherCursor(store: LocalState, root: string): Promise<number> {
+  const cursor = (await store.getLocal<number>(`publisher-execution:${hash(root)}`)) ?? 0;
+  if (!Number.isSafeInteger(cursor) || cursor < 0)
+    throw new Error('Invalid publisher execution cursor');
+  return cursor;
+}
+export async function startPublisherExecution(store: LocalState, root: string): Promise<number> {
+  const next = (await publisherCursor(store, root)) + 1;
+  if (!Number.isSafeInteger(next)) throw new Error('Publisher execution cursor exhausted');
+  await store.setLocal(`publisher-execution:${hash(root)}`, next);
+  return next;
+}
 
 export interface Journal {
   version: 2;
@@ -24,6 +39,9 @@ export interface Journal {
   steps: Record<string, 'started' | 'verified' | 'unknown'>;
   ids: Record<string, string>;
   selection: SyncSelection;
+  physicalBaseline?: SyncPlan['physicalBaseline'];
+  /** Monotonic actual-apply ordering, allocated durably before any native setter. */
+  executionSequence?: number;
   /** Exact-ID resume collected tags on created Rems; recovery must use the same projection. */
   resumed?: true;
   /** Original input-bound proof is sealed by planHash before the first SDK mutation. */
@@ -46,6 +64,9 @@ export function finalProofHash(journal: Journal): string {
   const { proofHash: _proofHash, ...final } = journal.final!;
   return hash({
     planHash: journal.planHash,
+    ...(journal.executionSequence === undefined
+      ? {}
+      : { executionSequence: journal.executionSequence }),
     selection: journal.selection,
     ids: journal.ids,
     final,
@@ -201,11 +222,11 @@ export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string
           !p ||
           rem.parent !== null ||
           p.children.includes(id) ||
-          change.position > p.children.length
+          (change.physicalPosition ?? change.position) > p.children.length
         )
           throw new Error('Resume parent step has an inconsistent ordered graph');
         const children = [...p.children];
-        children.splice(change.position, 0, id);
+        children.splice(change.physicalPosition ?? change.position, 0, id);
         expected.set(id, { ...rem, parent });
         expected.set(parent, { ...p, children });
         structuralIds.add(parent);

@@ -75,6 +75,11 @@ import {
 } from '../../../src/business/workspace/publication.js';
 import type { Journal } from '../../../src/business/workspace/resume.js';
 import { formatWorkspace } from '../../../src/business/workspace/format.js';
+import {
+  bindFeedbackRoles,
+  captureFeedback,
+  acknowledgeFeedback,
+} from '../../../src/business/workspace/feedback.js';
 import { stringify as yamlStringify } from 'yaml';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
@@ -327,6 +332,522 @@ async function prepare(setup?: (f: ReturnType<typeof fixture>) => void) {
 async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
 }
+
+describe('exact feedback partition regression', () => {
+  async function feedbackFixture() {
+    const f = await prepare((f) => {
+      f.rems.set('todo', native('todo', ['TODO']));
+      f.rems.set('done', native('done', ['DONE']));
+    });
+    await bindFeedbackRoles(directory, async () => f.backend, {
+      todoTagId: 'todo',
+      doneTagId: 'done',
+    });
+    f.rems.get('question')!.children.push('feedback');
+    f.rems.set(
+      'feedback',
+      native('feedback', ['Explain more ', { i: 'q', _id: 'question' }], {
+        parent: 'question',
+        tags: ['todo'],
+        cards: [],
+        facts: { isTodo: true, todoStatus: 'Unfinished' },
+      })
+    );
+    const refs = (id: string) =>
+      (f.rems.get(id)!.text as unknown[]).flatMap((part) =>
+        part && typeof part === 'object' && 'i' in part && part.i === 'q' && '_id' in part
+          ? [String(part._id)]
+          : []
+      );
+    f.backend.feedbackFacts = vi.fn(async (id) => ({
+      isTodo: f.rems.get(id)!.facts?.isTodo === true,
+      status: f.rems.get(id)!.facts?.todoStatus ?? null,
+      references: refs(id),
+      backlinks: [...f.rems.keys()].filter((other) => refs(other).includes(id)),
+    }));
+    f.backend.finishTodo = vi.fn(async (id) => {
+      f.calls.push(`${id}:checkbox`);
+      f.rems.get(id)!.facts!.todoStatus = 'Finished';
+    });
+    return f;
+  }
+  async function publishedFeedback() {
+    const f = await feedbackFixture();
+    const captured = await captureFeedback(directory, async () => f.backend, 'feedback', [
+      'question',
+    ]);
+    await edit(f.path, (source) => source.replace('Why?', 'Why exactly?'));
+    const sourceHash = hash(await readPrivate(directory, f.path));
+    const published = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: sourceHash,
+    })) as { status: string; planHash: string };
+    expect(published.status).toBe('verified');
+    return { ...f, captured, published };
+  }
+  it('completes explicit capture → local edit → one guarded publication → exact acknowledgment', async () => {
+    const f = await publishedFeedback();
+    const before = await loadState(directory);
+    expect(before.entries.feedback).toBeUndefined();
+    expect(
+      JSON.parse(await readPrivate(directory, before.entries.question!.rawPath)).children
+    ).toEqual(['answer', 'feedback']);
+    expect(
+      await acknowledgeFeedback(
+        directory,
+        async () => f.backend,
+        f.captured.receipt,
+        f.published.planHash
+      )
+    ).toMatchObject({ status: 'acknowledged', remoteWrites: 3, publicationWrites: 0 });
+    expect(f.rems.get('feedback')!.tags).toEqual(['done']);
+    expect(f.rems.get('feedback')!.facts!.todoStatus).toBe('Finished');
+    expect(
+      await acknowledgeFeedback(
+        directory,
+        async () => f.backend,
+        f.captured.receipt,
+        f.published.planHash
+      )
+    ).toMatchObject({ remoteWrites: 0 });
+    expect(f.calls.filter((call) => call === 'question:text')).toHaveLength(1);
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'unchanged',
+      remoteWrites: 0,
+    });
+  }, 15_000);
+  it('rejects dirty capture and pre-capture or no-op publication proofs with zero ack writes', async () => {
+    const f = await publishedFeedback(),
+      count = f.calls.length;
+    const source = await readPrivate(directory, f.path);
+    f.rems.get('feedback')!.text.push(' A new revision');
+    await edit(f.path, (value) => value.replace('Chapter', 'Unrelated chapter'));
+    await expect(
+      captureFeedback(directory, async () => f.backend, 'feedback', ['question'])
+    ).rejects.toThrow('clean');
+    await writePrivate(directory, f.path, source);
+    const captured = await captureFeedback(directory, async () => f.backend, 'feedback', [
+      'question',
+    ]);
+    expect(
+      (await captureFeedback(directory, async () => f.backend, 'feedback', ['question'])).receipt
+    ).toBe(captured.receipt);
+    await expect(
+      acknowledgeFeedback(directory, async () => f.backend, captured.receipt, f.published.planHash)
+    ).rejects.toThrow('Publisher proof');
+    const noop = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: hash(source),
+    })) as { planHash: string };
+    await expect(
+      acknowledgeFeedback(directory, async () => f.backend, captured.receipt, noop.planHash)
+    ).rejects.toThrow();
+    expect(f.calls).toHaveLength(count);
+  });
+  it('runs capture, guarded publish and idempotent ack through the real public CLI parser', async () => {
+    const f = await feedbackFixture();
+    const run = async (args: string[]) => {
+      const result = await syntheticCli(f.backend, args).result;
+      expect(result.code, result.stderr).toBe(0);
+      return JSON.parse(result.stdout) as Record<string, unknown>;
+    };
+    const captured = await run([
+      'sync',
+      'feedback',
+      'capture',
+      directory,
+      '--id',
+      'feedback',
+      '--target-id',
+      'question',
+    ]);
+    await edit(f.path, (source) => source.replace('Why?', 'Why exactly?'));
+    const published = await run([
+      'sync',
+      'apply',
+      directory,
+      '--path',
+      f.path,
+      '--expected-file-hash',
+      hash(await readPrivate(directory, f.path)),
+    ]);
+    const args = [
+      '--allow-destructive',
+      'sync',
+      'feedback',
+      'ack',
+      directory,
+      '--receipt',
+      String(captured.receipt),
+      '--plan-hash',
+      String(published.planHash),
+    ];
+    expect(await run(args)).toMatchObject({ status: 'acknowledged', remoteWrites: 3 });
+    expect(await run(args)).toMatchObject({ status: 'acknowledged', remoteWrites: 0 });
+    expect(f.calls.filter((call) => call === 'question:text')).toHaveLength(1);
+  });
+  it('binds only already-aligned source, preserving all Markdown bytes including YAML comments', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.set('todo', native('todo', ['TODO']));
+      rems.set('done', native('done', ['DONE']));
+    });
+    await edit(f.path, (source) =>
+      source.replace('---\n', '---\n# Local explanation must survive role binding\n')
+    );
+    await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: hash(await readPrivate(directory, f.path)),
+    });
+    const before = await Promise.all(
+      Object.keys((await loadState(directory)).documents).map(
+        async (path) => [path, await readPrivate(directory, path)] as const
+      )
+    );
+    expect(
+      await bindFeedbackRoles(directory, async () => f.backend, {
+        todoTagId: 'todo',
+        doneTagId: 'done',
+      })
+    ).toMatchObject({ status: 'bound', remoteWrites: 0 });
+    for (const [path, bytes] of before) expect(await readPrivate(directory, path)).toBe(bytes);
+    expect(f.calls).toEqual([]);
+  });
+  it('rejects unaligned role tokens before changing any source or sealed state', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.set('todo', native('todo', ['TODO']));
+      rems.set('done', native('done', ['DONE']));
+      rems.get('chapter')!.tags = ['todo'];
+    });
+    const state = await loadState(directory),
+      source = await readPrivate(directory, f.path),
+      identity = await readPrivate(directory, IDENTITY);
+    await expect(
+      bindFeedbackRoles(directory, async () => f.backend, { todoTagId: 'todo', doneTagId: 'done' })
+    ).rejects.toThrow(f.path);
+    expect(await loadState(directory)).toEqual(state);
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(await readPrivate(directory, IDENTITY)).toBe(identity);
+    expect(f.calls).toEqual([]);
+  });
+  it('refuses missing initial direct-tag evidence without repairing it', async () => {
+    await prepare(({ rems }) => {
+      rems.set('todo', native('todo', ['TODO']));
+      rems.set('done', native('done', ['DONE']));
+      delete rems.get('chapter')!.tags;
+    });
+    const state = await loadState(directory);
+    await expect(
+      bindFeedbackRoles(
+        directory,
+        async () => {
+          throw new Error('Must not connect');
+        },
+        { todoTagId: 'todo', doneTagId: 'done' }
+      )
+    ).rejects.toThrow('Missing initial direct-tag evidence');
+    expect(await loadState(directory)).toEqual(state);
+  });
+  it.each([
+    'plain-no-link',
+    'card-item',
+    'portal',
+    'malformed-reference',
+    'canonical-child',
+  ] as const)('rejects unsafe capture %s without writes', async (shape) => {
+    const f = await feedbackFixture(),
+      rem = f.rems.get('feedback')!;
+    if (shape === 'plain-no-link') rem.text = ['No reference'];
+    if (shape === 'card-item') rem.cardItem = true;
+    if (shape === 'portal') rem.portal = { type: 0, directlyIncludedRemIds: ['question'] };
+    if (shape === 'malformed-reference') rem.text = [{ i: 'q', _id: {} }];
+    if (shape === 'canonical-child') rem.children = ['answer'];
+    await expect(
+      captureFeedback(directory, async () => f.backend, 'feedback', ['question'])
+    ).rejects.toThrow();
+    expect(f.calls).toEqual([]);
+  });
+  it('does not replay an uncertain checkbox with no observed effect', async () => {
+    const f = await publishedFeedback();
+    f.backend.finishTodo = vi.fn(async () => {
+      throw new Error('Disconnected before effect was observed');
+    });
+    await expect(
+      acknowledgeFeedback(
+        directory,
+        async () => f.backend,
+        f.captured.receipt,
+        f.published.planHash
+      )
+    ).rejects.toThrow('Disconnected');
+    await expect(
+      acknowledgeFeedback(
+        directory,
+        async () => f.backend,
+        f.captured.receipt,
+        f.published.planHash
+      )
+    ).rejects.toThrow('never replay');
+    expect(f.backend.finishTodo).toHaveBeenCalledTimes(1);
+  });
+  it('checks newly published descendant content before ack and accepts it only unchanged', async () => {
+    const f = await feedbackFixture();
+    f.rems.get('feedback')!.text = ['Explain chapter ', { i: 'q', _id: 'chapter' }];
+    const captured = await captureFeedback(directory, async () => f.backend, 'feedback', [
+      'chapter',
+    ]);
+    await edit(f.path, (source) =>
+      source.replace(/^([ \t]*)- Why\?([^\n]*)$/m, '$1- Extra explanation\n$1- Why?$2')
+    );
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: hash(await readPrivate(directory, f.path)),
+    })) as { planHash: string };
+    expect(result, JSON.stringify(result)).toMatchObject({ status: 'verified' });
+    const created = [...f.rems.values()].find(
+      (rem) => hash(rem.text) === hash(['Extra explanation'])
+    )!;
+    expect(created).toBeDefined();
+    const source = structuredClone(created.text),
+      count = f.calls.length;
+    created.text = ['Native changed'];
+    await expect(
+      acknowledgeFeedback(directory, async () => f.backend, captured.receipt, result.planHash)
+    ).rejects.toThrow('Target native');
+    expect(f.calls).toHaveLength(count);
+    created.text = source;
+    expect(
+      await acknowledgeFeedback(directory, async () => f.backend, captured.receipt, result.planHash)
+    ).toMatchObject({ status: 'acknowledged' });
+  });
+  it.each(['apply', 'resume'] as const)(
+    'preserves physical attachment order through front/middle/end insertions and %s',
+    async (mode) => {
+      const f = await feedbackFixture();
+      f.rems.get('question')!.children = ['answer'];
+      f.rems.get('feedback')!.parent = 'daily';
+      f.rems.get('daily')!.children.unshift('feedback');
+      await edit(
+        f.path,
+        (source) =>
+          source
+            .replace('- Chapter ^', '- Before\n- Chapter ^')
+            .replace('- Front ^', '- Middle\n- Front ^') + '\n- Last\n'
+      );
+      const original = f.backend.setParent;
+      let lost = false;
+      if (mode === 'resume')
+        f.backend.setParent = vi.fn(async (...args) => {
+          await original(...args);
+          if (!lost) {
+            lost = true;
+            throw new Error('Lost parent acknowledgment');
+          }
+        });
+      const result = (await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: hash(await readPrivate(directory, f.path)),
+      })) as { status: string; planHash: string };
+      expect(result.status).toBe(mode === 'resume' ? 'unknown' : 'verified');
+      if (mode === 'resume')
+        expect(
+          await resumeWorkspace(directory, async () => f.backend, result.planHash)
+        ).toMatchObject({ status: 'verified' });
+      const id = (text: string) =>
+        [...f.rems.values()].find((rem) => hash(rem.text) === hash([text]))!.id;
+      expect(f.rems.get('daily')!.children).toEqual([
+        'feedback',
+        id('Before'),
+        'chapter',
+        id('Middle'),
+        'basic',
+        'opaque',
+        'subdoc',
+        id('Last'),
+      ]);
+      expect(f.calls.filter((call) => call === `${id('Before')}:parent`)).toHaveLength(1);
+      const state = await loadState(directory);
+      expect(state.entries.feedback).toBeUndefined();
+      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+    }
+  );
+  it('recovers local publication with its frozen feedback partition and no setter replay', async () => {
+    const f = await feedbackFixture(),
+      captured = await captureFeedback(directory, async () => f.backend, 'feedback', ['question']);
+    await edit(f.path, (source) => source.replace('Why?', 'Why exactly?'));
+    const set = LocalState.prototype.setLocal;
+    const spy = vi.spyOn(LocalState.prototype, 'setLocal').mockImplementation(async function (
+      this: LocalState,
+      key,
+      value
+    ) {
+      if (key.startsWith('publication:') && value !== null)
+        throw new Error('Before local publication');
+      return set.call(this, key, value);
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: hash(await readPrivate(directory, f.path)),
+    })) as { planHash: string };
+    expect(result).toMatchObject({ status: 'publication-incomplete' });
+    spy.mockRestore();
+    await expect(
+      acknowledgeFeedback(directory, async () => f.backend, captured.receipt, result.planHash)
+    ).rejects.toThrow();
+    expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+      status: 'recovered',
+      remoteWrites: 0,
+    });
+    expect(
+      await acknowledgeFeedback(directory, async () => f.backend, captured.receipt, result.planHash)
+    ).toMatchObject({ status: 'acknowledged' });
+    expect(f.calls.filter((call) => call === 'question:text')).toHaveLength(1);
+  });
+  it.each(['checkbox', 'done', 'todo'] as const)(
+    'recognizes an unknown %s exact after-state without replaying publication or the atom',
+    async (step) => {
+      const f = await publishedFeedback();
+      const method = step === 'checkbox' ? 'finishTodo' : step === 'done' ? 'addTag' : 'removeTag';
+      const original = f.backend[method]!.bind(f.backend) as (...args: string[]) => Promise<void>;
+      let failed = false;
+      Object.assign(f.backend, {
+        [method]: async (...args: string[]) => {
+          await original(...args);
+          if (!failed) {
+            failed = true;
+            throw new Error('lost acknowledgment');
+          }
+        },
+      });
+      await expect(
+        acknowledgeFeedback(
+          directory,
+          async () => f.backend,
+          f.captured.receipt,
+          f.published.planHash
+        )
+      ).rejects.toThrow('lost acknowledgment');
+      expect(
+        await acknowledgeFeedback(
+          directory,
+          async () => f.backend,
+          f.captured.receipt,
+          f.published.planHash
+        )
+      ).toMatchObject({
+        status: 'acknowledged',
+        remoteWrites: 2 - ['checkbox', 'done', 'todo'].indexOf(step),
+      });
+      expect(f.calls.filter((call) => call === 'question:text')).toHaveLength(1);
+      expect(
+        f.calls.filter(
+          (call) =>
+            call ===
+            `feedback:${step === 'checkbox' ? 'checkbox' : `tag:${step === 'done' ? 'add:done' : 'remove:todo'}`}`
+        )
+      ).toHaveLength(1);
+    }
+  );
+  it.each(['gate', 'source', 'revision', 'history', 'reference', 'pending'] as const)(
+    'makes zero ack mutations when %s proof fails',
+    async (failure) => {
+      const f = await publishedFeedback(),
+        count = f.calls.length;
+      if (failure === 'gate')
+        vi.mocked(f.backend.identity).mockResolvedValue({
+          kbId: 'kb',
+          writable: true,
+          destructive: false,
+        });
+      if (failure === 'source')
+        await edit(f.path, (source) => source.replace('Why exactly?', 'Changed again?'));
+      if (failure === 'revision') f.rems.get('feedback')!.text = ['Edited concurrently'];
+      if (failure === 'history')
+        f.rems.get('question')!.cards = [
+          {
+            id: 'card_question',
+            remId: 'question',
+            type: 'forward',
+            createdAt: 1,
+            repetitionHistory: null,
+            nextRepetitionTime: null,
+            lastRepetitionTime: null,
+            timesWrongInRow: null,
+          },
+        ];
+      if (failure === 'reference')
+        vi.mocked(f.backend.feedbackFacts!).mockImplementation(async (id) => ({
+          isTodo: id === 'feedback',
+          status: 'Unfinished',
+          references: [],
+          backlinks: [],
+        }));
+      if (failure === 'pending') {
+        const state = await loadState(directory);
+        state.pending = { planHash: f.published.planHash, journalKey: 'other' };
+        await saveState(directory, state);
+      }
+      await expect(
+        acknowledgeFeedback(
+          directory,
+          async () => f.backend,
+          f.captured.receipt,
+          f.published.planHash
+        )
+      ).rejects.toThrow();
+      expect(f.calls).toHaveLength(count);
+    }
+  );
+  it('keeps a native TODO feedback attachment outside canonical content', async () => {
+    const f = await prepare((f) => {
+      f.rems.set('todo', native('todo', ['TODO']));
+      f.rems.set('done', native('done', ['DONE']));
+    });
+    // This regression exercises reconciliation directly with an explicit verified role binding.
+    const context = await inspectLocal(directory);
+    Object.assign(context.state, { feedbackRoles: { todoTagId: 'todo', doneTagId: 'done' } });
+    const { readRemote } = await import('../../../src/business/workspace/reconcile.js');
+    const { selectPlan } = await import('../../../src/business/workspace/selection.js');
+    const plan = await selectPlan(context, planLocal(context), { scope: 'all' });
+    f.rems.get('question')!.children.push('feedback');
+    f.rems.set(
+      'feedback',
+      native('feedback', ['Explain more'], {
+        parent: 'question',
+        tags: ['todo'],
+        cards: [],
+        children: ['detail'],
+      })
+    );
+    f.rems.set('detail', native('detail', ['Detail'], { parent: 'feedback', cards: [] }));
+    const remote = await readRemote(context, plan, f.backend);
+    const result = reconcile(context, plan, remote);
+    expect(result.plan.conflicts).toEqual([]);
+    expect(remote.get('question')!.children).toEqual(['answer', 'feedback']);
+    expect(remote.has('feedback')).toBe(false);
+  });
+
+  it('keeps a bound canonical answer canonical when its native TODO role changes', async () => {
+    const f = await prepare((f) => {
+      f.rems.set('todo', native('todo', ['TODO']));
+      f.rems.set('done', native('done', ['DONE']));
+    });
+    const context = await inspectLocal(directory);
+    Object.assign(context.state, { feedbackRoles: { todoTagId: 'todo', doneTagId: 'done' } });
+    const { readRemote } = await import('../../../src/business/workspace/reconcile.js');
+    const { selectPlan } = await import('../../../src/business/workspace/selection.js');
+    const plan = await selectPlan(context, planLocal(context), { scope: 'all' });
+    f.rems.get('answer')!.tags = ['todo'];
+    const remote = await readRemote(context, plan, f.backend);
+    expect(reconcile(context, plan, remote).plan.conflicts).toEqual([]);
+    expect(remote.has('answer')).toBe(true);
+  });
+});
 
 /** Exercise the public parser/command in an owned process; SDK effects stay in this synthetic fixture. */
 function syntheticCli(

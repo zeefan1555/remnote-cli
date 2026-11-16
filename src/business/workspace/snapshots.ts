@@ -76,7 +76,7 @@ export function cardIdentities(rem: WorkspaceRem): unknown {
 export function immutableProjection(rem: WorkspaceRem): Record<string, unknown> {
   const facts = Object.fromEntries(
     Object.entries(rem.facts ?? {}).filter(
-      ([key]) => !['createdAt', 'localUpdatedAt', 'updatedAt'].includes(key)
+      ([key]) => !['createdAt', 'localUpdatedAt', 'updatedAt', 'isTodo', 'todoStatus'].includes(key)
     )
   );
   return {

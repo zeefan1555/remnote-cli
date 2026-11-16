@@ -55,6 +55,11 @@ function fixture(count = 2) {
       getTagRems: vi.fn(async () => []),
       addTag: vi.fn(async () => {}),
       removeTag: vi.fn(async () => {}),
+      isTodo: vi.fn(async () => true),
+      getTodoStatus: vi.fn(async () => 'Unfinished'),
+      remsBeingReferenced: vi.fn(async () => [{ _id: 'r0' }]),
+      remsReferencingThis: vi.fn(async () => []),
+      setTodoStatus: vi.fn(async () => {}),
       addPowerup: vi.fn(async () => {}),
       hasPowerup: vi.fn(async () => false),
       getPowerupProperty: vi.fn(async () => undefined),
@@ -108,6 +113,22 @@ async function readCardHistory(repetitionHistory: unknown) {
 }
 
 describe('public SDK sync adapter', () => {
+  it('uses atomic checkbox/reference capabilities and blocks unknown facts or disabled writes', async () => {
+    const f = fixture();
+    expect(await f.backend.feedbackFacts('r1')).toEqual({
+      isTodo: true,
+      status: 'Unfinished',
+      references: ['r0'],
+      backlinks: [],
+    });
+    await f.backend.finishTodo('r1');
+    expect(f.flags.get('r1')!.setTodoStatus).toHaveBeenCalledExactlyOnceWith('Finished');
+    f.status.mockResolvedValue({ kbId: 'kb', writable: false, destructive: false });
+    await expect(f.backend.finishTodo('r1')).rejects.toThrow();
+    expect(f.flags.get('r1')!.setTodoStatus).toHaveBeenCalledTimes(1);
+    f.flags.get('r1')!.isTodo!.mockResolvedValue(undefined);
+    await expect(f.backend.feedbackFacts('r1')).rejects.toThrow('Incomplete native feedback facts');
+  });
   it('uses exact tag IDs and preserves properties on removal behind both existing destructive gates', async () => {
     const f = fixture();
     await f.backend.addTag('r1', 'r0');

@@ -44,6 +44,11 @@ import { mapReads } from './read-pool.js';
 import { pathKey, WorkspaceLinks } from './links.js';
 import { registerTags, tagIdsSchema } from './tags.js';
 import {
+  contentChildren,
+  feedbackRolesSchema,
+  feedbackPartitionSchema,
+} from './feedback-partition.js';
+import {
   hash,
   type Diagnostic,
   type ParsedDocument,
@@ -85,6 +90,7 @@ const remSchema = z
     cards: z.array(cardMetadataSchema).nullable().optional(),
     facts: nativeDetailsSchema.partial().optional(),
     collected: z.array(z.string()).optional(),
+    feedback: feedbackPartitionSchema.optional(),
   })
   .strict();
 const stateSchema = z
@@ -98,6 +104,7 @@ const stateSchema = z
     rootIds: z.array(idSchema),
     globalDiscoveryComplete: z.boolean(),
     tagIds: tagIdsSchema.optional(),
+    feedbackRoles: feedbackRolesSchema.optional(),
     official: z
       .object({
         archiveSha256: digest,
@@ -214,7 +221,7 @@ export function validateGraph(rems: WorkspaceRem[], rootIds: string[] = []): str
       errors.push(`Missing parent ${rem.parent} for ${rem.id}`);
     if (rootIds.length && rem.parent === null && !rootIds.includes(rem.id))
       errors.push(`Unexpected root outside declared scope: ${rem.id}`);
-    for (const child of rem.children)
+    for (const child of contentChildren(rem))
       if (!byId.has(child) || byId.get(child)!.parent !== rem.id)
         errors.push(`Missing/disagreeing child ${rem.id}/${child}`);
     if (
@@ -396,6 +403,7 @@ export async function prepareSnapshot(
     rootIds: coverage.rootIds,
     globalDiscoveryComplete: coverage.globalDiscoveryComplete,
     tagIds: registerTags(byId, previous?.tagIds),
+    ...(previous?.feedbackRoles ? { feedbackRoles: previous.feedbackRoles } : {}),
     ...(official ? { official } : {}),
     errors: ['Snapshot write in progress'],
     entries: {},

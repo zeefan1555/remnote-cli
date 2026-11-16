@@ -33,6 +33,18 @@ async function runCommand(args: string[], result: unknown = { ok: true }): Promi
 }
 
 describe('command bridge action mapping', () => {
+  it.each(['complete', 'reopen'])(
+    'rejects removed todo %s commands without connecting',
+    async (name) => {
+      const execute = vi.spyOn(DirectClient.prototype, 'execute');
+      const program = createProgram('test')
+        .exitOverride()
+        .configureOutput({ writeErr: () => {} });
+      await expect(program.parseAsync(['todo', name, 'id'], { from: 'user' })).rejects.toThrow();
+      expect(execute).not.toHaveBeenCalled();
+      execute.mockRestore();
+    }
+  );
   afterEach(async () => {
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
@@ -193,25 +205,6 @@ describe('command bridge action mapping', () => {
     const listSpy = await runCommand(['todo', 'list', '--tag-id', 'todo-tag']);
     expect(listSpy).toHaveBeenCalledWith('list_todos', { tagRemId: 'todo-tag' });
     listSpy.mockRestore();
-
-    const completeSpy = await runCommand([
-      'todo',
-      'complete',
-      'todo-1',
-      '--todo-tag-id',
-      'todo-tag',
-      '--done-tag-id',
-      'done-tag',
-      '--apply',
-    ]);
-    expect(completeSpy).toHaveBeenCalledWith('update_todo', {
-      remId: 'todo-1',
-      finished: true,
-      todoTagRemId: 'todo-tag',
-      doneTagRemId: 'done-tag',
-      dryRun: false,
-    });
-    completeSpy.mockRestore();
   });
 
   it('maps sdk capabilities to get_sdk_capabilities', async () => {

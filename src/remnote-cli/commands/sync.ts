@@ -16,6 +16,11 @@ import { relocateWorkspace } from '../../business/workspace/relocate.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatError, formatResult } from '../output/formatter.js';
+import {
+  acknowledgeFeedback,
+  bindFeedbackRoles,
+  captureFeedback,
+} from '../../business/workspace/feedback.js';
 
 interface SyncOptions {
   apply?: boolean;
@@ -52,6 +57,65 @@ export function registerSyncCommands(program: Command): void {
   const workspace = program
     .command('sync')
     .description('Publish local-authoritative Markdown to RemNote through bounded commands');
+
+  const feedback = workspace
+    .command('feedback')
+    .description('Explicit exact feedback binding, capture and proof-gated acknowledgment');
+  const runFeedback = async (
+    operation: (
+      factory: () => ReturnType<ReturnType<typeof createCommandClient>['workspaceBackend']>
+    ) => Promise<unknown>
+  ) => {
+    const client = createCommandClient(program),
+      format = program.opts().text ? 'text' : 'json';
+    try {
+      console.log(
+        formatResult(await operation(() => client.workspaceBackend()), format, (data) =>
+          JSON.stringify(data, null, 2)
+        )
+      );
+    } catch (error) {
+      console.error(formatError(error instanceof Error ? error.message : String(error), format));
+      process.exitCode = 1;
+    } finally {
+      await client.close();
+    }
+  };
+  feedback
+    .command('bind <directory>')
+    .description('Bind exact lifecycle tags on clean aligned source; no native or Markdown writes')
+    .requiredOption('--todo-tag-id <id>', 'Already sealed native TODO tag ID')
+    .requiredOption('--done-tag-id <id>', 'Already sealed native DONE tag ID')
+    .action(async (directory: string, options: { todoTagId: string; doneTagId: string }) =>
+      runFeedback((factory) => bindFeedbackRoles(directory, factory, options))
+    );
+  feedback
+    .command('capture <directory>')
+    .description(
+      'Capture one exact non-canonical physical feedback attachment into a private receipt'
+    )
+    .requiredOption('--id <id>', 'Exact feedback Rem ID')
+    .requiredOption(
+      '--target-id <id>',
+      'Exact canonical target; repeatable',
+      (value: string, ids: string[]) => ids.concat(value),
+      []
+    )
+    .action(async (directory: string, options: { id: string; targetId: string[] }) =>
+      runFeedback((factory) => captureFeedback(directory, factory, options.id, options.targetId))
+    );
+  feedback
+    .command('ack <directory>')
+    .description(
+      'Acknowledge or resume acknowledgment only after exact guarded publication; never republishes'
+    )
+    .requiredOption('--receipt <hash>', 'Exact captured feedback receipt')
+    .requiredOption('--plan-hash <hash>', 'Completed guarded publisher plan')
+    .action(async (directory: string, options: { receipt: string; planHash: string }) =>
+      runFeedback((factory) =>
+        acknowledgeFeedback(directory, factory, options.receipt, options.planHash)
+      )
+    );
 
   async function execute(
     name:

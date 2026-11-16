@@ -819,7 +819,7 @@ describe('RemAdapter', () => {
       ).rejects.toThrow('Write operations are disabled');
     });
 
-    it('lists tagged todos and atomically completes one', async () => {
+    it('lists tagged todos without changing their lifecycle', async () => {
       const todoTag = plugin.addTestRem('todo-tag', 'TODO');
       plugin.addTestRem('done-tag', 'DONE');
       const todo = plugin.addTestRem('todo-1', 'Finish task');
@@ -839,24 +839,8 @@ describe('RemAdapter', () => {
         ],
       });
 
-      const result = await adapter.updateTodo({
-        remId: 'todo-1',
-        finished: true,
-        todoTagRemId: 'todo-tag',
-        doneTagRemId: 'done-tag',
-        dryRun: false,
-      });
-      expect(result).toMatchObject({
-        dryRun: false,
-        changed: true,
-        oldTodoStatus: 'Unfinished',
-        newTodoStatus: 'Finished',
-        addedTagRemIds: ['done-tag'],
-        removedTagRemIds: ['todo-tag'],
-      });
-      expect(await todo.getTodoStatus()).toBe('Finished');
-      expect(todo.getTags()).toContain('done-tag');
-      expect(todo.getTags()).not.toContain('todo-tag');
+      expect(await todo.getTodoStatus()).toBe('Unfinished');
+      expect((await todo.getTagRems()).map((rem) => rem._id)).toEqual(['todo-tag']);
     });
   });
 

@@ -109,7 +109,7 @@ keys and known IDs on failure; they are not atomic and must not be blindly repla
 
 Use friendly commands when available: `create`, `update`, `insert-children`,
 `update-tags`, `set-property` and `journal`.
-`set-document-status`, `move-note`, `outline`, `todo complete|reopen`,
+`set-document-status`, `move-note`, `outline`,
 `flashcards apply` and `wiki apply` default to preview and need `--apply`.
 
 Prefer additive `insert-children`. `replace-children` destroys child identities
@@ -117,6 +117,31 @@ and requires `--allow-destructive`; an empty payload clears content children.
 Use stale-state guards where provided. Existing title/card/document identity and
 exact tag/property semantics are documented in the
 [command reference](../../docs/guides/remnote-cli-command-reference.md).
+
+## Explicit Feedback
+
+Ordinary learning edits local source and uses the guarded publisher; ordinary sync
+never captures TODOs. For an explicitly requested feedback task, use
+`sync feedback capture DIR --id ID --target-id TARGET`, edit the returned target's
+local file, then publish that file with `sync apply --path PATH --expected-file-hash HASH`.
+Only after complete local publication, use
+`--allow-destructive sync feedback ack DIR --receipt HASH --plan-hash HASH`.
+Ack never publishes content; retry the same ack after an unknown outcome, not the
+publisher. It recognizes only the exact recorded after-state and otherwise stops.
+
+This path requires prior `sync feedback bind DIR --todo-tag-id ID --done-tag-id ID`:
+clean, already-aligned source and known sealed direct tags. Bind never edits
+Markdown or initializes missing native evidence; existing authored role tokens
+are a reported blocker. Capture also requires clean source, one separate direct
+physical non-card TODO subtree, and a preexisting exact native reference plus
+reciprocal backlink to each canonical target in one file. Plain feedback without
+that native link, canonical TODO nodes, Portals/cards, and no-change confirmation
+are unsupported. Capture is private evidence, never imported content. Ack requires
+a later verified target-content publication, fresh card/history/link proof and
+both live write gates; it durably finishes checkbox, adds DONE, removes TODO
+without deleting properties. Unknown history, changed revisions and old/no-op
+publisher proofs block all acknowledgment writes. `todo list` is read-only;
+the old transaction-based complete/reopen writer has been removed.
 
 ## Bounded Tasks
 

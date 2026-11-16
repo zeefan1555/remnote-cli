@@ -46,6 +46,12 @@ export interface WorkspaceRem {
   cards?: NativeMetadata['cards'];
   facts?: Partial<NativeDetails>;
   collected?: string[];
+  /** Sealed classification only; children remains the complete physical native order. */
+  feedback?: { roles: FeedbackRoles; attachmentIds: string[] };
+}
+export interface FeedbackRoles {
+  todoTagId: string;
+  doneTagId: string;
 }
 export interface WorkspaceEntry {
   path: string;
@@ -82,6 +88,7 @@ export interface WorkspaceState {
   rootIds: string[];
   globalDiscoveryComplete: boolean;
   tagIds?: Record<string, string>;
+  feedbackRoles?: FeedbackRoles;
   official?: {
     archiveSha256: string;
     exportDate: string;
@@ -136,6 +143,8 @@ export interface WorkspaceChange {
   path: string;
   parent: string | null;
   position: number;
+  /** Frozen physical insertion index, distinct from the canonical Markdown position. */
+  physicalPosition?: number;
   kind: NodeKind;
   cardItem: boolean;
   cardCluster?: true;
@@ -153,6 +162,8 @@ export interface WorkspacePlan {
   inputHash?: string;
   /** New token bindings are candidates until native verification and publication succeed. */
   tagIds?: Record<string, string>;
+  /** Input-bound physical feedback partition; no feedback body is captured by sync. */
+  physicalBaseline?: Record<string, Pick<WorkspaceRem, 'children' | 'tags' | 'feedback'>>;
   guarded?: { path: string; fileHash: string; beforeHash: string };
   files: Record<string, string>;
   changes: WorkspaceChange[];
@@ -242,4 +253,11 @@ export interface WorkspaceBackend {
   cardFacts(id: string): Promise<Array<{ id: string; hash: string }>>;
   remove(id: string): Promise<void>;
   existingIds(ids: string[]): Promise<string[]>;
+  feedbackFacts?(id: string): Promise<{
+    isTodo: boolean;
+    status: 'Finished' | 'Unfinished' | null;
+    references: string[];
+    backlinks: string[];
+  }>;
+  finishTodo?(id: string): Promise<void>;
 }

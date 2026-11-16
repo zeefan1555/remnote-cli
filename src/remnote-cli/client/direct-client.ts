@@ -26,7 +26,6 @@ const operations = {
   get_review_stats: ['getReviewStats', schemas.ReviewStatsSchema],
   set_outline_collapsed: ['setOutlineCollapsed', schemas.SetOutlineCollapsedSchema],
   list_todos: ['listTodos', schemas.ListTodosSchema],
-  update_todo: ['updateTodo', schemas.UpdateTodoSchema],
   update_note: ['updateNote', schemas.UpdateNoteSchema],
   set_document_status: ['setDocumentStatus', schemas.SetDocumentStatusSchema],
   insert_children: ['insertChildren', schemas.InsertChildrenSchema],

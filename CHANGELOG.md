@@ -9,10 +9,18 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Add explicit clean-source `sync feedback bind/capture/ack`. Exact non-card
+  TODO/DONE attachments stay outside canonical source while physical order is
+  preserved through insertion and recovery. Bind never rewrites Markdown or
+  initializes missing native evidence. Ack requires post-capture target-content
+  publication, complete local handoff, native reference/backlink and known history;
+  durable checkbox/tag atoms resume only proven after-states without republishing.
+  Remove the old transaction-based TODO complete/reopen/update writer.
 - Workspace publishing is local-authoritative after explicit empty-vault import.
   Local edits publish against the verified baseline; identical content converges.
   Other native body/tag drift archives both versions and blocks every write; new
-  native children are structural conflicts, never imported into source.
+  native children are structural conflicts unless explicitly bound exact feedback
+  attachments; neither case imports them into source.
 - Read, plans and execution receipts expose fixed `contentAuthority: "local"`.
   Remove incoming subtree discovery, tag set merging and timestamp/LWW execution.
   Guarded offline save binds bytes only. Old clock fields remain immutable sealed

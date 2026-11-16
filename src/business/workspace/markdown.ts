@@ -14,6 +14,7 @@ import { WorkspaceLinks } from './links.js';
 import { wikiFromMarkdown, wikiSyntax, wikiToMarkdown } from './wiki-markdown.js';
 import { tagFromMarkdown, tagSyntax, tagToMarkdown } from './tag-markdown.js';
 import { renderTags, resolveTags, type TagIds } from './tags.js';
+import { contentChildren, contentTags } from './feedback-partition.js';
 import {
   nativeDetailsSchema,
   metadataSchema,
@@ -134,6 +135,7 @@ export function readonlyReason(
   rem: WorkspaceRem,
   byId: Map<string, WorkspaceRem>
 ): string | undefined {
+  rem = { ...rem, children: contentChildren(rem) };
   if (rem.unsupported) return rem.unsupported;
   if (
     [rem.document, rem.folder, rem.cardItem, rem.practice, rem.enablePractice].some(
@@ -300,7 +302,7 @@ export function documentMetadata(
         original: options.originalIds?.has(id) ? originalPath('rems', id) : null,
       },
     };
-    for (const child of rem.children) if (!documents.has(child)) visit(child);
+    for (const child of contentChildren(rem)) if (!documents.has(child)) visit(child);
   }
   visit(rootId);
   return metadata;
@@ -404,7 +406,7 @@ function renderParts(
     // Empty rich-text segments are not visible content before an Obsidian block ID.
     front.children = front.children.filter((node) => node.type !== 'text' || node.value !== '');
     if (!heading && options.tagIds)
-      for (const token of renderTags(rem.tags, options.tagIds))
+      for (const token of renderTags(contentTags(rem), options.tagIds))
         front.children.push({ type: 'text', value: ' ' }, { type: 'obsidianTag', value: token });
     return [
       {
@@ -435,13 +437,15 @@ function renderParts(
             ],
           };
         const children = ownContent(rem);
-        if (rem.children.length && !branches.has(id)) children.push(list(rem.children));
+        if (contentChildren(rem).length && !branches.has(id))
+          children.push(list(contentChildren(rem)));
         return { type: 'listItem', spread: false, children: children as ListItem['children'] };
       }),
     };
   }
   const children = ownContent(root, true);
-  if (root.children.length && !branches.has(rootId)) children.push(list(root.children));
+  if (contentChildren(root).length && !branches.has(rootId))
+    children.push(list(contentChildren(root)));
   return { metadata, body: toMarkdown({ type: 'root', children }, MARKDOWN_OPTIONS) };
 }
 
@@ -449,7 +453,7 @@ export function renderDocument(...args: Parameters<typeof renderParts>): string 
   const { metadata, body } = renderParts(...args);
   const attributes = { ...args[4]?.attributes };
   if (args[4]?.tagIds) {
-    const tags = renderTags(args[2].get(args[0])!.tags, args[4].tagIds);
+    const tags = renderTags(contentTags(args[2].get(args[0])!), args[4].tagIds);
     if (tags.length) attributes.tags = tags;
     else delete attributes.tags;
   }
@@ -466,7 +470,8 @@ export function renderParsedDocument(
 ): ReturnType<typeof parseOutline> {
   const { metadata, body } = renderParts(...args);
   const attributes = { ...args[4]?.attributes };
-  if (args[4]?.tagIds) attributes.tags = renderTags(args[2].get(args[0])!.tags, args[4].tagIds);
+  if (args[4]?.tagIds)
+    attributes.tags = renderTags(contentTags(args[2].get(args[0])!), args[4].tagIds);
   return parseOutline(
     {
       path: args[1],

@@ -19,6 +19,7 @@ import {
 import { mapReads } from './read-pool.js';
 import { verificationClosure } from './selection.js';
 import { nativeTagToken, tagSet } from './tags.js';
+import { contentChildren, contentTags, partitionRemote } from './feedback-partition.js';
 
 function batches(ids: string[]): string[][] {
   return Array.from({ length: Math.ceil(ids.length / 50) }, (_, index) =>
@@ -157,6 +158,12 @@ export async function readRemote(
     );
   });
   for (const rem of nativeReads.flat()) result.set(rem.id, rem);
+  await partitionRemote(
+    result,
+    new Set(context.native.keys()),
+    context.state.feedbackRoles,
+    backend
+  );
   return result;
 }
 
@@ -191,8 +198,8 @@ export function reconcile(
       current = remote.get(id);
     if (!current) throw new Error(`Missing verification dependency ${id}`);
     if (
-      hash([base.parent, base.children, base.type]) !==
-        hash([current.parent, current.children, current.type]) ||
+      hash([base.parent, contentChildren(base), base.type]) !==
+        hash([current.parent, contentChildren(current), current.type]) ||
       (base.unsupported !== 'unverified-native-flags' &&
         hash(immutableProjection(base)) !== hash(immutableProjection(current)))
     )
@@ -214,7 +221,7 @@ export function reconcile(
           };
     const content = (rem: WorkspaceRem) => ({
       ...contentProjection(rem),
-      tags: Array.isArray(rem.tags) ? tagSet(rem.tags) : null,
+      tags: Array.isArray(rem.tags) ? tagSet(contentTags(rem, context.state.feedbackRoles)!) : null,
     });
     const baseHash = hash(content(base)),
       localHash = hash(content(desired)),
@@ -235,8 +242,8 @@ export function reconcile(
     }
     plan.remoteHashes[id] = publicationRevisionHash(current);
     if (
-      hash([base.parent, base.children, base.type]) !==
-        hash([current.parent, current.children, current.type]) ||
+      hash([base.parent, contentChildren(base), base.type]) !==
+        hash([current.parent, contentChildren(current), current.type]) ||
       (base.document !== null && base.document !== current.document) ||
       (base.folder !== null && base.folder !== current.folder) ||
       nodeKind(current, graph) !== node.kind ||
@@ -257,6 +264,30 @@ export function reconcile(
     }
   }
   for (const [id, rem] of remote) plan.remoteHashes[id] = publicationRevisionHash(rem);
+  if (context.state.feedbackRoles) {
+    plan.physicalBaseline = Object.fromEntries(
+      [...remote].map(([id, rem]) => [
+        id,
+        { children: rem.children, tags: rem.tags, feedback: rem.feedback },
+      ])
+    );
+    const physical = new Map([...remote].map(([id, rem]) => [id, [...rem.children]]));
+    for (const change of plan.changes) {
+      if (!change.key.startsWith('new:') || !change.parent) continue;
+      const children = physical.get(change.parent) ?? [];
+      const parent =
+        nodes.get(change.parent)?.node ??
+        context.parsed.get(change.path)?.nodes.find((node) => node.key === change.parent);
+      if (!parent) throw new Error('Missing canonical insertion parent');
+      const successor = parent.children
+        .slice(change.position + 1)
+        .find((id) => children.includes(id));
+      change.physicalPosition = successor ? children.indexOf(successor) : children.length;
+      children.splice(change.physicalPosition, 0, change.key);
+      physical.set(change.parent, children);
+      physical.set(change.key, []);
+    }
+  }
   if (plan.selection)
     plan.selection = {
       ...plan.selection,

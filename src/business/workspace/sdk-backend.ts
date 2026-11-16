@@ -457,6 +457,37 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
     await (await this.rem(id)).addTag(idSchema.parse(tagId));
   }
 
+  async feedbackFacts(id: string) {
+    const rem = await this.rem(id);
+    const [isTodo, status, references, backlinks] = await readTuple(
+      [
+        () => rem.isTodo(),
+        () => rem.getTodoStatus(),
+        () => rem.remsBeingReferenced(),
+        () => rem.remsReferencingThis(),
+      ],
+      4
+    );
+    if (
+      typeof isTodo !== 'boolean' ||
+      (status !== undefined && status !== 'Finished' && status !== 'Unfinished') ||
+      !Array.isArray(references) ||
+      !Array.isArray(backlinks)
+    )
+      throw new Error('Incomplete native feedback facts');
+    return {
+      isTodo,
+      status: status ?? null,
+      references: references.map((rem) => idSchema.parse(rem._id)),
+      backlinks: backlinks.map((rem) => idSchema.parse(rem._id)),
+    };
+  }
+
+  async finishTodo(id: string): Promise<void> {
+    await this.writable();
+    await (await this.rem(id)).setTodoStatus('Finished');
+  }
+
   async removeTag(id: string, tagId: string): Promise<void> {
     const identity = await this.identity();
     if (!identity.writable || !identity.destructive)

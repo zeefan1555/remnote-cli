@@ -38,6 +38,7 @@ import {
   withPublicSnapshot,
 } from './snapshots.js';
 import { recordPath } from './identity.js';
+import { partitionRemote } from './feedback-partition.js';
 import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
@@ -50,6 +51,7 @@ import {
   finalProofHash,
   requireFinalProof,
   publishedBaselineHash,
+  startPublisherExecution,
   type Journal,
 } from './resume.js';
 import { readOfficialExport, type OfficialBootstrap } from './official-export.js';
@@ -354,6 +356,15 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
     const nodes = new Map(doc.nodes.map((node) => [node.key, node]));
     for (const node of doc.nodes) {
       if (node.kind === 'opaque' || node.kind === 'mount') continue;
+      if (
+        context.state.feedbackRoles &&
+        node.tags?.some(
+          (id) =>
+            id === context.state.feedbackRoles!.todoTagId ||
+            id === context.state.feedbackRoles!.doneTagId
+        )
+      )
+        throw new Error('Feedback role tags are native lifecycle, not authored content tags');
       const before = baseline.get(node.key),
         native = context.native.get(node.key),
         parent = node.parent ? nodes.get(node.parent) : undefined;
@@ -831,13 +842,13 @@ async function synchronizeWorkspace(
       throw new Error(
         'Apply requires the exact frozen --plan-hash; files and remote content must match preview'
       );
-    const reconstructed = resuming
-      ? reconcile(
-          context,
-          localPlan,
-          new Map(checkedIds.map((id) => [id, context.native.get(id)!]))
-        )
-      : undefined;
+    const resumeBaseline = new Map(
+      checkedIds.map((id) => [
+        id,
+        { ...context.native.get(id)!, ...resuming?.physicalBaseline?.[id] },
+      ])
+    );
+    const reconstructed = resuming ? reconcile(context, localPlan, resumeBaseline) : undefined;
     if (
       reconstructed &&
       (hash(reconstructed.plan) !== resumeHash ||
@@ -847,9 +858,7 @@ async function synchronizeWorkspace(
         'Resume cannot reconstruct the exact original frozen plan from local content and baseline'
       );
     // Validate journal prefix and identities offline, before opening a native connection.
-    const rebuiltRemote = reconstructed
-      ? new Map(checkedIds.map((id) => [id, context.native.get(id)!]))
-      : undefined;
+    const rebuiltRemote = reconstructed ? resumeBaseline : undefined;
     if (resuming && Object.values(resuming.ids).some((id) => context.native.has(id)))
       throw new Error('Resume creation identity belongs to an existing baseline Rem');
     const folded = reconstructed
@@ -1077,6 +1086,9 @@ async function synchronizeWorkspace(
       steps: {},
       ids: {},
       selection,
+      ...(plan.physicalBaseline
+        ? { physicalBaseline: structuredClone(plan.physicalBaseline) }
+        : {}),
       ...(nativeBefore ? { proof: { plan: structuredClone(plan), nativeBefore } } : {}),
     };
     await store.setLocal(key, journal);
@@ -1109,6 +1121,8 @@ async function synchronizeWorkspace(
       throw new Error(
         'Explicit deletion requires --allow-destructive and both live plugin write gates'
       );
+    if (writesRemote && journal.executionSequence === undefined)
+      journal.executionSequence = await startPublisherExecution(store, root);
     journal.state = 'applying';
     await store.setLocal(key, journal);
     let active: string | undefined;
@@ -1159,6 +1173,12 @@ async function synchronizeWorkspace(
         ))
           fresh.set(id, rem);
       }
+      await partitionRemote(
+        fresh,
+        new Set([...context.native.keys(), ...Object.values(journal!.ids)]),
+        state.feedbackRoles,
+        backend
+      );
       for (const id of scopedIds) {
         const rem = expected.get(id)!;
         const current = withNativeSnapshot(rem, fresh.get(id)!);
@@ -1338,13 +1358,13 @@ async function synchronizeWorkspace(
             throw new Error('Missing explicit creation parent binding');
           await mutate(
             `${change.key}:parent`,
-            () => backend.setParent(id, parent, change.position),
+            () => backend.setParent(id, parent, change.physicalPosition ?? change.position),
             async () => {
               expected.set(id, { ...expected.get(id)!, parent });
               const p = expected.get(parent)!;
               structuralIds.add(parent);
               const children = [...p.children];
-              children.splice(change.position, 0, id);
+              children.splice(change.physicalPosition ?? change.position, 0, id);
               expected.set(parent, { ...p, children });
             }
           );
@@ -1725,6 +1745,14 @@ async function readFrozenProof(
       throw new Error(`Remote changed after verified sync: ${id}`);
     rems.set(id, current);
   }
+  const roles = Object.values(journal.physicalBaseline ?? {}).find((value) => value.feedback)
+    ?.feedback?.roles;
+  await partitionRemote(
+    rems,
+    new Set([...baseline.keys(), ...Object.values(journal.ids)]),
+    roles,
+    backend
+  );
   if (final.deleted.length && (await backend.existingIds(final.deleted)).length)
     throw new Error('Verified deletion no longer matches native state');
   return rems;

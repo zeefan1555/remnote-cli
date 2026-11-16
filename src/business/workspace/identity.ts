@@ -13,6 +13,7 @@ export const identitySchema = z
     schema: z.literal('remnote-identity/1'),
     kbId: z.string().min(1),
     tagIds: z.record(z.string(), idSchema).optional(),
+    feedbackRoles: z.object({ todoTagId: idSchema, doneTagId: idSchema }).strict().optional(),
     documents: z.record(
       shortBlockSchema,
       z
@@ -74,6 +75,7 @@ export function workspaceIdentity(state: WorkspaceState): z.infer<typeof identit
     kbId: state.kbId,
     documents,
     ...(state.tagIds ? { tagIds: state.tagIds } : {}),
+    ...(state.feedbackRoles ? { feedbackRoles: state.feedbackRoles } : {}),
   });
 }
 

@@ -259,20 +259,6 @@ export const ListTodosSchema = z
   })
   .strict();
 
-export const UpdateTodoSchema = z
-  .object({
-    remId: z.string().min(1).describe('Todo Rem ID'),
-    finished: z.boolean().describe('True to complete, false to reopen'),
-    todoTagRemId: z.string().min(1).describe('Exact TODO tag Rem ID'),
-    doneTagRemId: z.string().min(1).describe('Exact DONE tag Rem ID'),
-    dryRun: z.boolean().default(true).describe('Preview without changing RemNote'),
-  })
-  .strict()
-  .refine((value) => value.todoTagRemId !== value.doneTagRemId, {
-    message: 'todoTagRemId and doneTagRemId must be different',
-    path: ['doneTagRemId'],
-  });
-
 export const GetSdkCapabilitiesSchema = z
   .object({ identityOnly: z.boolean().optional() })
   .strict()

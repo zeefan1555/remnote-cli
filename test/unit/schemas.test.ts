@@ -13,7 +13,6 @@ import {
   ReviewStatsSchema,
   SetOutlineCollapsedSchema,
   ListTodosSchema,
-  UpdateTodoSchema,
   GetSdkCapabilitiesSchema,
   SdkCallSchema,
   UpdateNoteSchema,
@@ -91,24 +90,8 @@ describe('Outline and todo schemas', () => {
     ).toThrow();
   });
 
-  it('validates todo list and update inputs', () => {
+  it('validates readonly todo list inputs', () => {
     expect(ListTodosSchema.parse({ tagRemId: 'todo-tag' })).toEqual({ tagRemId: 'todo-tag' });
-    expect(
-      UpdateTodoSchema.parse({
-        remId: 'todo-1',
-        finished: true,
-        todoTagRemId: 'todo-tag',
-        doneTagRemId: 'done-tag',
-      })
-    ).toMatchObject({ finished: true, dryRun: true });
-    expect(() =>
-      UpdateTodoSchema.parse({
-        remId: 'todo-1',
-        finished: true,
-        todoTagRemId: 'same',
-        doneTagRemId: 'same',
-      })
-    ).toThrow();
   });
 });
 

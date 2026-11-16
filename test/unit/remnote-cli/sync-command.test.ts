@@ -289,6 +289,7 @@ describe('sync command interface', () => {
     expect(command.registeredArguments).toEqual([]);
     expect(command.options).toEqual([]);
     expect(command.commands.map((item) => item.name())).toEqual([
+      'feedback',
       'plan',
       'apply',
       'resume',

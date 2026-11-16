@@ -1075,17 +1075,52 @@ selected root itself is not changed.
 
 ## todo
 
-List exact-tag todos and synchronize native checkbox state with TODO/DONE tags:
+List exact-tag todos (read-only):
 
 ```bash
 remnote-cli todo list --tag-id <todo-tag-rem-id>
-remnote-cli todo complete <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id>
-remnote-cli todo complete <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id> --apply
-remnote-cli todo reopen <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id> --apply
 ```
 
-`complete` and `reopen` default to preview. Changed apply operations require atomic
-native status/tag synchronization and are currently unavailable; previews remain usable.
+The old transaction-based `complete`/`reopen` commands and `update_todo` operation
+are removed. Explicit local-source feedback processing uses:
+
+```bash
+remnote-cli sync feedback bind DIR --todo-tag-id TODO_ID --done-tag-id DONE_ID
+remnote-cli sync feedback capture DIR --id FEEDBACK_ID --target-id TARGET_ID
+# Edit the exact local file, then publish its current hash through the existing publisher.
+remnote-cli sync apply DIR --path PATH --expected-file-hash HASH
+remnote-cli --allow-destructive sync feedback ack DIR --receipt CAPTURE_HASH --plan-hash PLAN_HASH
+```
+
+`bind` requires complete, clean, already-aligned local source, existing sealed role
+IDs and known direct-tag evidence. It only seals exact roles and necessary private
+metadata; zero Markdown and zero native writes. Authored role tokens are rejected
+with their paths. It does not initialize or repair missing native baselines.
+
+`capture` reads only the exact separate feedback attachment and explicit targets
+(`--target-id` is repeatable, all in one file), under a reciprocal canonical physical
+parent. The attachment must be an unfinished native checkbox with the exact TODO
+role, an observed non-card plain-text/reference subtree and an existing native
+reference plus reciprocal backlink to each target. A parent edge alone is not a
+reference. Canonical TODO nodes remain content; they are not capture candidates.
+Cards/cardItems, Portals, cycles, canonical descendants and unknown shapes fail
+closed. The private receipt binds KB, workspace, ID, revision, target path/IDs,
+clean source baseline and the publisher execution cursor. It contains feedback
+evidence but never creates a Markdown entry. Repeated capture of the same revision
+keeps its original receipt and binding.
+
+`ack` requires a subsequent real verified target-content change, its exact guarded
+publisher journal and fully completed local publication, with fresh native
+content/card/history and reference proof. Old journals, same-source/no-op or
+unrelated edits cannot acknowledge feedback. It preflights destructive permission
+and both live gates before durably executing checkbox Finished → add DONE → remove
+TODO (`removeTag(tagId, false)`, no property deletion). Unknown outcomes retain the
+receipt: repeat the same ack to recognize an exact after-state, never replay the
+uncertain atom or republish content. Changed/unknown evidence stops. Repeating a
+finished ack makes zero writes. Ordinary sync only classifies unexpected exact
+children; it never globally queries TODOs or captures feedback. Physical child
+order is preserved, while validated TODO/DONE attachments stay outside canonical
+Markdown and identity membership.
 
 ## SDK commands
 
