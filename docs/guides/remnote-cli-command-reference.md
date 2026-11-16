@@ -234,11 +234,11 @@ Oversized metadata is rejected without truncation or relaxing individual-file li
 
 Users and agents may edit the same Markdown directly, then run `sync apply DIR`
 once. Separate read/save/lint/diff/preview commands are not a required daily pipeline.
-For guarded editing and trusted local version clocks, use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
+For guarded editing, use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
 and its `fileHash` from the same read, then edit that source and call `sync save`
 with the returned hash and complete `--content-file` (or `-` for stdin). `PATH` is
 the exact workspace-relative Markdown path, not a native Rem ID. Both commands
-are offline and report `remoteWrites: 0`; read returns `status: "read"`, and save
+are offline and report `remoteWrites: 0`; read includes fixed `contentAuthority: "local"` and returns `status: "read"`, and save
 returns `status: "saved"` or `"unchanged"`, the resulting `fileHash` and changed
 Rem keys. Copy the returned hash verbatim rather than substituting a file mtime.
 
@@ -272,19 +272,11 @@ effects, then returns the same original file/plan proof with fresh nativeAfter.
 It never replaces original nativeBefore with recovery-time history. Tampered or
 unreconstructible proof/journals fail closed, without replaying uncertain writes.
 
-Save validates the entire workspace and rejects a stale hash before publication.
-Only Rems whose semantic front/back content changed receive a millisecond local
-version timestamp bound to their content hash. New Rems use engine-generated temporary keys in the same
-path and lose those temporary clocks after verified native-ID assignment. No-op
-or formatting-only saves do not retime content. The source and clock metadata use
-the existing staged publication/recovery mechanism, without advancing the native
-baseline; `sync recover` finishes an interrupted save with its original timestamp.
-
-Obsidian or direct file edits remain valid one-sided sync input, but do not gain
-a trusted per-Rem clock. Saving an already-edited file unchanged cannot add one
-retroactively. Use guarded save for Agent edits when automatic same-Rem resolution
-is needed. Uncertain mutation journals still block save and sync; a prior preview
-with no write steps can be replaced by a fresh preview.
+Save validates the whole workspace and rejects stale hashes before staged local
+publication, without advancing the native baseline. It generates no content
+clocks. Direct editor changes are equally valid desired input. Uncertain mutation
+journals block save and sync; a local-authority preview with no steps may be
+replaced. Consumers must check the read authority marker before calling apply.
 
 ### Human Markdown and stable identities
 
@@ -344,8 +336,7 @@ practice direction/enabled state, tags and references. Structured facts use:
 - `propertyValues`: `{propertyId, valueRemId, valueRichText}` entries (not `properties`).
 - `portal`: `{type, directlyIncludedRemIds, query?, filter?}`, or `null`. Query and
   Filter are opaque, read-only values from public search-Portal slots. An absent
-  field means uncollected, while an observed empty property is `null`. New incoming
-  Portals require both reads (or verified absence of the search-Portal Powerup).
+  field means uncollected, while an observed empty property is `null`. These observations never authorize importing native-only Portal children.
 - `cards`: exact `id`, `remId`, forward/backward or `{clozeId}` type, `createdAt`,
   `repetitionHistory`, `nextRepetitionTime`, `lastRepetitionTime`, `timesWrongInRow`.
   History and scheduling fields are read-only.
@@ -449,8 +440,8 @@ is not a fallback. Unknown tokens,
 case-folded/native-path collisions and missing tag ancestors fail closed; sync does
 not create or guess a tag entity. Literal hashtags are escaped; inline code, escaped
 hashes and URL fragments are not memberships. Tags of opaque Rems remain read-only.
-Membership deltas merge independently from the body's edit clock:
-`(remote − locally removed baseline tags) ∪ locally added tags`.
+Direct tags are local desired memberships. Native-only tag drift blocks the batch;
+there is no set merge, name-based TODO exclusion or implicit tag acknowledgement.
 
 Removal always calls `removeTag(tagId, false)`, retaining properties, Tag Rems,
 CardIDs and history. The existing Bridge marks this atomic method destructive:
@@ -502,62 +493,38 @@ records its native type and directly included Rem IDs; it does not grant Portal
 write support. Raw-record preservation, metadata mapping, writable support and
 live/UI verification are separate coverage claims.
 
-Incoming structure has a separate bounded surface: new branches below already
-bound, selected Rems are imported, including empty text Rems, native cards,
-nested Folder/Document boundaries and opaque Portal children. Existing child IDs
-must remain an ordered subsequence with unchanged parents; moves, removal and
-reordering stay conflicts. Local creation and remote insertion beneath the same
-parent conflict rather than guessing sibling positions. Other supported local
-edits/creates can share the batch. The complete planned graph, new file paths,
-identity coverage and rendered sizes are checked before the first native write.
-Portal membership and references never authorize discovering new roots. Known
-targets are verified without absorbing unselected content/clocks; incoming tags
-require exact, already-sealed native ancestor paths, never automatic Tag creation.
-All collected raw facts/Card histories and both Portal identities are retained,
-even when the established read-only rendering folds an empty reference wrapper.
+New native-only children are structural drift, not incoming source. No recursive
+subtree discovery is performed during publication. Explicit import is available
+only as bootstrap into a new empty directory. Existing moves remain unsupported.
 
-### Common baseline and convergence
+### Local desired content and convergence
 
-Compare semantic content for each stable Rem across baseline, local and remote.
-One-sided edits propagate to the other endpoint; identical results converge;
-edits to different Rems merge, including a local question edit and a remote
-answer edit in the same file. The merge unit is a whole Rem: for a basic card,
-the selected version supplies both front and back, never a field-wise hybrid.
-For divergent versions, `version-time-lww` compares the local `cli-save` timestamp
-with the observed native `rem-updated-at` timestamp only when each is bound to the
-matching semantic content hash. The greater timestamp wins. Missing, equal,
-invalid, decreasing or more-than-five-minutes-future timestamps preserve both
-versions as `untrusted-edit-order`. Markdown file mtime and sync capture time
-are not version evidence.
+For each bound Rem compare verified baseline B, local desired L and native R,
+including front/back text and exact direct tags. R=B permits local changes;
+L=R converges without content writes. R differs from both B and L produces
+`remote-content-drift`, archives local and remote snapshots and blocks the whole
+batch before any native setter. Parent/children/type or readonly Portal/layout
+drift is `remote-structure`.
+No timestamp, review event or whole-file mtime selects a winner. Publication checks
+the selected source graph again and rejects native body/tag/children/readonly-projection backfill,
+even if a caller misclassifies it as metadata refresh.
 
-Remote `updatedAt` is epoch milliseconds and describes a native Rem version,
-not a text-only edit log. Once observed, unchanged content retains its version
-timestamp across later metadata/review changes. A controlled local or observed
-remote A→B→A revert is a new version; A→A is not. Publication consumes those
-change markers, so a resolved revert does not trigger repeated writes. This is
-version-time ordering, not guaranteed physical edit chronology across devices:
-an unobserved review or metadata update can affect the native timestamp before
-the changed content is first observed.
+Read, plans and execution receipts expose fixed `contentAuthority: "local"`, not
+a configuration option. Native runtime facts, cards, histories and scheduling
+remain read-only sidecar snapshots; their refresh preserves local source bytes,
+including comments and formatting. Ordinary publication never scans or acknowledges
+TODO feedback; explicit feedback processing must first change local source and
+verify publication before its separate exact acknowledgement layer.
 
-Before any automatic winner overwrites either endpoint, the preview stores an
-immutable `.sync/conflicts/` record containing both semantic versions, their
-hashes/timestamps and the decision. Archive failure or mismatched existing history
-blocks writes. The preview's `resolutions` include exact `historyPath` and
-`historyHash`; apply verifies and reuses the same evidence.
+Old persisted clock fields are preserved verbatim as sealed evidence only.
+New plans and successful journals generate none. Legacy or mixed-authority pending
+journals are readable for reconciliation but cannot apply, resume or recover
+content automatically. Errors retain the exact journal reference; do not delete
+state, migrate hashes or replay an old staged two-way publication.
 
-The target sync plan can contain incoming and outgoing changes together. Recheck
-both endpoints before apply; publish only the planned semantic result and advance
-the common baseline only after verification. Frozen-file checks guard local
-publication, and remote pre/post hashes detect observed version changes. These
-are client optimistic checks: the SDK has no native conditional setter, so they
-cannot eliminate the check-write lost-update window. Native transactions remain
-disabled. Partial or uncertain results retain the baseline, both versions and
-recovery evidence rather than claiming atomic convergence.
-
-Review history and scheduling are exclusively owned by RemNote. Local copies are
-read-only snapshots and never become outgoing updates. Missing files, nodes or
-remote objects are not automatic deletion requests; absence must be distinguished
-from incomplete reads. Deletion remains explicit and bounded in either direction.
+Before/final native hashes and frozen files provide optimistic checks, not native
+compare-and-set. There remains a check-write race window and no native transaction.
+Partial/unknown writes preserve identity and original evidence for exact-ID handling.
 
 ### Lint, preview and apply
 
@@ -570,7 +537,7 @@ are protected. Missing files, nodes or remote objects do not authorize movement
 or automatic deletion.
 
 `status` and `diff` inspect local state without applying changes. `sync plan DIR`
-previews with zero native writes. `sync apply DIR` performs whole-workspace lint, fresh bidirectional planning,
+previews with zero native writes. `sync apply DIR` performs whole-workspace lint, fresh local-desired planning,
 guarded apply and verification in one invocation, without requiring a separate preview.
 Use `sync apply DIR --plan-hash HASH` to require an exact previous preview instead.
 The hash binds normalized scope/path selectors, selected documents,
@@ -580,8 +547,8 @@ file, native content or hash is refused, not silently accepted as a new plan.
 Equivalent normalized selectors reuse the same selection, not a bypass of content
 freshness checks.
 Either apply path binds a frozen plan, unchanged candidate files, matching KB and native
-state, with live writes enabled for outgoing changes. Incoming changes are merged
-semantic results, not arbitrary remote snapshot overwrites. SDK writes are
+state, with live writes enabled for outgoing changes. Native content is never accepted
+as replacement local source. SDK writes are
 sequential, not atomic; there is no server-side CAS or exactly-once guarantee.
 Unknown or partial journal outcomes remain blocked for exact-ID reconciliation;
 omitting `--plan-hash` is not a retry or recovery bypass. Deletion still requires
@@ -595,11 +562,9 @@ guards and discovery, reads the public SDK `getChildrenRem()` entity list. The
 optional public `children` field is not proof of emptiness: when present, it must
 be a complete ordered subsequence of that list. Entity IDs must be valid, unique
 and owned by the requested parent. Unknown, malformed or failed entity reads are
-errors, never an empty-list fallback. All entity types are retained. New descendants
-are read in bounded exact-ID batches (at most 100000 new Rems), with complete
-parent/child ownership and query/Card/tag observations; they are not ignored as
-SDK noise. Additions after the plan is frozen are concurrent changes, not an
-invitation to expand an in-progress write or replay an uncertain operation.
+errors, never an empty-list fallback. Newly observed child IDs cause structural
+drift; they are not traversed or imported. Later additions are concurrent changes,
+not an invitation to expand an in-progress write.
 Cheap probes still omit Card/history and full native-flag reads.
 Ordinary `--scope changed` still initially probes **every selected bound ID** to
 discover remote-only changes; omitting `--path` selects the whole vault. It is not
@@ -619,38 +584,32 @@ Current receipt fields (arrays contain exact Rem IDs unless noted):
 
 | Status | Fields and meaning |
 | --- | --- |
-| `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `incoming`, `converged`, `outgoing`, `metadataRefresh`, `resolutions`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
-| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `resolutions`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
+| `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `converged`, `outgoing`, `metadataRefresh`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
+| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `converged`, native-ID `outgoing`, `metadataRefresh`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
 | `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
-| planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `resolutions`, `remoteWrites: 0`; no apply is authorized by this receipt |
+| planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `remoteWrites: 0`; no apply is authorized by this receipt |
 
 Read `remoteChecked` as actual remote-read evidence, not a constant: an empty
 selection can return offline `unchanged`
 with `remoteChecked: false` and no checked IDs. Bound-ID planning reports
-`discoveryScope: "bound-ids"` (or `"bound-descendants"` for new descendants),
+`discoveryScope: "bound-ids"`,
 `globalDiscoveryComplete: false`; even an all-scope
 success cannot establish global discovery. `diff` is local-only and reports
 `remoteChecked: false`; it cannot establish remote freshness or convergence.
-`checkedIds` / `checkedCount` describe the bound IDs, discovered descendants and verification set,
+`checkedIds` / `checkedCount` describe the bound IDs and verification set,
 not the number of SDK calls or repeated reads. Created IDs have separate `ids`
 and readback receipts. `selection` records canonical `paths`, selected `files`,
-actual local-key `outgoingKeys`, `reconcileIds`, disjoint `verificationIds`, and
-optional `addedIds` for fully observed incoming descendants. New native descendants
-also appear in `incoming`; they do not use the outgoing `new:key` assignment map.
-Verification-only dependencies do not advance their shared native baseline or
-content clocks. Unselected bytes and unassigned bullets remain intact. Selected
-but unpublished Rems also retain their raw baseline and both content clocks.
-Actual incoming/converged/outgoing changes, selected metadata refreshes, incoming
-descendants and assigned creations are published; structural-only parents receive
-only their verified children projection. A late unrelated body/tag edit is left
-for the next selected-set discovery, not silently absorbed into this publication.
-Previews/conflicts still retain legitimate observed remote version clocks.
-Selected
-layout-only apply advances only local layout/file hashes and display attributes;
-it preserves all native records/clocks and any separate pending native plan.
+actual local-key `outgoingKeys`, `reconcileIds` and disjoint `verificationIds`.
+Verification-only dependencies do not advance their baseline. Unselected bytes
+and unassigned bullets stay intact. Only local outgoing/converged content,
+selected runtime metadata and assigned creations publish; structural-only parents
+receive verified children only. A late unrelated body/tag edit is left for the
+next selected probe, not silently absorbed. Previews/conflicts do not create clocks.
+Layout-only publication preserves native records and any independent pending plan.
+All these receipts include `contentAuthority: "local"`.
 The acceptance driver records wall time and native mutation steps separately;
 SDK transport calls are explicitly `not-instrumented`.
-Each planning conflict records `id`, `path`, `reason` (`untrusted-edit-order`,
+Each planning conflict records `id`, `path`, `reason` (`remote-content-drift`,
 `remote-structure` or `remote-missing`), `baseHash`, `localHash`, nullable
 `remoteHash` / `remoteUpdatedAt`, a private `localSnapshot` path and a
 `remoteSnapshot` path or `null`. The local version remains in place; opaque local
@@ -675,7 +634,7 @@ both live plugin write gates and global `--allow-destructive` are required.
 Deleting a Rem does not promise to purge all historical Card records. Never
 delete review history to make an acceptance test pass.
 
-The verified receipt distinguishes incoming/outgoing changes and identity/card
+The verified receipt reports outgoing/converged changes and identity/card
 checks after baseline publication. Read back exact semantic state:
 exit 0, a Markdown card shape or a Rem ID alone is not native-card acceptance.
 
@@ -692,19 +651,17 @@ writes followed by validation or publication failure are not a zero-write failur
 and must be reconciled. A recovered local publication reports `status: "recovered"`,
 `complete: true`, `remoteWrites: 0` and the existing `ids`; it does not mean the
 original operation had zero remote writes.
-The original incoming ID set remains sealed in the journal. Recovery verifies
-those identities and final hashes, distinguishes recorded outgoing creations,
-and refuses additional descendants or changed query/card/structure facts.
+Recovery verifies the exact recorded identities and final hashes; it never
+expands the selected graph or discovers native-only descendants.
 The final journal separately seals exact native verification hashes, bounded
 `publicationIds`, and `publishedBaselineHash` over the complete original relevant
 resulting semantic baseline (including unchanged records and deleted identities,
 excluding remote-owned review history/scheduling and arrival timestamps). Its
 integrity hash binds those fields to the original plan, selection, inputs and
 assigned IDs. Missing or inconsistent proof is refused without migration.
-The journal also seals exactly P's verified content-version observations. Normal
-publication and unstaged recovery reuse these clocks, so later review timestamps
-cannot promote an unchanged content version; staged recovery checks them against
-the next manifest before connecting. Published versions clear `sinceBaseline`.
+Old content-version evidence is not executable recovery policy. Missing local
+authority or legacy incoming/winner records stop recovery before native access or
+local stage publication, keeping the exact original journal intact.
 These checksums detect corruption and mismatches, not malicious writers able to
 rewrite the same journal and recompute its checksum.
 Recovery reads frozen verification IDs without rediscovery and validates the
@@ -738,7 +695,8 @@ keep the source files, sealed baseline and original journal unchanged. Resume:
    with the original input/nativeBefore binding, never duplicate writes.
 
 The bounded resume implementation accepts outgoing-only plans that reconstruct
-exactly; it does not resume deletion, incoming/converged or LWW-resolution plans.
+exactly; it does not resume deletion or converged plans. Legacy incoming/LWW
+journals are evidence only, never an executable fallback.
 Different source bytes, malformed/noncontiguous steps or concurrent native edits
 require reconciliation outside this command. Do not delete state to bypass a
 refusal. A verified remote journal delegates to publication recovery; guarded
@@ -761,9 +719,8 @@ Development acceptance needs a frozen candidate, exclusive live ownership and
 the guarded integration wrapper. Exercise `scripts/sync-agent-acceptance.mjs`
 against current-format fixtures before any authorized native run. Acceptance must
 use a new synthetic subtree with guarded local new-card saves, current-format
-stable-block checks, incoming-only, mixed-direction, same-result convergence,
-both version-time winners with pre-apply archives and same-Rem conflict
-cases. The deliberate conflict must prove zero remote writes and preserve both
+stable-block checks, local outgoing publication, same-result convergence,
+remote body/tag/children drift and zero-write archived conflict cases. The deliberate conflict must prove zero remote writes and preserve both
 versions before resolving only local synthetic text to the observed remote value.
 Cleanup requires fresh exact root text/parent/children plus a recorded intent.
 SDK `findMany` may filter missing IDs; deletion proof uses `inspect --strict` and

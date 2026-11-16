@@ -12,19 +12,12 @@ import {
   type WorkspaceRem,
 } from './types.js';
 import { nativeProof } from './outline.js';
-import { z } from 'zod';
 import type { ContentVersion } from './types.js';
-
-const publishedVersionSchema = z
-  .object({
-    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
-    timestamp: z.number().int().nonnegative().nullable(),
-    source: z.literal('rem-updated-at'),
-  })
-  .strict();
 
 export interface Journal {
   version: 2;
+  /** Missing on legacy evidence, which is readable but cannot execute. */
+  contentAuthority?: 'local';
   planHash: string;
   guardHash: string;
   state: 'preview' | 'applying' | 'verified' | 'unknown' | 'conflict';
@@ -41,7 +34,8 @@ export interface Journal {
     deleted: string[];
     structuralIds: string[];
     publicationIds: string[];
-    remoteVersions: Record<string, ContentVersion>;
+    /** Sealed legacy evidence only; new journals omit it. */
+    remoteVersions?: Record<string, ContentVersion>;
     publishedBaselineHash: string;
     proofHash: string;
   };
@@ -59,6 +53,7 @@ export function finalProofHash(journal: Journal): string {
 }
 
 export function requireFinalProof(journal: Journal): NonNullable<Journal['final']> {
+  requireLocalAuthority(journal, journal.planHash);
   const final = journal.final;
   if (
     !final ||
@@ -66,11 +61,6 @@ export function requireFinalProof(journal: Journal): NonNullable<Journal['final'
     !Array.isArray(final.structuralIds) ||
     !Array.isArray(final.deleted) ||
     !final.hashes ||
-    !final.remoteVersions ||
-    hash(Object.keys(final.remoteVersions).sort()) !== hash(final.publicationIds) ||
-    Object.values(final.remoteVersions).some(
-      (version) => !publishedVersionSchema.safeParse(version).success
-    ) ||
     !/^[a-f0-9]{64}$/.test(final.publishedBaselineHash ?? '') ||
     !/^[a-f0-9]{64}$/.test(final.inputHash ?? '') ||
     final.proofHash !== finalProofHash(journal) ||
@@ -88,7 +78,6 @@ export function publishedBaselineHash(journal: Journal, native: Map<string, Work
     ...new Set([
       ...journal.selection.reconcileIds,
       ...journal.selection.verificationIds,
-      ...(journal.selection.addedIds ?? []),
       ...Object.values(journal.ids),
       ...Object.keys(final.hashes),
       ...final.deleted,
@@ -116,13 +105,8 @@ export function guardedBinding(journal: Journal) {
 
 /** Fold the one attempted prefix, never infer a new plan from the current remote state. */
 export function foldResume(plan: SyncPlan, journal: Journal, initial: Map<string, WorkspaceRem>) {
-  if (
-    plan.deletion ||
-    plan.incoming.length ||
-    plan.converged.length ||
-    plan.resolutions.length ||
-    plan.conflicts.length
-  )
+  requireLocalAuthority(journal, journal.planHash);
+  if (plan.deletion || plan.converged.length || plan.conflicts.length)
     throw new Error(
       'Resume requires an exactly reconstructible outgoing-only plan; preserve this journal'
     );
@@ -334,4 +318,22 @@ export function verifyResumeReadback(
     result.set(id, actual);
   }
   return result;
+}
+
+/** Old journals remain intact for reconciliation, never executable under new source authority. */
+export function requireLocalAuthority(journal: Journal, reference: string): void {
+  const legacy = journal.proof?.plan as
+    (SyncPlan & { incoming?: unknown; resolutions?: unknown; winner?: unknown }) | undefined;
+  if (
+    journal.contentAuthority !== 'local' ||
+    journal.final?.remoteVersions !== undefined ||
+    (legacy &&
+      (legacy.contentAuthority !== 'local' ||
+        'incoming' in legacy ||
+        'resolutions' in legacy ||
+        'winner' in legacy))
+  )
+    throw new Error(
+      `Legacy or mixed-authority journal is evidence only; preserve exact journal ${reference}. Manual reconciliation required; no writes or replay.`
+    );
 }

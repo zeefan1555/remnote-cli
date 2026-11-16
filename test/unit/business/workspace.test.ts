@@ -41,6 +41,7 @@ import {
   documentPaths,
   inspectLocal,
   publicationStore,
+  prepareSnapshot,
 } from '../../../src/business/workspace/local.js';
 import { LocalState } from '../../../src/remnote-cli/client/local-state.js';
 import * as fileOps from '../../../src/business/workspace/files.js';
@@ -435,6 +436,381 @@ function syntheticCli(
   };
 }
 
+async function save(path: string, replace: (source: string) => string) {
+  const source = await workspace.readWorkspace(directory, path);
+  return workspace.saveWorkspace(directory, path, replace(source.content), source.fileHash);
+}
+
+describe('local-authoritative content publisher', () => {
+  it.each(['all', 'guarded', 'changed'] as const)(
+    'blocks native readonly Portal projection drift in %s mode before unrelated local writes',
+    async (mode) => {
+      const f = await prepare(({ rems }) => {
+        Object.assign(rems.get('opaque')!, {
+          text: [],
+          type: 6,
+          portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+        });
+      });
+      await edit(f.path, (source) => source.replace('Because', 'Desired local answer'));
+      const source = await readPrivate(directory, f.path),
+        identity = await readPrivate(directory, IDENTITY),
+        before = await loadState(directory);
+      f.rems.get('opaque')!.portal!.directlyIncludedRemIds = ['chapter'];
+      if (mode === 'changed') f.rems.get('opaque')!.public = { updatedAt: 50, text: [] };
+      // The public probe must make this Rem eligible for a full read in changed mode.
+      if (mode === 'changed') f.rems.get('opaque')!.text = ['Observed portal'];
+      const remote = structuredClone([...f.rems]);
+      expect(
+        await syncWorkspace(directory, async () => f.backend, {
+          apply: true,
+          ...(mode === 'guarded'
+            ? {
+                paths: [f.path],
+                expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
+              }
+            : { scope: mode, paths: [f.path] }),
+        })
+      ).toMatchObject({
+        contentAuthority: 'local',
+        status: 'conflict',
+        remoteWrites: 0,
+        conflicts: [expect.objectContaining({ id: 'opaque', reason: 'remote-structure' })],
+      });
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPrivate(directory, IDENTITY)).toBe(identity);
+      expect((await loadState(directory)).entries).toEqual(before.entries);
+      expect((await loadState(directory)).documents).toEqual(before.documents);
+      expect([...f.rems]).toEqual(remote);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('rejects readonly projection backfill even when snapshot preparation bypasses reconciliation', async () => {
+    const f = await prepare(({ rems }) => {
+      Object.assign(rems.get('opaque')!, {
+        text: [],
+        type: 6,
+        portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+      });
+    });
+    const context = await inspectLocal(directory),
+      rems = structuredClone([...context.native.values()]);
+    rems.find((rem) => rem.id === 'opaque')!.portal!.directlyIncludedRemIds = ['chapter'];
+    await expect(
+      prepareSnapshot(
+        directory,
+        'kb',
+        rems,
+        context.state,
+        context.state,
+        await context.inputs.freeze(),
+        undefined,
+        undefined,
+        [],
+        context.parsed
+      )
+    ).rejects.toThrow(/Local-authoritative publication/);
+    expect(await loadState(directory)).toEqual(context.state);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('refreshes native review and TODO facts without rewriting local source bytes or consuming feedback', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) => '---\n# Preserve this local YAML comment\naliases: [Local alias]\n---\n' + source
+    );
+    const source = await readPrivate(directory, f.path),
+      identity = await readPrivate(directory, IDENTITY);
+    const question = f.rems.get('question')!;
+    question.cards = (await f.backend.read(['question']))[0]!.cards;
+    question.cards![0]!.repetitionHistory = [{ time: 30 }];
+    question.cards![0]!.nextRepetitionTime = 60;
+    question.facts = { isTodo: true, todoStatus: 'Unfinished', updatedAt: 30 };
+    const remote = structuredClone([...f.rems]);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, scope: 'all' })
+    ).toMatchObject({ contentAuthority: 'local', status: 'verified', remoteWrites: 0 });
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(await readPrivate(directory, IDENTITY)).toBe(identity);
+    expect((await inspectLocal(directory)).native.get('question')!.facts).toMatchObject({
+      isTodo: true,
+      todoStatus: 'Unfinished',
+    });
+    expect([...f.rems]).toEqual(remote);
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['body', 'tags', 'children'] as const)(
+    'rejects %s backfill at local publication even if a caller bypasses reconciliation',
+    async (kind) => {
+      const f = await prepare();
+      const context = await inspectLocal(directory),
+        rems = structuredClone([...context.native.values()]);
+      const answer = rems.find((rem) => rem.id === 'answer')!;
+      if (kind === 'body') answer.text = ['Smuggled remote content'];
+      if (kind === 'tags') answer.tags = ['home'];
+      if (kind === 'children') {
+        answer.children.push('remote-only');
+        rems.push(native('remote-only', ['Smuggled child'], { parent: 'answer' }));
+      }
+      const before = await readPrivate(directory, f.path);
+      await expect(
+        prepareSnapshot(
+          directory,
+          'kb',
+          rems,
+          context.state,
+          context.state,
+          await context.inputs.freeze(),
+          undefined,
+          undefined,
+          [],
+          context.parsed
+        )
+      ).rejects.toThrow(/Local-authoritative publication/);
+      expect(await readPrivate(directory, f.path)).toBe(before);
+      expect(await loadState(directory)).toEqual(context.state);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('ignores and preserves sealed legacy clocks without generating new clock evidence', async () => {
+    const f = await prepare(),
+      state = await loadState(directory);
+    state.localVersions = {
+      answer: { contentHash: '1'.repeat(64), timestamp: 1, source: 'cli-save' },
+    };
+    state.remoteVersions = {
+      answer: {
+        contentHash: '2'.repeat(64),
+        timestamp: 9e12,
+        source: 'rem-updated-at',
+        sinceBaseline: true,
+      },
+    };
+    await saveState(directory, state);
+    const read = await workspace.readWorkspace(directory, f.path);
+    expect(read).toMatchObject({ contentAuthority: 'local' });
+    await workspace.saveWorkspace(
+      directory,
+      f.path,
+      read.content.replace('Because', 'Desired answer'),
+      read.fileHash
+    );
+    const context = await inspectLocal(directory),
+      local = planLocal(context);
+    const remote = new Map(
+      (await f.backend.read([...context.native.keys()])).map((rem) => [rem.id, rem])
+    );
+    const first = reconcile(context, local, remote).plan;
+    context.state.localVersions!.answer!.timestamp = 9e12;
+    context.state.remoteVersions!.answer!.timestamp = 1;
+    expect(reconcile(context, planLocal(context), remote).plan).toEqual(first);
+    expect(first).toMatchObject({ contentAuthority: 'local', conflicts: [] });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { planHash: string };
+    expect(result).toMatchObject({
+      contentAuthority: 'local',
+      status: 'verified',
+      remoteWrites: 1,
+    });
+    const after = await loadState(directory);
+    expect(after.localVersions).toEqual(state.localVersions);
+    expect(after.remoteVersions).toEqual(state.remoteVersions);
+    const journal = await localStore('kb').getLocal<Journal>(
+      `workspace-v2:kb:${hash(directory)}:${result.planHash}`
+    );
+    expect(journal).toMatchObject({ contentAuthority: 'local' });
+    expect(journal!.final).not.toHaveProperty('remoteVersions');
+  });
+
+  it.each(['missing', 'incoming', 'winner'] as const)(
+    'preserves old unknown journal %s and rejects every execution entry before native access',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Desired answer'));
+      const read = await workspace.readWorkspace(directory, f.path);
+      const original = f.backend.writeField;
+      f.backend.writeField = async (...args) => {
+        await original(...args);
+        throw new Error('lost ack');
+      };
+      const result = (await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: read.fileHash,
+      })) as { journalKey: string; planHash: string };
+      expect(result).toMatchObject({ status: 'unknown' });
+      const journal = (await localStore('kb').getLocal<Journal>(result.journalKey))!;
+      if (kind === 'missing') delete journal.contentAuthority;
+      else
+        Object.assign(
+          journal.proof!.plan,
+          kind === 'incoming' ? { incoming: ['answer'] } : { winner: 'remote' }
+        );
+      await localStore('kb').setLocal(result.journalKey, journal);
+      const state = await loadState(directory),
+        source = await readPrivate(directory, f.path),
+        calls = [...f.calls];
+      const factory = vi.fn(async () => f.backend);
+      expect((await workspace.readWorkspace(directory, f.path)).content).toBe(source);
+      await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        result.journalKey
+      );
+      await expect(resumeWorkspace(directory, factory, result.planHash)).rejects.toThrow(
+        result.journalKey
+      );
+      await expect(recoverWorkspace(directory, factory)).rejects.toThrow(result.journalKey);
+      await expect(save(f.path, (text) => text + '\n')).rejects.toThrow(result.journalKey);
+      expect(factory).not.toHaveBeenCalled();
+      expect(await loadState(directory)).toEqual(state);
+      expect(await localStore('kb').getLocal(result.journalKey)).toEqual(journal);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(f.calls).toEqual(calls);
+    }
+  );
+
+  it('blocks even a reliably newer remote body and archives both versions before any write', async () => {
+    const f = await prepare();
+    await save(f.path, (source) => source.replace('Because', 'Local answer'));
+    const source = await readPrivate(directory, f.path);
+    f.rems.get('answer')!.text = ['Remote answer'];
+    f.rems.get('answer')!.public = { updatedAt: Date.now() + 1_000 };
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { conflicts: Array<{ localSnapshot: string; remoteSnapshot: string }> };
+    expect(result).toMatchObject({
+      contentAuthority: 'local',
+      status: 'conflict',
+      complete: false,
+      remoteWrites: 0,
+      conflicts: [{ id: 'answer', reason: 'remote-content-drift' }],
+    });
+    expect(await readPrivate(directory, result.conflicts[0]!.localSnapshot)).toContain(
+      'Local answer'
+    );
+    expect(await readPrivate(directory, result.conflicts[0]!.remoteSnapshot)).toContain(
+      'Remote answer'
+    );
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(f.rems.get('answer')!.text).toEqual(['Remote answer']);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('cannot disguise a remote-only body change as a runtime metadata refresh', async () => {
+    const f = await prepare();
+    const source = await readPrivate(directory, f.path);
+    const question = f.rems.get('question')!;
+    question.cards = (await f.backend.read(['question']))[0]!.cards;
+    question.cards![0]!.repetitionHistory = [{ time: 20 }];
+    question.text = ['Remote-only question'];
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({ contentAuthority: 'local', status: 'conflict', remoteWrites: 0 });
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['plain', 'portal', 'missing', 'cycle'] as const)(
+    'blocks %s remote children and unrelated local writes without reading or importing their tree',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Desired answer'));
+      const source = await readPrivate(directory, f.path),
+        identity = await readPrivate(directory, IDENTITY),
+        state = await loadState(directory);
+      f.rems.get('chapter')!.children.push('native-only');
+      if (kind !== 'missing')
+        f.rems.set(
+          'native-only',
+          native('native-only', ['Remote child'], {
+            parent: 'chapter',
+            ...(kind === 'portal'
+              ? {
+                  type: 6,
+                  portal: {
+                    type: 4,
+                    directlyIncludedRemIds: ['unknown-target'],
+                    query: 'unsupported query',
+                  },
+                }
+              : {}),
+            ...(kind === 'cycle' ? { children: ['chapter'] } : {}),
+          })
+        );
+      const remote = structuredClone([...f.rems]);
+      vi.mocked(f.backend.read).mockClear();
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).toMatchObject({
+        contentAuthority: 'local',
+        status: 'conflict',
+        remoteWrites: 0,
+        conflicts: [{ id: 'chapter', reason: 'remote-structure' }],
+      });
+      expect(vi.mocked(f.backend.read).mock.calls.flatMap(([ids]) => ids)).not.toContain(
+        'native-only'
+      );
+      expect((await loadState(directory)).entries['native-only']).toBeUndefined();
+      expect((await loadState(directory)).entries).toEqual(state.entries);
+      expect((await loadState(directory)).documents).toEqual(state.documents);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPrivate(directory, IDENTITY)).toBe(identity);
+      expect([...f.rems]).toEqual(remote);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('blocks remote-only tag drift rather than merging it into local Markdown', async () => {
+    const f = await prepare();
+    const source = await readPrivate(directory, f.path);
+    f.rems.get('answer')!.tags = ['home'];
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).toMatchObject({
+      contentAuthority: 'local',
+      status: 'conflict',
+      remoteWrites: 0,
+      conflicts: [{ id: 'answer', reason: 'remote-content-drift' }],
+    });
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('publishes local edits and verifies exact equal-content no-ops without recreating cards', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Desired answer'));
+    const before = await workspace.readWorkspace(directory, f.path);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: before.fileHash,
+      })
+    ).toMatchObject({ contentAuthority: 'local', status: 'verified', cardsPreserved: true });
+    expect(f.calls).toEqual(['answer:text']);
+    const after = await workspace.readWorkspace(directory, f.path);
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: after.fileHash,
+      })
+    ).toMatchObject({
+      contentAuthority: 'local',
+      status: 'verified',
+      remoteWrites: 0,
+      verification: { nativeAfter: { question: { cardIds: ['card_question'] } } },
+    });
+    expect(f.calls).toEqual(['answer:text']);
+  });
+});
+
 describe('first-class tag and Card Cluster creation', () => {
   it('does not replace an unknown existing native cardItem flag with inferred local nesting', async () => {
     const f = await prepare((f) => {
@@ -537,9 +913,10 @@ describe('first-class tag and Card Cluster creation', () => {
     const f = await prepare();
     await edit(f.path, (s) => s.replace('Because', 'Local edit'));
     f.rems.get('chapter')!.tags = ['unknown-native-tag'];
-    await expect(syncWorkspace(directory, async () => f.backend, { apply: true })).rejects.toThrow(
-      'Unmapped native tag'
-    );
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'conflict',
+      remoteWrites: 0,
+    });
     expect(f.calls).toEqual([]);
   });
   it('adds a newly discovered outside dependency when a remote-only selected Rem changes', async () => {
@@ -551,7 +928,7 @@ describe('first-class tag and Card Cluster creation', () => {
     expect(
       await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [path] })
     ).toMatchObject({
-      status: 'verified',
+      status: 'conflict',
       selection: { verificationIds: expect.arrayContaining(['home']) },
     });
     expect(vi.mocked(f.backend.read).mock.calls.flatMap(([ids]) => ids)).toContain('home');
@@ -791,7 +1168,7 @@ describe('first-class tag and Card Cluster creation', () => {
         .mock.calls.flatMap(([ids]) => ids)
         .some((id) => id.startsWith('unrelated_'))
     ).toBe(false);
-  });
+  }, 15_000);
 });
 
 // The pre-existing reconciliation fixtures explicitly exercise the whole bound graph.
@@ -844,63 +1221,11 @@ describe('scoped publication proof', () => {
           remoteWrites: 0,
         });
       expect(observed).toBe(true);
-      expect((await loadState(directory)).remoteVersions!.basic!.timestamp).toBe(10);
+      expect(await loadState(directory)).not.toHaveProperty('remoteVersions');
       expect(f.rems.get('basic')!.public!.updatedAt).toBe(25);
       expect(f.calls).toEqual(['basic:backText']);
     }
   );
-
-  it.each([
-    ['normal', 10, 20, 20],
-    ['missing', 10, null, null],
-    ['backward', 20, 10, null],
-  ] as const)(
-    'keeps first observed P clock through same-run review drift: %s',
-    async (_case, beforeTime, contentTime, expectedTime) => {
-      const f = await prepare((f) => {
-        f.rems.get('basic')!.public = { updatedAt: beforeTime };
-      });
-      f.rems.get('basic')!.backText = ['Incoming back'];
-      f.rems.get('basic')!.public = contentTime === null ? {} : { updatedAt: contentTime };
-      const guard = f.backend.guard;
-      f.backend.guard = async (ids) => {
-        const result = await guard(ids);
-        f.rems.get('basic')!.public = { updatedAt: 30 };
-        return result;
-      };
-      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-        status: 'verified',
-        incoming: ['basic'],
-      });
-      const state = await loadState(directory);
-      expect(state.remoteVersions!.basic!.timestamp).toBe(expectedTime);
-      expect(state.remoteVersions!.basic!.sinceBaseline).toBeUndefined();
-      expect(f.calls).toEqual([]);
-    }
-  );
-
-  it('preserves observed A to B to A time while clearing published sinceBaseline', async () => {
-    const f = await prepare((f) => {
-      f.rems.get('basic')!.public = { updatedAt: 10 };
-    });
-    f.rems.get('basic')!.backText = ['B'];
-    f.rems.get('basic')!.public = { updatedAt: 20 };
-    expect(await syncWorkspace(directory, async () => f.backend)).toMatchObject({
-      incoming: ['basic'],
-    });
-    expect((await loadState(directory)).remoteVersions!.basic).toMatchObject({
-      timestamp: 20,
-      sinceBaseline: true,
-    });
-    f.rems.get('basic')!.backText = ['Back'];
-    f.rems.get('basic')!.public = { updatedAt: 30 };
-    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-      status: 'verified',
-    });
-    expect((await loadState(directory)).remoteVersions!.basic).toMatchObject({ timestamp: 30 });
-    expect((await loadState(directory)).remoteVersions!.basic!.sinceBaseline).toBeUndefined();
-    expect(f.calls).toEqual([]);
-  });
 
   it.each(['all', 'guarded'] as const)(
     'retains complete original publication for %s',
@@ -922,7 +1247,10 @@ describe('scoped publication proof', () => {
     }
   );
 
-  async function stagedFixture(point: 'before-install' | 'displaced' | 'installed') {
+  async function stagedFixture(
+    point: 'before-install' | 'displaced' | 'installed',
+    guarded = false
+  ) {
     const f = await prepare();
     await edit(f.path, (source) => source.replace('Because', 'Frozen answer'));
     const set = LocalState.prototype.setLocal,
@@ -946,7 +1274,17 @@ describe('scoped publication proof', () => {
         throw new Error('After exact target displacement');
       return link(...args);
     });
-    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+    expect(
+      await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        ...(guarded
+          ? {
+              paths: [f.path],
+              expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
+            }
+          : {}),
+      })
+    ).toMatchObject({
       status: 'publication-incomplete',
     });
     stateSpy.mockRestore();
@@ -983,6 +1321,30 @@ describe('scoped publication proof', () => {
       })
     );
 
+  it.each(['missing', 'incoming'] as const)(
+    'preserves installed legacy %s publication and refuses recovery before native access',
+    async (kind) => {
+      const { f, publication } = await stagedFixture('installed', true);
+      if (publication.recovery.kind !== 'sync') throw new Error('Expected sync binding');
+      const key = publication.recovery.journalKey,
+        journal = (await localStore('kb').getLocal<Journal>(key))!;
+      if (kind === 'missing') delete journal.contentAuthority;
+      else Object.assign(journal.proof!.plan, { incoming: ['answer'] });
+      await localStore('kb').setLocal(key, journal);
+      const bytes = await payloadSnapshot(publication),
+        authoritative = await authoritativeState(directory),
+        calls = [...f.calls];
+      const factory = vi.fn(async () => f.backend);
+      await expect(recoverWorkspace(directory, factory)).rejects.toThrow(key);
+      expect(factory).not.toHaveBeenCalled();
+      expect(await payloadSnapshot(publication)).toEqual(bytes);
+      expect(await authoritativeState(directory)).toEqual(authoritative);
+      expect(await readPublication(directory)).toEqual(publication);
+      expect(await localStore('kb').getLocal(key)).toEqual(journal);
+      expect(f.calls).toEqual(calls);
+    }
+  );
+
   it('refuses a sync ledger appearing after the unlocked lookup and before locked recovery', async () => {
     const { f, publication } = await stagedFixture('installed'),
       before = await payloadSnapshot(publication),
@@ -1009,50 +1371,6 @@ describe('scoped publication proof', () => {
     expect(await payloadSnapshot(publication)).toEqual(before);
     expect(await readPublication(directory)).toEqual(publication);
   });
-
-  it.each([
-    'missing',
-    'extra',
-    'source',
-    'hash',
-    'time',
-    'content',
-    'next-clock',
-    'sinceBaseline',
-  ] as const)(
-    'rejects sealed P version %s mismatch before activating installed recovery',
-    async (kind) => {
-      const { f, publication } = await stagedFixture('installed');
-      if (publication.recovery.kind !== 'sync') throw new Error('Expected sync binding');
-      const journal = (await localStore('kb').getLocal<Journal>(publication.recovery.journalKey))!,
-        versions = journal.final!.remoteVersions,
-        version = versions.answer!,
-        { finalProofHash } = await import('../../../src/business/workspace/resume.js');
-      if (kind === 'missing') delete versions.answer;
-      if (kind === 'extra') versions.basic = { ...version };
-      if (kind === 'source') version.source = 'cli-save';
-      if (kind === 'hash') version.contentHash = 'not-a-digest';
-      if (kind === 'time') version.timestamp = -1;
-      if (kind === 'content') version.contentHash = '0'.repeat(64);
-      if (kind === 'next-clock') version.timestamp = 100;
-      if (kind === 'sinceBaseline') version.sinceBaseline = true;
-      journal.final!.proofHash = finalProofHash(journal);
-      publication.recovery.proofHash = journal.final!.proofHash;
-      const { integrityHash: _seal, ...unsealed } = publication;
-      publication.integrityHash = hash(unsealed);
-      await localStore('kb').setLocal(publication.recovery.journalKey, journal);
-      await publicationStore().setLocal(`publication:${hash(directory)}`, publication);
-      const factory = vi.fn(async () => f.backend),
-        before = await payloadSnapshot(publication),
-        authoritative = await authoritativeState(directory);
-      await expect(recoverWorkspace(directory, factory)).rejects.toThrow(
-        /publication proof|content version proof/
-      );
-      expect(factory).not.toHaveBeenCalled();
-      expect(await payloadSnapshot(publication)).toEqual(before);
-      expect(await authoritativeState(directory)).toEqual(authoritative);
-    }
-  );
 
   it.each(['root', 'kb', 'plan', 'journal', 'proof', 'live-kb'] as const)(
     'refuses installed sync publication with a mismatched %s binding',
@@ -1236,7 +1554,7 @@ describe('scoped publication proof', () => {
       expect([...f.rems]).toEqual(remoteOnly);
       expect(f.calls).toEqual(calls);
       const after = await loadState(directory);
-      expect(after.remoteVersions!.basic!.timestamp).toBe(10);
+      expect(after).not.toHaveProperty('remoteVersions');
       for (const [id, bytes] of raw) {
         expect(await readPrivate(directory, after.entries[id]!.rawPath)).toBe(bytes);
         expect(after.localVersions?.[id]).toEqual(before.localVersions?.[id]);
@@ -1360,7 +1678,7 @@ describe('scoped publication proof', () => {
         )
       ).toMatchObject({ status: 'already-complete' });
       expect(await syncWorkspace(directory, async () => f.backend)).toMatchObject({
-        incoming: ['basic'],
+        conflicts: [expect.objectContaining({ id: 'basic', reason: 'remote-content-drift' })],
       });
     }
   );
@@ -1399,15 +1717,15 @@ describe('scoped publication proof', () => {
       const path = f.state.entries.subdoc!.path;
       const before = await loadState(directory);
       const raw = await readPrivate(directory, before.entries.basic!.rawPath);
-      f.rems.get('subdoc')!.text = ['Incoming child document'];
+      await edit(path, (source) => source.replace('Child doc', 'Desired child document'));
       vi.mocked(f.backend.readProbe).mockClear();
       const result = await syncWorkspace(directory, async () => f.backend, {
         apply: true,
         paths: [path],
       });
-      expect(result).toMatchObject({ status: 'verified', incoming: ['subdoc'], remoteWrites: 0 });
+      expect(result).toMatchObject({ status: 'verified', outgoing: ['subdoc'], remoteWrites: 1 });
       expect(result.selection!.reconcileIds).toEqual(['subdoc']);
-      expect(vi.mocked(f.backend.readProbe).mock.calls[0]![0]).toEqual(['subdoc']);
+      expect(vi.mocked(f.backend.readProbe).mock.calls[0]![0]).toEqual(['daily', 'home', 'subdoc']);
       const probes = vi.mocked(f.backend.readProbe).mock.calls.map(([ids]) => ids);
       expect(probes.slice(-2)).toEqual([
         ['basic', 'daily', 'home', 'subdoc'],
@@ -1421,9 +1739,9 @@ describe('scoped publication proof', () => {
       }
       expect(await readPrivate(directory, before.entries.basic!.rawPath)).toEqual(raw);
       expect((await inspectLocal(directory)).native.get('subdoc')!.text).toEqual([
-        'Incoming child document',
+        'Desired child document',
       ]);
-      expect(f.calls).toEqual([]);
+      expect(f.calls).toEqual(['subdoc:text']);
     }
   );
 
@@ -1436,20 +1754,20 @@ describe('scoped publication proof', () => {
     const path = f.state.entries.subdoc!.path;
     await edit(f.path, (source) => source.replace('Front', 'Unselected local front'));
     const untouched = await readPrivate(directory, f.path);
-    f.rems.get('subdoc')!.text = ['Incoming child document'];
+    await edit(path, (source) => source.replace('Child doc', 'Desired child document'));
     f.rems.get('basic')!.tags = ['opaque'];
     f.rems.get('opaque')!.tags = ['chapter'];
     const result = await syncWorkspace(directory, async () => f.backend, {
       apply: true,
       paths: [path],
     });
-    expect(result).toMatchObject({ status: 'verified', incoming: ['subdoc'], remoteWrites: 0 });
+    expect(result).toMatchObject({ status: 'verified', outgoing: ['subdoc'], remoteWrites: 1 });
     expect(result.selection!.reconcileIds).toEqual(['subdoc']);
     expect(await readPrivate(directory, f.path)).toEqual(untouched);
     const probes = vi.mocked(f.backend.readProbe).mock.calls.map(([ids]) => ids);
     const expected = ['basic', 'chapter', 'daily', 'home', 'opaque', 'subdoc'];
     expect(probes.slice(-2)).toEqual([expected, expected]);
-    expect(f.calls).toEqual([]);
+    expect(f.calls).toEqual(['subdoc:text']);
   });
 
   it.each(['known-tags', 'text', 'children', 'parent', 'type', 'powerup', 'unbound-tag'] as const)(
@@ -1462,8 +1780,8 @@ describe('scoped publication proof', () => {
       });
       const before = await loadState(directory);
       const path = before.entries.subdoc!.path;
+      await edit(path, (source) => source.replace('Child doc', 'Desired child document'));
       const markdown = await readPrivate(directory, path);
-      f.rems.get('subdoc')!.text = ['Incoming child document'];
       const dependency = f.rems.get('basic')!;
       if (change === 'known-tags') dependency.tags = ['chapter'];
       if (change === 'text') dependency.text = ['Changed dependency'];
@@ -1490,8 +1808,8 @@ describe('scoped publication proof', () => {
         f.rems.get('basic')!.tags = undefined;
       });
       const path = f.state.entries.subdoc!.path;
+      await edit(path, (source) => source.replace('Child doc', 'Desired child document'));
       const markdown = await readPrivate(directory, path);
-      f.rems.get('subdoc')!.text = ['Incoming child document'];
       const probe = f.backend.readProbe,
         read = f.backend.read;
       if (boundary === 'full-read')
@@ -1521,7 +1839,7 @@ describe('scoped publication proof', () => {
           error: expect.stringMatching(/Concurrent remote change.*basic/),
         });
       expect(await readPrivate(directory, path)).toEqual(markdown);
-      expect(f.calls).toEqual([]);
+      expect(f.calls).toEqual(boundary === 'after' ? ['subdoc:text'] : []);
     }
   );
 
@@ -1535,7 +1853,7 @@ describe('scoped publication proof', () => {
       const path = f.state.entries.subdoc!.path;
       const before = await loadState(directory);
       const raw = await readPrivate(directory, before.entries.basic!.rawPath);
-      f.rems.get('subdoc')!.text = ['Incoming child document'];
+      await edit(path, (source) => source.replace('Child doc', 'Desired child document'));
       const original = LocalState.prototype.setLocal,
         link = fileOps.linkPrivate;
       const storeSpy = vi
@@ -1577,7 +1895,7 @@ describe('scoped publication proof', () => {
       });
       expect(await readPrivate(directory, before.entries.basic!.rawPath)).toEqual(raw);
       expect((await loadState(directory)).entries.basic).toEqual(before.entries.basic);
-      expect(f.calls).toEqual([]);
+      expect(f.calls).toEqual(['subdoc:text']);
     }
   );
 
@@ -1806,28 +2124,6 @@ describe('selected incremental sync', () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it('merges local and remote direct tag deltas separately from remote body edits', async () => {
-    const f = await prepare((f) => {
-      f.rems.get('question')!.tags = ['home'];
-      f.rems.get('basic')!.tags = ['chapter'];
-    });
-    await edit(f.path, (source) => source.replace('Why? #HOME', 'Why? #HOME/Today/Chapter'));
-    f.rems.get('question')!.text = ['Remote why'];
-    f.rems.get('question')!.tags = ['home', 'chapter'];
-    const result = await syncWorkspace(directory, async () => f.backend, {
-      apply: true,
-      paths: [f.path],
-    });
-    expect(result).toMatchObject({ status: 'verified', incoming: ['question'], remoteWrites: 1 });
-    expect(f.calls).toEqual(['question:tag:remove:home']);
-    expect(f.rems.get('question')).toMatchObject({ text: ['Remote why'], tags: ['chapter'] });
-    expect(await readPrivate(directory, f.path)).toContain('Remote why #HOME/Today/Chapter');
-    expect(await syncWorkspace(directory, async () => f.backend)).toMatchObject({
-      status: 'unchanged',
-      remoteWrites: 0,
-    });
-  });
-
   it('rejects tag removal before any text writes when the existing destructive capability gate is disabled', async () => {
     const f = await prepare((f) => {
       f.rems.get('question')!.tags = ['home'];
@@ -1852,12 +2148,15 @@ describe('selected incremental sync', () => {
       paths: [f.path],
     });
     expect(result).toMatchObject({
-      status: 'verified',
-      incoming: ['answer', 'question'],
+      status: 'conflict',
+      conflicts: [
+        expect.objectContaining({ id: 'answer' }),
+        expect.objectContaining({ id: 'question' }),
+      ],
       remoteWrites: 0,
     });
-    expect(await readPrivate(directory, f.path)).toContain('Remote-only answer');
-    expect(await readPrivate(directory, f.path)).toContain('Why? #HOME');
+    expect(await readPrivate(directory, f.path)).not.toContain('Remote-only answer');
+    expect(await readPrivate(directory, f.path)).not.toContain('Why? #HOME');
     expect(f.calls).toEqual([]);
   });
 
@@ -1882,30 +2181,25 @@ describe('selected incremental sync', () => {
       apply: true,
     });
     expect(result).toMatchObject({
-      status: 'verified',
-      outgoing: ['answer'],
-      incoming: ['basic'],
-      selection: { reconcileIds: ['answer', 'basic', 'chapter', 'daily', 'opaque', 'question'] },
+      status: 'conflict',
+      remoteWrites: 0,
+      conflicts: [expect.objectContaining({ id: 'basic' })],
     });
     const after = await loadState(directory);
     expect(await readPrivate(directory, bPath)).toBe(bBytes);
     expect(await readPrivate(directory, before.entries.subdoc!.rawPath)).toBe(bRaw);
-    expect(await readPrivate(directory, before.entries.basic!.rawPath)).not.toBe(cRaw);
-    expect(after.entries.subdoc).toEqual(before.entries.subdoc);
-    expect(after.documents[bPath]).toEqual(before.documents[bPath]);
-    expect(after.localVersions).toEqual(before.localVersions);
-    expect(after.remoteVersions!.subdoc).toEqual(before.remoteVersions!.subdoc);
-    expect(after.remoteVersions!.basic).not.toEqual(before.remoteVersions!.basic);
-    expect(Object.keys(after.entries)).not.toContain('created_1');
+    expect(await readPrivate(directory, before.entries.basic!.rawPath)).toBe(cRaw);
+    expect(after).toEqual(before);
+    expect(f.calls).toEqual([]);
     expect(vi.mocked(f.backend.readProbe).mock.calls.flatMap(([ids]) => ids)).toContain('basic');
+    f.rems.get('basic')!.text = ['Front'];
     const later = await syncWorkspace(directory, async () => f.backend, {
       scope: 'all',
       apply: true,
     });
     expect(later).toMatchObject({
       status: 'verified',
-      incoming: [],
-      outgoing: ['subdoc', 'created_1'],
+      outgoing: ['answer', 'subdoc', 'created_1'],
     });
     expect(f.calls.filter((call) => call === 'create')).toHaveLength(1);
     expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
@@ -1924,20 +2218,21 @@ describe('selected incremental sync', () => {
       const preview = await syncWorkspace(directory, async () => f.backend, { paths: [f.path] });
       expect(preview).toMatchObject({
         status: 'preview',
-        incoming: [],
         selection: { verificationIds: expect.arrayContaining([id]) },
       });
-      expect((await loadState(directory)).remoteVersions![id]).toEqual(before.remoteVersions![id]);
+      expect((await loadState(directory)).remoteVersions?.[id]).toEqual(
+        before.remoteVersions?.[id]
+      );
       expect(
         await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
-      ).toMatchObject({ status: 'verified', incoming: [], outgoing: ['answer'] });
+      ).toMatchObject({ status: 'verified', outgoing: ['answer'] });
       const after = await loadState(directory);
       expect(await readPrivate(directory, before.entries[id]!.rawPath)).toBe(raw);
       expect(after.entries[id]).toEqual(before.entries[id]);
-      expect(after.remoteVersions![id]).toEqual(before.remoteVersions![id]);
+      expect(after.remoteVersions?.[id]).toEqual(before.remoteVersions?.[id]);
       expect(await readPrivate(directory, f.path)).not.toContain('Remote dependency');
       expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject(
-        { status: 'preview', incoming: [id] }
+        { status: 'conflict', conflicts: [expect.objectContaining({ id })] }
       );
     }
   );
@@ -1950,19 +2245,14 @@ describe('selected incremental sync', () => {
     const before = await loadState(directory);
     expect(
       await syncWorkspace(directory, async () => f.backend, { paths: [f.path], apply: true })
-    ).toMatchObject({ status: 'verified', incoming: ['daily'], outgoing: ['created_1'] });
-    const after = await loadState(directory),
-      parent = JSON.parse(await readPrivate(directory, after.entries.daily!.rawPath));
-    expect(parent.children).toContain('created_1');
-    expect(parent.public.children).toContain('created_1');
-    expect(parent.text).toEqual(['Remote parent title']);
-    expect(parent.public.text).toEqual(['Remote parent title']);
-    expect(after.remoteVersions!.daily).not.toEqual(before.remoteVersions!.daily);
-    expect(await readPrivate(directory, f.path)).toContain('# Remote parent title');
-    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
-    expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
-      status: 'unchanged',
+    ).toMatchObject({
+      status: 'conflict',
+      remoteWrites: 0,
+      conflicts: [expect.objectContaining({ id: 'daily' })],
     });
+    expect(await loadState(directory)).toEqual(before);
+    expect(f.calls).toEqual([]);
+    expect(await readPrivate(directory, f.path)).not.toContain('Remote parent title');
   });
 
   it('checks all bound IDs only in selected files when scope is all', async () => {
@@ -1977,13 +2267,16 @@ describe('selected incremental sync', () => {
         apply: true,
       })
     ).toMatchObject({
-      status: 'verified',
-      incoming: ['subdoc'],
+      status: 'conflict',
+      conflicts: [expect.objectContaining({ id: 'subdoc' })],
       selection: { reconcileIds: ['subdoc'] },
     });
     expect(await readPrivate(directory, f.path)).not.toContain('Unselected remote');
     expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
-      incoming: ['basic'],
+      conflicts: expect.arrayContaining([
+        expect.objectContaining({ id: 'basic' }),
+        expect.objectContaining({ id: 'subdoc' }),
+      ]),
     });
   });
 
@@ -2251,11 +2544,11 @@ describe('selected incremental sync', () => {
       expect(f.calls).toEqual(calls);
       expect(await readPrivate(directory, bPath)).toBe(bytes);
       expect(await readPrivate(directory, before.entries.home!.rawPath)).toBe(raw);
-      expect((await loadState(directory)).remoteVersions!.home).toEqual(
-        before.remoteVersions!.home
+      expect((await loadState(directory)).remoteVersions?.home).toEqual(
+        before.remoteVersions?.home
       );
       expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject(
-        { incoming: ['home'], creates: 1 }
+        { status: 'conflict', conflicts: [expect.objectContaining({ id: 'home' })] }
       );
     }
   );
@@ -2335,12 +2628,12 @@ describe('selected incremental sync', () => {
       parent = JSON.parse(await readPrivate(directory, after.entries.chapter!.rawPath));
     expect(parent.text).toEqual(['Chapter']);
     expect(parent.children).toEqual([]);
-    expect(after.remoteVersions!.chapter).toEqual(before.remoteVersions!.chapter);
+    expect(after.remoteVersions?.chapter).toEqual(before.remoteVersions?.chapter);
     expect(after.documents[renamed]).toBeDefined();
     expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
     expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
-      status: 'preview',
-      incoming: ['chapter'],
+      status: 'conflict',
+      conflicts: [expect.objectContaining({ id: 'chapter' })],
     });
   });
 
@@ -2480,8 +2773,8 @@ describe('selected incremental sync', () => {
     expect(f.calls).toEqual(calls);
     expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
     expect(await syncWorkspace(directory, async () => f.backend, { scope: 'all' })).toMatchObject({
-      status: 'preview',
-      incoming: ['chapter'],
+      status: 'conflict',
+      conflicts: [expect.objectContaining({ id: 'chapter' })],
     });
   });
 });
@@ -3604,201 +3897,7 @@ describe('explicit offline format', () => {
   });
 });
 
-describe('versioned sync', () => {
-  async function save(path: string, replace: (source: string) => string) {
-    const source = await workspace.readWorkspace(directory, path);
-    return workspace.saveWorkspace(directory, path, replace(source.content), source.fileHash);
-  }
-
-  it('reads and saves offline with per-Rem clocks without advancing the native baseline', async () => {
-    const f = await prepare();
-    const before = await loadState(directory);
-    const source = await workspace.readWorkspace(directory, f.path);
-    expect(source.fileHash).toBe(hash(source.content));
-    const saved = await workspace.saveWorkspace(
-      directory,
-      f.path,
-      source.content.replace('Because', 'Controlled answer'),
-      source.fileHash
-    );
-    expect(saved).toMatchObject({ status: 'saved', changed: ['answer'], remoteWrites: 0 });
-    const after = await loadState(directory);
-    expect(after.localVersions?.answer).toMatchObject({
-      contentHash: hash(
-        contentProjection({ ...f.rems.get('answer')!, text: ['Controlled answer'] })
-      ),
-      source: 'cli-save',
-      timestamp: expect.any(Number),
-    });
-    expect(Object.keys(after.localVersions ?? {})).toEqual(['answer']);
-    expect(after.entries).toEqual(before.entries);
-    expect(after.documents).toEqual(before.documents);
-    expect(await diffWorkspace(directory)).toMatchObject({ changes: [{ id: 'answer' }] });
-    expect(f.calls).toEqual([]);
-  });
-
-  it('saves a new multiline card before assigning native IDs and consumes its local clocks', async () => {
-    const f = await prepare();
-    const saved = await save(f.path, (source) =>
-      addNodes(
-        source,
-        { q: 'multiline', a: 'text' },
-        '\n- New question ^local-q\n  - New answer ^local-a\n'
-      )
-    );
-    expect(saved).toMatchObject({
-      status: 'saved',
-      changed: [newKeys.a, newKeys.q].sort(),
-      remoteWrites: 0,
-    });
-    expect(Object.keys((await loadState(directory)).localVersions!).sort()).toEqual(
-      [newKeys.a, newKeys.q].sort()
-    );
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(preview).toMatchObject({ status: 'preview', creates: 2, updates: 0 });
-    expect(f.calls).toEqual([]);
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({
-      status: 'verified',
-      ids: { [newKeys.q!]: 'created_1', [newKeys.a!]: 'created_2' },
-    });
-    expect((await loadState(directory)).localVersions).toEqual({});
-    expect(f.rems.get('created_1')!.children).toEqual(['created_2']);
-    expect(f.rems.get('created_2')).toMatchObject({ text: ['New answer'], cardItem: true });
-    expect(await pushWorkspace(directory, async () => f.backend)).toMatchObject({
-      status: 'unchanged',
-    });
-  });
-
-  it('selects the whole local Rem version rather than combining independently edited front and back', async () => {
-    const f = await prepare();
-    await edit(f.path, (source) => source.replace('Front', 'Local front'));
-    const now = Date.now();
-    f.rems.get('basic')!.backText = ['Remote back'];
-    f.rems.get('basic')!.public = { updatedAt: now - 1_000 };
-    const context = await inspectLocal(directory);
-    context.state.localVersions = {
-      basic: {
-        contentHash: hash(
-          contentProjection({ ...f.rems.get('basic')!, text: ['Local front'], backText: ['Back'] })
-        ),
-        timestamp: now,
-        source: 'cli-save',
-      },
-    };
-    const remote = new Map(
-      (await f.backend.read([...context.native.keys()])).map((rem) => [rem.id, rem])
-    );
-    const { plan } = reconcile(context, planLocal(context), remote);
-    expect(plan.conflicts).toEqual([]);
-    expect(plan.resolutions).toMatchObject([{ id: 'basic', winner: 'local' }]);
-    expect(plan.changes).toMatchObject([
-      { key: 'basic', fields: { text: ['Local front'], backText: ['Back'] } },
-    ]);
-  });
-
-  it('selects a later remote content version when both endpoints changed the same Rem', async () => {
-    const f = await prepare();
-    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-    const now = Date.now();
-    f.rems.get('answer')!.text = ['Remote answer'];
-    f.rems.get('answer')!.public = { updatedAt: now };
-    const context = await inspectLocal(directory);
-    context.state.localVersions = {
-      answer: {
-        contentHash: hash(contentProjection({ ...f.rems.get('answer')!, text: ['Local answer'] })),
-        timestamp: now - 1_000,
-        source: 'cli-save',
-      },
-    };
-    const remote = new Map(
-      (await f.backend.read([...context.native.keys()])).map((rem) => [rem.id, rem])
-    );
-    const { plan } = reconcile(context, planLocal(context), remote);
-    expect(plan.conflicts).toEqual([]);
-    expect(plan.resolutions).toMatchObject([{ id: 'answer', winner: 'remote' }]);
-    expect(plan.incoming).toEqual(['answer']);
-    expect(plan.changes).toEqual([]);
-  });
-
-  it.each(['local', 'remote'] as const)(
-    'applies the whole %s winner after archiving both content versions',
-    async (winner) => {
-      const f = await prepare();
-      await save(f.path, (source) => source.replace('Front', 'Local front'));
-      const timestamp = (await loadState(directory)).localVersions!.basic!.timestamp!;
-      f.rems.get('basic')!.backText = ['Remote back'];
-      f.rems.get('basic')!.public = {
-        updatedAt: timestamp + (winner === 'local' ? -1_000 : 1_000),
-      };
-      const originalCard = (await f.backend.read(['basic']))[0]!.cards![0]!;
-      f.rems.get('basic')!.cards = [
-        {
-          ...originalCard,
-          repetitionHistory: [{ time: 100 }],
-          lastRepetitionTime: 100,
-          nextRepetitionTime: 200,
-        },
-      ];
-      const history = structuredClone(f.rems.get('basic')!.cards);
-      const preview = (await pushWorkspace(directory, async () => f.backend)) as {
-        planHash: string;
-        resolutions: Array<{ historyPath: string }>;
-      };
-      expect(preview).toMatchObject({ status: 'preview', resolutions: [{ id: 'basic', winner }] });
-      const record = JSON.parse(await readPrivate(directory, preview.resolutions[0]!.historyPath));
-      expect(record).toMatchObject({
-        local: { text: ['Local front'], backText: ['Back'] },
-        remote: { text: ['Front'], backText: ['Remote back'] },
-        decision: { policy: 'version-time-lww', winner },
-      });
-      expect(JSON.stringify(record)).not.toContain('repetitionHistory');
-      expect(f.calls).toEqual([]);
-      expect(
-        await pushWorkspace(directory, async () => f.backend, {
-          apply: true,
-          planHash: preview.planHash,
-        })
-      ).toMatchObject({ status: 'verified' });
-      const basic = (await inspectLocal(directory)).parsed
-        .get(f.path)!
-        .nodes.find((node) => node.key === 'basic')!;
-      expect(basic.text).toEqual(winner === 'local' ? ['Local front'] : ['Front']);
-      expect(basic.backText).toEqual(winner === 'local' ? ['Back'] : ['Remote back']);
-      expect(f.rems.get('basic')!.cards).toEqual(history);
-      expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
-      expect(await pushWorkspace(directory, async () => f.backend)).toMatchObject({
-        status: 'unchanged',
-      });
-      expect(JSON.parse(await readPrivate(directory, preview.resolutions[0]!.historyPath))).toEqual(
-        record
-      );
-    }
-  );
-
-  it('does not stamp no-op, formatting-only or untouched external Rem edits', async () => {
-    const f = await prepare();
-    await save(f.path, (source) => source);
-    expect((await loadState(directory)).localVersions).toEqual({});
-    await edit(f.path, (source) => source.replace('Because', 'External answer'));
-    await save(f.path, (source) => source.replace('Front', 'Controlled front'));
-    const after = await loadState(directory);
-    expect(Object.keys(after.localVersions!)).toEqual(['basic']);
-    await save(f.path, (source) => source + '\n');
-    expect((await loadState(directory)).localVersions).toEqual(after.localVersions);
-    f.rems.get('answer')!.text = ['Remote answer'];
-    f.rems.get('answer')!.public = { updatedAt: Date.now() };
-    expect(await pushWorkspace(directory, async () => f.backend)).toMatchObject({
-      status: 'conflict',
-      conflicts: [expect.objectContaining({ id: 'answer', reason: 'untrusted-edit-order' })],
-    });
-    expect(f.calls).toEqual([]);
-  });
-
+describe('hash-bound local source saves', () => {
   it('rejects a stale save without changing source or version metadata', async () => {
     const f = await prepare(),
       source = await workspace.readWorkspace(directory, f.path);
@@ -3816,19 +3915,8 @@ describe('versioned sync', () => {
     expect(await readPrivate(directory, f.path)).toBe(current);
     expect(await loadState(directory)).toEqual(state);
   });
-
-  it('preserves a child-document root clock when a mount appears in another edited document', async () => {
-    const f = await prepare();
-    const childPath = (await loadState(directory)).entries.subdoc!.path;
-    await save(childPath, (source) => source.replace('# Child doc\n', '# Edited child doc\n'));
-    const version = (await loadState(directory)).localVersions!.subdoc;
-    expect(version).toMatchObject({ source: 'cli-save', timestamp: expect.any(Number) });
-    await save(f.path, (source) => source.replace('Because', 'Another edited Rem'));
-    expect((await loadState(directory)).localVersions!.subdoc).toEqual(version);
-  });
-
-  it.each(['before-content', 'before-clock'] as const)(
-    'recovers a save interrupted %s without retiming it',
+  it.each(['before-content', 'before-manifest'] as const)(
+    'recovers a save interrupted %s without remote access',
     async (point) => {
       const f = await prepare(),
         original = LocalState.prototype.setLocal,
@@ -3850,7 +3938,7 @@ describe('versioned sync', () => {
         save(f.path, (source) => source.replace('Because', 'Interrupted answer'))
       ).rejects.toThrow('injected');
       const pending = await readPublication(directory);
-      expect(pending?.next.localVersions?.answer?.timestamp).toEqual(expect.any(Number));
+      expect(pending?.next).not.toHaveProperty('localVersions');
       expect((await authoritativeState(directory)).localVersions).toEqual(before.localVersions);
       writer.mockRestore();
       const native = vi.fn(async () => {
@@ -3865,133 +3953,6 @@ describe('versioned sync', () => {
       expect(native).not.toHaveBeenCalled();
     }
   );
-
-  it('keeps the observed remote version time through review and metadata-only changes', async () => {
-    const f = await prepare();
-    await save(f.path, (source) => source.replace('Front', 'Local front'));
-    const timestamp = (await loadState(directory)).localVersions!.basic!.timestamp!;
-    f.rems.get('basic')!.backText = ['Remote back'];
-    f.rems.get('basic')!.public = { updatedAt: timestamp - 1_000 };
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as {
-      planHash: string;
-      resolutions: Array<{ historyPath: string }>;
-    };
-    const recorded = (await loadState(directory)).remoteVersions!.basic;
-    const record = await readPrivate(directory, preview.resolutions[0]!.historyPath);
-    f.rems.get('basic')!.public!.updatedAt = timestamp + 2_000;
-    const card = (await f.backend.read(['basic']))[0]!.cards![0]!;
-    f.rems.get('basic')!.cards = [
-      {
-        ...card,
-        repetitionHistory: [{ time: 200 }],
-        lastRepetitionTime: 200,
-        nextRepetitionTime: 300,
-      },
-    ];
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({ status: 'verified', resolutions: [{ winner: 'local' }] });
-    expect(recorded?.timestamp).toBe(timestamp - 1_000);
-    expect(await readPrivate(directory, preview.resolutions[0]!.historyPath)).toBe(record);
-    expect(f.rems.get('basic')!.cards![0]!.repetitionHistory).toEqual([{ time: 200 }]);
-  });
-
-  it('records a new remote clock for an observed A to B to A sequence', async () => {
-    const f = await prepare(),
-      timestamp = Date.now();
-    f.rems.get('answer')!.text = ['B'];
-    f.rems.get('answer')!.public = { updatedAt: timestamp - 1_000 };
-    await pushWorkspace(directory, async () => f.backend);
-    const first = (await loadState(directory)).remoteVersions!.answer!;
-    f.rems.get('answer')!.text = ['Because'];
-    f.rems.get('answer')!.public!.updatedAt = timestamp;
-    await pushWorkspace(directory, async () => f.backend);
-    const second = (await loadState(directory)).remoteVersions!.answer!;
-    expect(second.contentHash).not.toBe(first.contentHash);
-    expect(second.timestamp).toBe(timestamp);
-  });
-
-  it.each(['local', 'remote'] as const)(
-    'orders an observed %s A to B to A revert as a new version and consumes it after publication',
-    async (side) => {
-      const f = await prepare(),
-        timestamp = Date.now();
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(timestamp);
-      await save(f.path, (source) => source.replace('Because', 'Local answer'));
-      f.rems.get('answer')!.text = ['Remote answer'];
-      f.rems.get('answer')!.public = { updatedAt: timestamp - 1_000 };
-      if (side === 'local') {
-        f.rems.get('answer')!.public!.updatedAt = timestamp + 1_000;
-        clock.mockReturnValue(timestamp + 2_000);
-        await save(f.path, (source) => source.replace('Local answer', 'Because'));
-      } else {
-        await pushWorkspace(directory, async () => f.backend);
-        f.rems.get('answer')!.text = ['Because'];
-        f.rems.get('answer')!.public!.updatedAt = timestamp + 1_000;
-      }
-      const preview = (await pushWorkspace(directory, async () => f.backend)) as {
-        planHash: string;
-        resolutions: Array<{ historyPath: string }>;
-      };
-      expect(preview).toMatchObject({
-        status: 'preview',
-        resolutions: [{ id: 'answer', winner: side }],
-      });
-      const archived = JSON.parse(
-        await readPrivate(directory, preview.resolutions[0]!.historyPath)
-      );
-      expect(archived[side].text).toEqual(['Because']);
-      expect(f.calls).toEqual([]);
-      expect(
-        await pushWorkspace(directory, async () => f.backend, {
-          apply: true,
-          planHash: preview.planHash,
-        })
-      ).toMatchObject({ status: 'verified' });
-      expect(f.rems.get('answer')!.text).toEqual(['Because']);
-      const after = await inspectLocal(directory);
-      expect(after.parsed.get(f.path)!.nodes.find((node) => node.key === 'answer')!.text).toEqual([
-        'Because',
-      ]);
-      expect(after.state.localVersions).toEqual({});
-      expect(after.state.remoteVersions!.answer).not.toHaveProperty('sinceBaseline');
-      expect(await pushWorkspace(directory, async () => f.backend)).toMatchObject({
-        status: 'unchanged',
-      });
-    }
-  );
-
-  it.each(['local', 'remote'] as const)(
-    'does not turn a same-content %s observation into a new version',
-    async (side) => {
-      const f = await prepare(),
-        timestamp = Date.now();
-      const before = await loadState(directory);
-      if (side === 'local') {
-        await save(f.path, (source) => source);
-        f.rems.get('answer')!.text = ['Remote answer'];
-        f.rems.get('answer')!.public = { updatedAt: timestamp - 1_000 };
-      } else {
-        await save(f.path, (source) => source.replace('Because', 'Local answer'));
-        f.rems.get('answer')!.public = { updatedAt: timestamp + 1_000 };
-      }
-      const preview = await pushWorkspace(directory, async () => f.backend);
-      expect(preview).toMatchObject({
-        status: 'preview',
-        resolutions: [],
-        incoming: side === 'local' ? ['answer'] : [],
-        outgoing: side === 'remote' ? ['answer'] : [],
-      });
-      const after = await loadState(directory);
-      if (side === 'local') expect(after.localVersions).toEqual({});
-      else expect(after.remoteVersions!.answer).toEqual(before.remoteVersions!.answer);
-      expect(f.calls).toEqual([]);
-    }
-  );
-
   it.each(['preview', 'unknown'] as const)(
     'reads a version-less manifest without changing its seal but refuses its retired %s journal',
     async (journalState) => {
@@ -4004,7 +3965,7 @@ describe('versioned sync', () => {
         );
       const currentPlan = reconcile(context, localPlan, remote).plan;
       const priorPlan: Partial<typeof currentPlan> = { ...currentPlan };
-      delete priorPlan.resolutions;
+      delete priorPlan.contentAuthority;
       const oldHash = hash(priorPlan),
         journalKey = `workspace-v1:kb:${hash(directory)}:${oldHash}`;
       const oldState = context.state;
@@ -4030,87 +3991,18 @@ describe('versioned sync', () => {
       expect((await workspace.readWorkspace(directory, f.path)).content).toBe(source);
       expect(await readPrivate(directory, '.sync/state.json')).toBe(mirror);
       await expect(pushWorkspace(directory, async () => f.backend)).rejects.toThrow(
-        'Prior write outcome'
+        'evidence only'
       );
       await expect(
         save(f.path, (source) => source.replace('Because', 'Must not overwrite'))
-      ).rejects.toThrow('Prior write outcome');
+      ).rejects.toThrow('evidence only');
       expect(hash(await loadState(directory))).toBe(stateHash);
       expect(f.calls).toEqual([]);
     }
   );
-
-  it.each(['missing', 'equal', 'future', 'invalid'] as const)(
-    'keeps both versions when the remote clock is %s',
-    async (kind) => {
-      const f = await prepare();
-      await save(f.path, (source) => source.replace('Because', 'Local answer'));
-      const timestamp = (await loadState(directory)).localVersions!.answer!.timestamp!;
-      f.rems.get('answer')!.text = ['Remote answer'];
-      f.rems.get('answer')!.public =
-        kind === 'missing'
-          ? {}
-          : {
-              updatedAt:
-                kind === 'equal' ? timestamp : kind === 'future' ? timestamp + 600_000 : -1,
-            };
-      const result = (await pushWorkspace(directory, async () => f.backend)) as {
-        conflicts: Array<{ localSnapshot: string; remoteSnapshot: string }>;
-      };
-      expect(result).toMatchObject({ status: 'conflict', complete: false });
-      expect(
-        JSON.parse(await readPrivate(directory, result.conflicts[0]!.localSnapshot)).text
-      ).toEqual(['Local answer']);
-      expect(
-        JSON.parse(await readPrivate(directory, result.conflicts[0]!.remoteSnapshot)).text
-      ).toEqual(['Remote answer']);
-      expect(f.calls).toEqual([]);
-    }
-  );
-
-  it.each(['markdown', 'local-clock', 'remote-content'] as const)(
-    'refuses a frozen plan after %s changes',
-    async (change) => {
-      const f = await prepare();
-      await save(f.path, (source) => source.replace('Because', 'Local answer'));
-      const timestamp = (await loadState(directory)).localVersions!.answer!.timestamp!;
-      f.rems.get('answer')!.text = ['Remote answer'];
-      f.rems.get('answer')!.public = { updatedAt: timestamp - 1_000 };
-      const preview = (await pushWorkspace(directory, async () => f.backend)) as {
-        planHash: string;
-      };
-      if (change === 'markdown')
-        await edit(f.path, (source) => source.replace('Local answer', 'Later local answer'));
-      else if (change === 'local-clock') {
-        const state = await loadState(directory);
-        state.localVersions!.answer!.timestamp = timestamp + 1;
-        await saveState(directory, state);
-      } else f.rems.get('answer')!.text = ['Later remote answer'];
-      await expect(
-        pushWorkspace(directory, async () => f.backend, { apply: true, planHash: preview.planHash })
-      ).rejects.toThrow('frozen');
-      expect(f.calls).toEqual([]);
-    }
-  );
-
-  it('performs zero overwrites when history storage fails', async () => {
-    const f = await prepare();
-    await save(f.path, (source) => source.replace('Because', 'Local answer'));
-    const timestamp = (await loadState(directory)).localVersions!.answer!.timestamp!;
-    f.rems.get('answer')!.text = ['Remote answer'];
-    f.rems.get('answer')!.public = { updatedAt: timestamp - 1_000 };
-    vi.spyOn(fileOps, 'writePrivateOnce').mockRejectedValue(new Error('history disk failure'));
-    await expect(pushWorkspace(directory, async () => f.backend)).rejects.toThrow(
-      'history disk failure'
-    );
-    expect(await readPrivate(directory, f.path)).toContain('Local answer');
-    expect(f.rems.get('answer')!.text).toEqual(['Remote answer']);
-    expect(f.calls).toEqual([]);
-  });
-
   it('archives the actual opaque local content for a remote-missing conflict', async () => {
     const f = await prepare(),
-      before = contentProjection(f.rems.get('opaque')!);
+      before = { ...contentProjection(f.rems.get('opaque')!), tags: [] };
     f.rems.delete('opaque');
     const result = (await pushWorkspace(directory, async () => f.backend)) as {
       conflicts: Array<{ id: string; localSnapshot: string; localHash: string }>;
@@ -4119,25 +4011,6 @@ describe('versioned sync', () => {
     const record = JSON.parse(await readPrivate(directory, conflict.localSnapshot));
     expect(record).toEqual(before);
     expect(hash(record)).toBe(conflict.localHash);
-    expect(f.calls).toEqual([]);
-  });
-
-  it('refuses apply when the same immutable history identity contains different content', async () => {
-    const f = await prepare();
-    await save(f.path, (source) => source.replace('Because', 'Local answer'));
-    const timestamp = (await loadState(directory)).localVersions!.answer!.timestamp!;
-    f.rems.get('answer')!.text = ['Remote answer'];
-    f.rems.get('answer')!.public = { updatedAt: timestamp - 1_000 };
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as {
-      planHash: string;
-      resolutions: Array<{ historyPath: string }>;
-    };
-    await writePrivate(directory, preview.resolutions[0]!.historyPath, '{}\n');
-    await expect(
-      pushWorkspace(directory, async () => f.backend, { apply: true, planHash: preview.planHash })
-    ).rejects.toThrow('Immutable history record differs');
-    expect(f.rems.get('answer')!.text).toEqual(['Remote answer']);
-    expect(await readPrivate(directory, f.path)).toContain('Local answer');
     expect(f.calls).toEqual([]);
   });
 });
@@ -4565,7 +4438,7 @@ describe('controlled RemNote workspace', () => {
     f.rems.get('answer')!.text = ['Remote edit'];
     expect(await pushWorkspace(directory, async () => f.backend)).toMatchObject({
       status: 'conflict',
-      conflicts: [expect.objectContaining({ id: 'answer', reason: 'untrusted-edit-order' })],
+      conflicts: [expect.objectContaining({ id: 'answer', reason: 'remote-content-drift' })],
     });
     expect(f.calls).toEqual([]);
   });
@@ -4823,81 +4696,6 @@ describe('controlled RemNote workspace', () => {
     );
     expect(await lintWorkspace(directory)).toMatchObject({ ok: false });
   });
-  it('merges a remote-only existing question edit as incoming, preserving native Rem/Card IDs', async () => {
-    const f = await prepare();
-    const cards = await f.backend.cardFacts('question');
-    f.rems.get('question')!.text = ['Why now?'];
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(preview).toMatchObject({ status: 'preview', incoming: ['question'], updates: 0 });
-    expect(f.calls).toEqual([]);
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({ status: 'verified', updated: [], incoming: ['question'] });
-    expect(await readPrivate(directory, f.path)).toContain(
-      `Why now? ^${nativeBlockId('question')}`
-    );
-    expect(await f.backend.cardFacts('question')).toEqual(cards);
-    expect(f.calls).toEqual([]);
-  });
-  it('imports bounded new empty descendants and preserves their identities on the next sync', async () => {
-    const f = await prepare();
-    f.rems.get('chapter')!.children.unshift('incoming');
-    f.rems.set('incoming', native('incoming', [], { parent: 'chapter', children: ['leaf'] }));
-    f.rems.set('leaf', native('leaf', ['Native leaf'], { parent: 'incoming', tags: ['home'] }));
-    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-      status: 'verified',
-      incoming: ['incoming', 'leaf'],
-      remoteWrites: 0,
-      selection: { addedIds: ['incoming', 'leaf'] },
-    });
-    const state = await loadState(directory);
-    expect(state.entries.incoming?.path).toBe(f.path);
-    expect(state.entries.leaf?.path).toBe(f.path);
-    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
-    expect(await readPrivate(directory, state.entries.incoming!.rawPath)).toContain('"leaf"');
-    const identity = await readPrivate(directory, IDENTITY);
-    expect(await pushWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-      status: 'unchanged',
-      remoteWrites: 0,
-    });
-    expect(await readPrivate(directory, IDENTITY)).toBe(identity);
-    expect(f.backend.enumerate).toHaveBeenCalledTimes(1);
-    expect(f.calls).toEqual([]);
-  });
-  it('merges incoming nested native documents with a local body edit in the selected document', async () => {
-    const f = await prepare();
-    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-    f.rems.get('daily')!.children.push('incoming-doc');
-    f.rems.set(
-      'incoming-doc',
-      native('incoming-doc', ['New native document'], {
-        parent: 'daily',
-        document: true,
-        children: ['incoming-note'],
-      })
-    );
-    f.rems.set(
-      'incoming-note',
-      native('incoming-note', ['A remote note'], { parent: 'incoming-doc' })
-    );
-    expect(
-      await pushWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-    ).toMatchObject({
-      status: 'verified',
-      incoming: ['incoming-doc', 'incoming-note'],
-      updated: ['answer'],
-    });
-    const state = await loadState(directory),
-      newPath = state.entries['incoming-doc']!.path;
-    expect(newPath).not.toBe(f.path);
-    expect(await readPrivate(directory, newPath)).toContain('A remote note');
-    expect(await readPrivate(directory, f.path)).toContain('Local answer');
-    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
-    expect(f.calls).toEqual(['answer:text']);
-  });
   it('rejects same-parent local and incoming insertions before any native write', async () => {
     const f = await prepare();
     await edit(f.path, (source) => addNodes(source, { n: 'text' }, '\n- Local note ^local-n\n'));
@@ -4913,88 +4711,6 @@ describe('controlled RemNote workspace', () => {
     expect(f.calls).toEqual([]);
     expect((await loadState(directory)).entries).toEqual(f.state.entries);
   });
-  it('preserves both incoming Portal identities, query facts and an unselected membership target', async () => {
-    const f = await prepare();
-    await edit(f.path, (source) => source.replace('Because', 'Local revised answer'));
-    f.rems.get('question')!.children.push('incoming-portal');
-    f.rems.set(
-      'incoming-portal',
-      native('incoming-portal', [], {
-        parent: 'question',
-        type: 6,
-        children: ['incoming-wrapper'],
-        portal: {
-          type: 4,
-          directlyIncludedRemIds: ['incoming-wrapper'],
-          query: null,
-          filter: null,
-        },
-      })
-    );
-    f.rems.set(
-      'incoming-wrapper',
-      native('incoming-wrapper', [], {
-        parent: 'incoming-portal',
-        type: 6,
-        portal: { type: null, directlyIncludedRemIds: ['subdoc'], query: null, filter: null },
-      })
-    );
-    const targetRaw = await readPrivate(directory, f.state.entries.subdoc!.rawPath);
-    const beforeCards = await f.backend.cardFacts('question');
-    expect(
-      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-    ).toMatchObject({
-      status: 'verified',
-      incoming: ['incoming-portal', 'incoming-wrapper'],
-      updated: ['answer'],
-      selection: { verificationIds: expect.arrayContaining(['subdoc']) },
-    });
-    const state = await loadState(directory);
-    expect(state.entries.question!.editable).toBe(true);
-    for (const id of ['incoming-portal', 'incoming-wrapper']) {
-      expect(state.entries[id]!.editable).toBe(false);
-      expect(JSON.parse(await readPrivate(directory, state.entries[id]!.rawPath))).toMatchObject({
-        id,
-        cards: [],
-        portal: { query: null, filter: null },
-      });
-    }
-    expect(await f.backend.cardFacts('question')).toEqual(beforeCards);
-    expect(await readPrivate(directory, state.entries.subdoc!.rawPath)).toBe(targetRaw);
-    expect(state.remoteVersions!.subdoc).toEqual(f.state.remoteVersions!.subdoc);
-    expect(
-      await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-    ).toMatchObject({
-      status: 'unchanged',
-      remoteWrites: 0,
-    });
-    expect(f.calls).toEqual(['answer:text']);
-  });
-  it.each(['query', 'missing', 'duplicate', 'parent', 'cycle', 'graft', 'tag'] as const)(
-    'rejects incomplete or unsafe incoming %s before an unrelated local edit writes',
-    async (kind) => {
-      const f = await prepare();
-      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-      f.rems.get('chapter')!.children.push('incoming');
-      f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
-      const added = f.rems.get('incoming')!;
-      if (kind === 'query')
-        Object.assign(added, { type: 6, portal: { type: 4, directlyIncludedRemIds: [] } });
-      if (kind === 'missing') f.rems.delete('incoming');
-      if (kind === 'duplicate') added.children = ['leaf', 'leaf'];
-      if (kind === 'parent') added.parent = 'daily';
-      if (kind === 'cycle') added.children = ['incoming'];
-      if (kind === 'graft') added.children = ['basic'];
-      if (kind === 'tag') added.tags = ['unbound-tag'];
-      const bytes = await readPrivate(directory, f.path);
-      await expect(
-        syncWorkspace(directory, async () => f.backend, { apply: true })
-      ).rejects.toThrow();
-      expect(f.calls).toEqual([]);
-      expect(await readPrivate(directory, f.path)).toBe(bytes);
-      expect((await loadState(directory)).entries).toEqual(f.state.entries);
-    }
-  );
   it('keeps additions in unselected documents outside discovery', async () => {
     const f = await prepare();
     f.rems.get('subdoc')!.children.push('incoming');
@@ -5037,385 +4753,12 @@ describe('controlled RemNote workspace', () => {
       expect(f.calls).toEqual([]);
     }
   );
-  it('binds incoming contents and the exact added ID set to a frozen preview', async () => {
-    const f = await prepare();
-    f.rems.get('chapter')!.children.push('incoming');
-    f.rems.set('incoming', native('incoming', ['Before'], { parent: 'chapter' }));
-    const plan = (await syncWorkspace(directory, async () => f.backend)) as { planHash: string };
-    f.rems.get('incoming')!.text = ['After'];
-    await expect(
-      syncWorkspace(directory, async () => f.backend, { apply: true, planHash: plan.planHash })
-    ).rejects.toThrow('exact frozen');
-    expect((await loadState(directory)).entries).toEqual(f.state.entries);
-    expect(f.calls).toEqual([]);
-  });
-  it('imports native card history and tags without creating or replacing native cards', async () => {
-    const f = await prepare();
-    f.rems.get('chapter')!.children.push('incoming-card');
-    const cards: WorkspaceRem['cards'] = [
-      {
-        id: 'existing-native-card',
-        remId: 'incoming-card',
-        type: 'backward',
-        createdAt: 2,
-        repetitionHistory: [{ time: 17, score: 1 }],
-        nextRepetitionTime: 23,
-        lastRepetitionTime: 17,
-        timesWrongInRow: 0,
-      },
-    ];
-    f.rems.set(
-      'incoming-card',
-      native('incoming-card', ['Native front'], {
-        parent: 'chapter',
-        backText: ['Native back'],
-        cards,
-        tags: ['home'],
-      })
-    );
-    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-      status: 'verified',
-      remoteWrites: 0,
-      incoming: ['incoming-card'],
-    });
-    const state = await loadState(directory);
-    expect(
-      JSON.parse(await readPrivate(directory, state.entries['incoming-card']!.rawPath))
-    ).toMatchObject({ cards, tags: ['home'] });
-    expect(await readPrivate(directory, f.path)).toContain('Native back');
-    expect(f.calls).toEqual([]);
-  });
-  it('rejects an unpublishable incoming document before a mixed native edit', async () => {
-    const f = await prepare();
-    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-    f.rems.get('chapter')!.children.push('incoming');
-    f.rems.set(
-      'incoming',
-      native('incoming', ['x'.repeat(4 * 1024 * 1024)], { parent: 'chapter' })
-    );
-    await expect(syncWorkspace(directory, async () => f.backend, { apply: true })).rejects.toThrow(
-      /exceeds|MiB|large|size/i
-    );
-    expect(f.calls).toEqual([]);
-    expect((await loadState(directory)).entries).toEqual(f.state.entries);
-  });
-  it('checks the complete incoming publication ledger before a mixed native edit', async () => {
-    const f = await prepare();
-    await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-    f.rems.get('chapter')!.children.push('incoming');
-    f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
-    const bytes = Buffer.byteLength;
-    vi.spyOn(Buffer, 'byteLength').mockImplementation((value, encoding) =>
-      typeof value === 'string' && value.includes('"previousHash":') && value.includes('"writes":')
-        ? fileOps.MAX_METADATA_BYTES + 1
-        : bytes(value, encoding)
-    );
-    await expect(syncWorkspace(directory, async () => f.backend, { apply: true })).rejects.toThrow(
-      'publication metadata exceeds 32 MiB'
-    );
-    expect(f.calls).toEqual([]);
-    expect((await loadState(directory)).entries).toEqual(f.state.entries);
-  });
-  it.each(
-    (['direct', 'guarded'] as const).flatMap((mode) =>
-      (['add', 'replace', 'remove'] as const).map((change) => ({ mode, change }))
-    )
-  )(
-    'rejects incoming card $change before the first guard in $mode apply',
-    async ({ mode, change }) => {
-      const f = await prepare();
-      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-      const card = {
-        id: 'original-card',
-        remId: 'incoming',
-        type: 'forward',
-        createdAt: 1,
-        repetitionHistory: [],
-        nextRepetitionTime: null,
-        lastRepetitionTime: null,
-        timesWrongInRow: null,
-      };
-      f.rems.get('chapter')!.children.push('incoming');
-      f.rems.set(
-        'incoming',
-        native('incoming', [], { parent: 'chapter', cards: change === 'add' ? [] : [card] })
-      );
-      const guard = f.backend.guard;
-      let changed = false;
-      f.backend.guard = vi.fn(async (ids) => {
-        if (!changed) {
-          changed = true;
-          f.rems.get('incoming')!.cards =
-            change === 'remove' ? [] : [{ ...card, id: 'replacement-card' }];
-        }
-        return guard(ids);
-      });
-      const options =
-        mode === 'guarded'
-          ? {
-              paths: [f.path],
-              expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
-            }
-          : {};
-      expect(
-        await syncWorkspace(directory, async () => f.backend, { apply: true, ...options })
-      ).toMatchObject({
-        status: 'conflict',
-        complete: false,
-        remoteWrites: 0,
-        error: expect.stringContaining('card identity'),
-      });
-      expect(f.calls).toEqual([]);
-      expect((await loadState(directory)).entries).toEqual(f.state.entries);
-    }
-  );
-  it.each(['direct', 'guarded'] as const)(
-    'preserves incoming remote-owned review updates before first guard in %s apply',
-    async (mode) => {
-      const f = await prepare();
-      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-      const card = {
-        id: 'incoming-card',
-        remId: 'incoming',
-        type: 'forward',
-        createdAt: 1,
-        repetitionHistory: [],
-        nextRepetitionTime: null,
-        lastRepetitionTime: null,
-        timesWrongInRow: null,
-      };
-      f.rems.get('chapter')!.children.push('incoming');
-      f.rems.set('incoming', native('incoming', [], { parent: 'chapter', cards: [card] }));
-      const reviewed = {
-        ...card,
-        repetitionHistory: [{ time: 2, score: 1 }],
-        nextRepetitionTime: 5,
-        lastRepetitionTime: 2,
-        timesWrongInRow: 0,
-      };
-      const guard = f.backend.guard;
-      let changed = false;
-      f.backend.guard = vi.fn(async (ids) => {
-        if (!changed) {
-          changed = true;
-          f.rems.get('incoming')!.cards = [reviewed];
-        }
-        return guard(ids);
-      });
-      const options =
-        mode === 'guarded'
-          ? {
-              paths: [f.path],
-              expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
-            }
-          : {};
-      expect(
-        await syncWorkspace(directory, async () => f.backend, { apply: true, ...options })
-      ).toMatchObject({
-        status: 'verified',
-        complete: true,
-        remoteWrites: 1,
-        cardsPreserved: true,
-      });
-      const state = await loadState(directory);
-      expect(
-        JSON.parse(await readPrivate(directory, state.entries.incoming!.rawPath))
-      ).toMatchObject({ cards: [reviewed] });
-      expect(f.rems.get('incoming')!.cards).toEqual([reviewed]);
-      expect(f.calls).toEqual(['answer:text']);
-    }
-  );
-  it.each(['child', 'query', 'card'] as const)(
-    'rejects an incoming %s race at the first write boundary',
-    async (kind) => {
-      const f = await prepare();
-      await edit(f.path, (source) => source.replace('Because', 'Local answer'));
-      f.rems.get('chapter')!.children.push('incoming');
-      f.rems.set(
-        'incoming',
-        native('incoming', [], {
-          parent: 'chapter',
-          type: 6,
-          portal: { type: 4, directlyIncludedRemIds: [], query: null, filter: null },
-          cards: [],
-        })
-      );
-      const guard = f.backend.guard;
-      f.backend.guard = vi.fn(async (ids) => {
-        const digest = await guard(ids);
-        if (kind === 'child') f.rems.get('incoming')!.children = ['late'];
-        if (kind === 'query') f.rems.get('incoming')!.portal!.query = 'changed';
-        if (kind === 'card')
-          f.rems.get('incoming')!.cards = [
-            {
-              id: 'late-card',
-              remId: 'incoming',
-              type: 'forward',
-              createdAt: 1,
-              repetitionHistory: [],
-              nextRepetitionTime: null,
-              lastRepetitionTime: null,
-              timesWrongInRow: null,
-            },
-          ];
-        return digest;
-      });
-      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-        status: 'conflict',
-        complete: false,
-        remoteWrites: 0,
-      });
-      expect(f.calls).toEqual([]);
-    }
-  );
-  it.each(['publication', 'staging'] as const)(
-    'recovers incoming identity and a mixed local creation after %s failure without replay',
-    async (point) => {
-      const f = await prepare();
-      await edit(f.path, (source) =>
-        addNodes(source, { n: 'text' }, '\n- New local note ^local-n\n')
-      );
-      f.rems.get('chapter')!.children.push('incoming');
-      f.rems.set('incoming', native('incoming', [], { parent: 'chapter' }));
-      const original = LocalState.prototype.setLocal,
-        link = fileOps.linkPrivate;
-      const stateSpy = vi
-        .spyOn(LocalState.prototype, 'setLocal')
-        .mockImplementation(async function (key, value) {
-          if (point === 'publication' && key.startsWith('publication:') && value !== null)
-            throw new Error('Injected incoming publication failure');
-          return original.call(this, key, value);
-        });
-      const fileSpy = vi
-        .spyOn(fileOps, 'linkPrivate')
-        .mockImplementation(async (root, from, to) => {
-          if (point === 'staging' && to === f.path)
-            throw new Error('Injected incoming staging failure');
-          return link(root, from, to);
-        });
-      expect(
-        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-      ).toMatchObject({
-        status: 'publication-incomplete',
-        ids: expect.any(Object),
-      });
-      stateSpy.mockRestore();
-      fileSpy.mockRestore();
-      const calls = [...f.calls];
-      expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
-        status: 'recovered',
-        remoteWrites: 0,
-      });
-      expect(f.calls).toEqual(calls);
-      const state = await loadState(directory);
-      expect(state.entries.incoming).toBeDefined();
-      expect(state.entries.created_1).toBeDefined();
-      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
-      expect(
-        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
-      ).toMatchObject({
-        status: 'unchanged',
-        remoteWrites: 0,
-      });
-    }
-  );
-  it.each(['identity', 'query', 'card'] as const)(
-    'refuses changed incoming %s during verified-publication recovery without replay',
-    async (kind) => {
-      const f = await prepare();
-      f.rems.get('chapter')!.children.push('incoming');
-      f.rems.set(
-        'incoming',
-        native('incoming', [], {
-          parent: 'chapter',
-          type: 6,
-          cards: [],
-          portal: { type: 4, directlyIncludedRemIds: [], query: null, filter: null },
-        })
-      );
-      const original = LocalState.prototype.setLocal;
-      const spy = vi
-        .spyOn(LocalState.prototype, 'setLocal')
-        .mockImplementation(async function (key, value) {
-          if (key.startsWith('publication:') && value !== null)
-            throw new Error('Injected publication failure');
-          return original.call(this, key, value);
-        });
-      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
-        status: 'publication-incomplete',
-        remoteWrites: 0,
-      });
-      spy.mockRestore();
-      if (kind === 'identity') {
-        f.rems.get('incoming')!.children.push('late');
-        f.rems.set('late', native('late', [], { parent: 'incoming' }));
-      }
-      if (kind === 'query') f.rems.get('incoming')!.portal!.query = 'late query';
-      if (kind === 'card')
-        f.rems.get('incoming')!.cards = [
-          {
-            id: 'late-card',
-            remId: 'incoming',
-            type: 'forward',
-            createdAt: 1,
-            repetitionHistory: [],
-            nextRepetitionTime: null,
-            lastRepetitionTime: null,
-            timesWrongInRow: null,
-          },
-        ];
-      await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(/changed/i);
-      expect(f.calls).toEqual([]);
-      expect((await loadState(directory)).entries).toEqual(f.state.entries);
-    }
-  );
-  it('treats an untouched softbreak node as incoming rather than a fabricated local conflict', async () => {
-    const f = fixture();
-    f.rems.get('answer')!.text = ['First line\nSecond line'];
-    await importWorkspace(directory, 'kb', async () => f.backend);
-    expect(await lintWorkspace(directory)).toMatchObject({ ok: true });
-    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
-    f.rems.get('answer')!.text = ['First line\nRemote second line'];
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(preview).toMatchObject({ status: 'preview', incoming: ['answer'], updates: 0 });
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({ status: 'verified', incoming: ['answer'], updated: [], remoteWrites: 0 });
-    expect(f.calls).toEqual([]);
-    const state = await loadState(directory),
-      path = state.entries.answer!.path;
-    const parsed = (await inspectLocal(directory)).parsed.get(path)!;
-    expect(parsed.nodes.find((node) => node.key === 'answer')!.text).toEqual([
-      'First line\nRemote second line',
-    ]);
-  });
-  it('merges different Rem edits in one file in both directions without losing either edit', async () => {
-    const f = await prepare();
-    await edit(f.path, (s) => s.replace('Because', 'Local answer'));
-    f.rems.get('question')!.text = ['Remote question'];
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(preview).toMatchObject({ incoming: ['question'], updates: 1 });
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({ status: 'verified', updated: ['answer'] });
-    expect(f.rems.get('answer')!.text).toEqual(['Local answer']);
-    const source = await readPrivate(directory, f.path);
-    expect(source).toContain('Remote question');
-    expect(source).toContain('Local answer');
-    expect(await diffWorkspace(directory)).toMatchObject({ changes: [] });
-  });
   it('converges equal edits without remote writes and keeps both versions of an unordered conflict', async () => {
     const f = await prepare();
     await edit(f.path, (s) => s.replace('Because', 'Same answer'));
     f.rems.get('answer')!.text = ['Same answer'];
     const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(preview).toMatchObject({ updates: 0, incoming: [], converged: ['answer'] });
+    expect(preview).toMatchObject({ updates: 0, converged: ['answer'] });
     expect(
       await pushWorkspace(directory, async () => f.backend, {
         apply: true,
@@ -5431,7 +4774,7 @@ describe('controlled RemNote workspace', () => {
     expect(conflict).toMatchObject({
       status: 'conflict',
       complete: false,
-      conflicts: [expect.objectContaining({ id: 'answer', reason: 'untrusted-edit-order' })],
+      conflicts: [expect.objectContaining({ id: 'answer', reason: 'remote-content-drift' })],
     });
     expect(await readPrivate(directory, f.path)).toContain('Local version');
     expect(
@@ -5465,7 +4808,7 @@ describe('controlled RemNote workspace', () => {
       },
     ];
     const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(preview).toMatchObject({ incoming: [], updates: 1 });
+    expect(preview).toMatchObject({ updates: 1 });
     expect(
       await pushWorkspace(directory, async () => f.backend, {
         apply: true,
@@ -5532,20 +4875,7 @@ describe('controlled RemNote workspace', () => {
     });
     expect(f.calls).toEqual(['answer:text']);
   });
-  it('applies incoming-only edits with the native write gate disabled', async () => {
-    const f = await prepare();
-    f.rems.get('answer')!.text = ['Remote answer'];
-    f.backend.identity = vi.fn(async () => ({ kbId: 'kb', writable: false, destructive: false }));
-    const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
-        apply: true,
-        planHash: preview.planHash,
-      })
-    ).toMatchObject({ status: 'verified', incoming: ['answer'], updated: [] });
-    expect(f.calls).toEqual([]);
-    expect(await readPrivate(directory, f.path)).toContain('Remote answer');
-  });
+
   it('keeps an entire mixed batch write-free when one Rem has an unordered content conflict', async () => {
     const f = await prepare();
     await edit(f.path, (source) =>
@@ -5556,7 +4886,6 @@ describe('controlled RemNote workspace', () => {
       )
     );
     f.rems.get('answer')!.text = ['Remote answer'];
-    f.rems.get('question')!.text = ['Incoming question'];
     const before = await readPrivate(directory, f.path);
     expect(await pushWorkspace(directory, async () => f.backend)).toMatchObject({
       status: 'conflict',
@@ -5674,7 +5003,6 @@ describe('controlled RemNote workspace', () => {
     await writeFile(join(directory, 'HOME/.DS_Store'), 'ui-state', { mode: 0o644 });
     await edit(f.path, (source) => source.replace('Because', 'New answer'));
     await chmod(join(directory, f.path), 0o644);
-    f.rems.get('question')!.text = ['Incoming question'];
     const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
     await writeFile(join(directory, '.obsidian/workspace.json'), '{"active":"other"}');
     expect(
@@ -5683,7 +5011,7 @@ describe('controlled RemNote workspace', () => {
         planHash: preview.planHash,
       })
     ).toMatchObject({ status: 'verified' });
-    expect((await stat(join(directory, f.path))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(directory, f.path))).mode & 0o777).toBe(0o644);
     expect(
       (await fileOps.allFiles(directory)).some(
         (path) => path.includes('.obsidian') || path.includes('.DS_Store')
@@ -5694,8 +5022,7 @@ describe('controlled RemNote workspace', () => {
   });
   it('restores a displaced concurrent 0644 editor save without relaxing staging permissions', async () => {
     const f = await prepare();
-    await edit(f.path, (source) => source.replace('Because', 'New answer'));
-    f.rems.get('question')!.text = ['Incoming question'];
+    await edit(f.path, (source) => source + '\n- New body ^local-race\n');
     const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
     const original = fileOps.displacePrivate;
     let injected = false;

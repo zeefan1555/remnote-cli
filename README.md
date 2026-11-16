@@ -74,15 +74,12 @@ remnote-cli status --text
 JSON is the default. `--text` is the human-readable form. A lost response does
 not prove that no data changed: read the returned ids before retrying a write.
 
-## Shared Obsidian vault and two-way editing
+## Local-authoritative Obsidian content
 
-The sync design supports editing in both a private human-readable Markdown vault
-and RemNote, including card edits during review. Users in Obsidian and agents
-edit the same local files. A shared baseline supports per-Rem semantic three-way
-merging without whole-file last-write-wins. Keep
-content outside code Git, optionally in a separate private content repository;
-network backup needs explicit user authorization. Sync does not configure Git or
-upload content to a remote.
+Users and agents edit the same private Markdown vault. RemNote is the publishing
+and review target; ongoing sync never imports native content into local source.
+Keep content outside code Git. A separate private content repository and network
+backup require the user's authorization; sync does not configure or upload Git.
 
 ```bash
 remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
@@ -91,14 +88,13 @@ remnote-cli sync apply /PRIVATE/vault
 ```
 
 Import establishes the initial baseline in a new empty directory, from a declared
-subtree or official `.rem` archive. Subsequent sync plans may contain incoming and
-outgoing changes together; re-import is not a substitute for merging. Compared to
-the shared baseline, one-sided changes propagate, equal changes converge, and
-edits to different Rems merge. Conflicting edits may select a newer value only
-with trustworthy comparable version evidence; unknown/equal times preserve both
-versions. File mtime, sync capture time and review time are not content authority.
-Review history and scheduling remain RemNote-owned and never flow back from a
-local snapshot. Missing content on either side does not imply deletion.
+subtree or official archive. After that, local Markdown is desired content.
+Local edits publish only when native content still matches the verified baseline;
+identical local/native content converges. Other native body or direct-tag drift
+archives both versions and blocks the entire batch before any writes. Native-only
+children are structural conflicts, not an import request. No timestamp picks a winner.
+Review history, scheduling and native runtime facts remain RemNote-owned and are
+never written back from snapshots. Missing content does not imply deletion.
 
 Daily editing needs one `sync apply DIR` invocation: it validates, plans,
 applies and verifies without a manual read/save/lint/diff/preview pipeline.
@@ -120,31 +116,27 @@ freshness. `sync diff DIR` is offline and accepts `--path`; status/lint stay
 whole-vault. Frozen plan hashes bind the normalized selectors, actual selection
 and full-vault frozen inputs, so a materially changed selection cannot reuse one.
 Dependencies are checked for safety, not merged as incoming content or given new
-baseline clocks. A later all-scope sync still sees their remote-only edits.
+baselines. A later all-scope sync still sees their remote-only edits.
 Only empty selections stay offline. A clean nonempty changed selection reports
 `unchanged` after probing, not a fresh review-history audit. Unselected source
-bytes, native records and clocks stay unchanged.
+bytes, native records and sealed evidence stay unchanged.
 
-The current candidate reports `incoming`, `outgoing`,
-`converged` and conflict receipts; native acceptance is separate. The offline
-`sync read` / `sync save` workflow binds controlled local edits to each changed Rem
-version's content hash and save time. Divergent same-Rem edits use whole-Rem
-`version-time-lww` only with comparable, hash-bound local/native clocks, after
-archiving both versions. Direct file edits do not establish a trusted local clock;
-missing, equal, or invalid clocks preserve both versions as `untrusted-edit-order`.
-Independent front/back edits to the same basic card still share one whole-Rem
-merge unit, not individual fields.
-Legacy `pull`/`push` aliases are removed. Continuous discovery follows the native
-children of selected bound Rems in batches of at most 50. Fully observed new
-descendants, including empty Rems, nested Documents/Folders and Portal/query
-children, join the frozen plan as `selection.addedIds`. Their exact identities,
-native cards, tags and collected raw facts are preserved. Existing children must
-keep their parent and relative order; deletion, movement, reordering and concurrent
-local/remote insertion under one parent fail or conflict. Receipts use
-`discoveryScope: "bound-descendants"` when additions are found, otherwise
-`"bound-ids"`; both keep `globalDiscoveryComplete: false`. New top-level roots
-and children of unselected Rems are outside scope. An initial archive import does
-not prove continuous whole-library coverage.
+Plans and read/apply/resume receipts declare fixed `contentAuthority: "local"`.
+Check the read marker before an automated apply; old CLI output is not safe to
+assume one-way. Receipts report `outgoing`, `converged`, `metadataRefresh` and
+`remote-content-drift` conflicts, never incoming merges or LWW resolutions.
+Offline `sync read` / `sync save` guards source bytes with `fileHash`;
+no edit clocks are generated. Old sealed clocks remain immutable evidence only.
+Old pending journals without local authority fail closed and stay intact.
+
+Legacy `pull`/`push` aliases remain removed. Probes follow exact selected bound
+IDs only; there is no recursive incoming discovery. Receipts report
+`discoveryScope: "bound-ids"` and `globalDiscoveryComplete: false`.
+New top-level roots and children of unselected Rems stay outside scope.
+
+A normal publish does not scan TODO feedback. Explicit feedback processing is a
+separate layer: read feedback, edit local source, publish and verify, then acknowledge
+the exact feedback. This content publisher does not implement that acknowledgement.
 
 Ordinary nested Markdown lists use short, stable Obsidian anchors; a single
 hidden `<!-- remnote:document-key -->` before H1 binds each imported document.

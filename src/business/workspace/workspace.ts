@@ -17,7 +17,6 @@ import {
   serializeState,
   validateGraph,
   writeSnapshot,
-  prepareSnapshot,
   type LocalContext,
 } from './local.js';
 import {
@@ -28,12 +27,10 @@ import {
   type WorkspaceRem,
   type WorkspaceState,
   type SyncPlan,
-  type ContentVersion,
 } from './types.js';
 import { selectPlan, publicVerificationIds, type SelectionOptions } from './selection.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
 import {
-  contentProjection,
   cardIdentities,
   publicationRevisionHash,
   revisionHash,
@@ -41,12 +38,13 @@ import {
   withPublicSnapshot,
 } from './snapshots.js';
 import { recordPath } from './identity.js';
-import { nodeContent, remoteVersion } from './versions.js';
+import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
 import { planDeletion, type DeleteOptions } from './deletion.js';
 import { FrozenFiles } from './frozen-files.js';
 import {
   foldResume,
+  requireLocalAuthority,
   guardedBinding,
   verifyResumeReadback,
   finalProofHash,
@@ -72,6 +70,7 @@ import {
 async function requirePreviewOnly(state: WorkspaceState): Promise<void> {
   if (!state.pending) return;
   const old = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
+  if (old) requireLocalAuthority(old, state.pending.journalKey);
   if (
     !old ||
     old.version !== 2 ||
@@ -93,6 +92,7 @@ export async function readWorkspace(directory: string, path: string) {
     if (!local.parsed.has(path)) throw new Error('Read requires an exact tracked Markdown path');
     const content = await local.inputs.read(path);
     return {
+      contentAuthority: 'local' as const,
       status: 'read',
       kbId: local.state.kbId,
       path,
@@ -104,7 +104,7 @@ export async function readWorkspace(directory: string, path: string) {
   });
 }
 
-/** One offline publication binds the edited source and per-Rem clocks; the native baseline stays put. */
+/** One offline publication binds edited source bytes; the native baseline stays put. */
 export async function saveWorkspace(
   directory: string,
   path: string,
@@ -138,36 +138,17 @@ export async function saveWorkspace(
         changed: [],
         remoteWrites: 0,
       };
-    const localVersions: Record<string, ContentVersion> = { ...before.state.localVersions };
-    // A previously stamped Rem edited outside this entrypoint loses that stamp, not its content.
-    for (const document of after.parsed.values())
-      for (const node of document.nodes) {
-        if (node.kind === 'mount') continue;
-        if (
-          localVersions[node.key]?.contentHash !==
-          hash(nodeContent(node, before.native.get(node.key)))
-        )
-          delete localVersions[node.key];
-      }
     const previousNodes = new Map(original.nodes.map((node) => [node.key, node]));
-    const changed: string[] = [],
-      timestamp = Date.now();
+    const changed: string[] = [];
     for (const node of after.parsed.get(path)!.nodes) {
       if (node.kind === 'mount' || node.kind === 'opaque') continue;
       const previous = previousNodes.get(node.key),
         base = before.native.get(node.key);
       const contentHash = hash(nodeContent(node, base));
       if (previous && hash(nodeContent(previous, base)) === contentHash) continue;
-      const priorTime = before.state.localVersions?.[node.key]?.timestamp;
-      localVersions[node.key] = {
-        contentHash,
-        source: 'cli-save',
-        timestamp:
-          priorTime !== null && priorTime !== undefined && timestamp < priorTime ? null : timestamp,
-      };
       changed.push(node.key);
     }
-    const next = { ...before.state, localVersions };
+    const next = { ...before.state };
     delete next.pending;
     await stageSnapshot(root, next, before.state, new Map([[path, content]]), frozen);
     return {
@@ -178,34 +159,6 @@ export async function saveWorkspace(
       remoteWrites: 0,
     };
   });
-}
-
-async function archiveResolutions(
-  root: string,
-  context: LocalContext,
-  plan: SyncPlan,
-  remote: Map<string, WorkspaceRem>
-) {
-  const histories = [];
-  for (const decision of plan.resolutions) {
-    const node = context.parsed.get(decision.path)!.nodes.find((node) => node.key === decision.id)!;
-    const local = nodeContent(node, context.native.get(decision.id)),
-      native = contentProjection(remote.get(decision.id)!);
-    if (hash(local) !== decision.local.contentHash || hash(native) !== decision.remote.contentHash)
-      throw new Error('LWW history does not match its frozen content versions');
-    const record = {
-      version: 1,
-      kbId: plan.kbId,
-      directoryHash: hash(root),
-      decision,
-      local,
-      remote: native,
-    };
-    const historyPath = `.sync/conflicts/${hash({ kbId: plan.kbId, directoryHash: hash(root), decision })}/${decision.id}.json`;
-    await writePrivateOnce(root, historyPath, JSON.stringify(record, null, 2) + '\n');
-    histories.push({ ...decision, historyPath, historyHash: hash(record) });
-  }
-  return histories;
 }
 
 export async function importWorkspace(
@@ -387,6 +340,7 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
       context.diagnostics.map((d) => `${d.path}:${d.line} / ${d.code} / ${d.message}`).join('\n')
     );
   const plan: WorkspacePlan = {
+    contentAuthority: 'local',
     version: 1,
     directory: context.state.directory,
     kbId: context.state.kbId,
@@ -416,12 +370,7 @@ export function planLocal(context: LocalContext, options: DeleteOptions = {}): W
       if (!before || hash(before.text) !== hash(node.text)) fields.text = node.text;
       if (node.kind === 'basic' && (!before || hash(before.backText) !== hash(node.backText)))
         fields.backText = node.backText;
-      if (
-        !Object.keys(fields).length &&
-        !tags &&
-        context.state.localVersions?.[node.key]?.contentHash !== hash(nodeContent(node, native))
-      )
-        continue;
+      if (!Object.keys(fields).length && !tags) continue;
       plan.changes.push({
         key: node.key,
         path,
@@ -456,6 +405,7 @@ export async function diffWorkspace(
   plan.inputHash = hash(frozen.hashes());
   await frozen.check();
   return {
+    contentAuthority: 'local',
     kbId: plan.kbId,
     remoteChecked: false,
     planHash: hash(plan),
@@ -511,7 +461,7 @@ function affectedIds(
       ancestor = native.get(ancestor)?.parent;
     }
   }
-  for (const id of [...plan.incoming, ...plan.converged]) {
+  for (const id of plan.converged) {
     ids.add(id);
     let ancestor = native.get(id)?.parent;
     while (
@@ -573,7 +523,6 @@ function publicationIds(
     ...new Set([
       ...(plan.selection!.scope === 'changed' && !plan.guarded
         ? [
-            ...plan.incoming,
             ...plan.converged,
             ...metadataIds,
             ...plan.changes
@@ -581,7 +530,6 @@ function publicationIds(
               .map((change) => change.key),
           ]
         : plan.selection!.reconcileIds),
-      ...(plan.selection!.addedIds ?? []),
       ...Object.values(assigned),
     ]),
   ]
@@ -603,65 +551,6 @@ async function checkPublicScope(
   );
   await checkPublicRevision(backend, exact, knownPowerupCodes(exact));
   for (const [id, rem] of exact) remote.set(id, rem);
-}
-
-/** Preview the complete semantic publication before a mixed batch starts native mutations. */
-function plannedPublication(
-  context: LocalContext,
-  plan: SyncPlan,
-  remote: Map<string, WorkspaceRem>,
-  metadataIds: string[]
-) {
-  const rems = new Map(remote),
-    assigned: Record<string, string> = {};
-  for (const change of plan.changes) {
-    const fresh = change.key.startsWith('new:');
-    // Shape-only placeholders; never sent to the SDK or persisted as assigned native identities.
-    const id = fresh ? `planned_${hash(change.key).slice(0, 32)}` : change.key;
-    if (fresh) {
-      if (rems.has(id) || context.native.has(id)) throw new Error('Planned identity collision');
-      assigned[change.key] = id;
-      rems.set(id, {
-        id,
-        parent: null,
-        children: [],
-        type: null,
-        text: [],
-        backText: change.kind === 'multiline' ? [] : null,
-        document: false,
-        folder: false,
-        cardItem: change.cardItem,
-        practice: 'forward',
-        enablePractice: true,
-        tags: [],
-        cards: [],
-        ...(change.cardCluster ? { powerupPresence: { cc: true } } : {}),
-      });
-    }
-    const rem = rems.get(id)!;
-    rems.set(id, { ...rem, ...change.fields, ...(change.tags ? { tags: change.tags.after } : {}) });
-    if (fresh) {
-      const parent = assigned[change.parent!] ?? change.parent!,
-        before = rems.get(parent);
-      if (!before) throw new Error('Missing planned creation parent');
-      const children = [...before.children];
-      children.splice(change.position, 0, id);
-      rems.set(parent, { ...before, children });
-      rems.set(id, { ...rems.get(id)!, parent });
-    }
-  }
-  return {
-    assigned,
-    rems: publicationRems(
-      context,
-      rems,
-      publicationIds(plan, metadataIds, assigned),
-      [],
-      plan.changes
-        .filter((change) => change.key.startsWith('new:'))
-        .map((change) => assigned[change.parent!] ?? change.parent!)
-    ),
-  };
 }
 
 async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
@@ -693,6 +582,7 @@ export async function resumeWorkspace(
     state = await authoritativeState(root);
   const key = `workspace-v2:${state.kbId}:${hash(root)}:${planHash}`;
   const journal = await localStore(state.kbId).getLocal<Journal>(key);
+  if (journal) requireLocalAuthority(journal, key);
   if (journal?.state === 'verified' && journal.final) {
     requireFinalProof(journal);
     const binding = guardedBinding(journal);
@@ -735,6 +625,7 @@ export async function resumeWorkspace(
         }
         await frozen.check();
         return {
+          contentAuthority: 'local',
           status: 'verified',
           complete: true,
           resumed: true,
@@ -788,6 +679,7 @@ async function synchronizeWorkspace(
       resuming = await localStore(state.kbId).getLocal<Journal>(key);
       if (!resuming || resuming.version !== 2 || resuming.planHash !== resumeHash)
         throw new Error('Resume cannot find the exact original journal for this vault and KB');
+      requireLocalAuthority(resuming, key);
       if (
         !state.pending &&
         !context.diagnostics.length &&
@@ -799,6 +691,7 @@ async function synchronizeWorkspace(
       )
         return {
           status: 'already-complete',
+          contentAuthority: 'local',
           complete: true,
           planHash: resumeHash,
           ids: resuming.ids,
@@ -878,6 +771,7 @@ async function synchronizeWorkspace(
       ...requestedSelection.verificationIds,
     ].sort();
     const coverage = {
+      contentAuthority: 'local' as const,
       discoveryScope: 'bound-ids',
       globalDiscoveryComplete: false,
       remoteChecked: checkedIds.length > 0,
@@ -923,10 +817,8 @@ async function synchronizeWorkspace(
         planHash,
         creates: 0,
         updates: 0,
-        incoming: [],
         outgoing: [],
         converged: [],
-        resolutions: [],
         localPublished: options.apply === true,
         remoteWrites: 0,
         ...coverage,
@@ -989,8 +881,7 @@ async function synchronizeWorkspace(
         fileHash: options.expectedFileHash!,
         beforeHash: hash(nativeBefore),
       };
-    const { plan, metadataChanged, remoteVersions } =
-        reconstructed ?? reconcile(context, localPlan, remote),
+    const { plan, metadataChanged } = reconstructed ?? reconcile(context, localPlan, remote),
       planHash = hash(plan);
     const selection = plan.selection!;
     const removesTags = plan.changes.some((change) =>
@@ -1001,13 +892,8 @@ async function synchronizeWorkspace(
         'Removing native tag associations requires explicit --allow-destructive and the existing plugin replace gate; no writes were started. Properties and Rem entities are never deleted by tag sync'
       );
     coverage.selection = selection;
-    if (selection.addedIds?.length) coverage.discoveryScope = 'bound-descendants';
     coverage.checkedIds = [
-      ...new Set([
-        ...selection.reconcileIds,
-        ...selection.verificationIds,
-        ...(selection.addedIds ?? []),
-      ]),
+      ...new Set([...selection.reconcileIds, ...selection.verificationIds]),
     ].sort();
     coverage.checkedCount = coverage.checkedIds.length;
     if (
@@ -1019,15 +905,10 @@ async function synchronizeWorkspace(
       );
     await frozen.check();
     const stateBeforeObservations = hash(state);
-    // Previews/conflicts record observations (including A -> B -> A). Successful apply advances
-    // clocks only for published Rems, together with the atomic local snapshot manifest.
-    if (!resuming && (!options.apply || plan.conflicts.length))
-      state.remoteVersions = remoteVersions;
     if (state.pending && state.pending.planHash !== planHash) {
       delete state.pending;
     }
     if (hash(state) !== stateBeforeObservations) await persistState();
-    const resolutions = await archiveResolutions(root, context, plan, remote);
     if (plan.conflicts.length) {
       const conflicts = [];
       for (const conflict of plan.conflicts) {
@@ -1044,7 +925,14 @@ async function synchronizeWorkspace(
         await writePrivateOnce(
           root,
           localSnapshot,
-          JSON.stringify(nodeContent(node, context.native.get(conflict.id)), null, 2) + '\n'
+          JSON.stringify(
+            {
+              ...nodeContent(node, context.native.get(conflict.id)),
+              tags: node.tags ?? context.native.get(conflict.id)?.tags ?? null,
+            },
+            null,
+            2
+          ) + '\n'
         );
         conflicts.push({ ...conflict, localSnapshot, remoteSnapshot });
       }
@@ -1053,32 +941,13 @@ async function synchronizeWorkspace(
         complete: false,
         planHash,
         conflicts,
-        resolutions,
         remoteWrites: 0,
         ...coverage,
       };
     }
-    if (selection.addedIds?.length) {
-      const intended = plannedPublication(context, plan, remote, metadataChanged);
-      await prepareSnapshot(
-        root,
-        state.kbId,
-        intended.rems,
-        state,
-        state,
-        frozen,
-        undefined,
-        undefined,
-        [],
-        context.parsed,
-        intended.assigned,
-        selection
-      );
-    }
     if (
       !plan.changes.length &&
       !plan.deletion &&
-      !plan.incoming.length &&
       !plan.converged.length &&
       !metadataChanged.length &&
       !proofPath &&
@@ -1173,8 +1042,8 @@ async function synchronizeWorkspace(
       }
       existingIds = [...new Set([...existingIds, ...extra])].sort();
     }
-    // Incoming descendants already exist natively; only outgoing creations may acquire new cards.
-    const observedNativeIds = new Set([...context.native.keys(), ...(selection.addedIds ?? [])]);
+    // Only outgoing creations may acquire new cards.
+    const observedNativeIds = new Set(context.native.keys());
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     if (folded)
       for (const id of existingIds) if (!expected.has(id)) expected.set(id, remote.get(id)!);
@@ -1201,6 +1070,7 @@ async function synchronizeWorkspace(
     }
     journal ??= {
       version: 2,
+      contentAuthority: 'local',
       planHash,
       guardHash,
       state: 'preview',
@@ -1219,11 +1089,9 @@ async function synchronizeWorkspace(
         planHash,
         creates: plan.changes.filter((change) => change.key.startsWith('new:')).length,
         updates: plan.changes.filter((change) => !change.key.startsWith('new:')).length,
-        incoming: plan.incoming,
         converged: plan.converged,
         outgoing: plan.changes.map((change) => change.key),
         metadataRefresh: metadataChanged,
-        resolutions,
         deletion: plan.deletion,
         tagChanges: plan.changes
           .filter((change) => change.tags)
@@ -1330,8 +1198,6 @@ async function synchronizeWorkspace(
       for (const [id, rem] of fresh) {
         expected.set(id, rem);
         // Track only accepted native readbacks, never synthesized after-mutation expectations.
-        // A later review of this content must not replace its first observed version time.
-        remoteVersions[id] = remoteVersion(rem, remoteVersions[id]);
       }
     }
     async function mutate<T>(
@@ -1535,9 +1401,6 @@ async function synchronizeWorkspace(
         deleted: plan.deletion?.ids ?? [],
         structuralIds: [...structuralIds].sort(),
         publicationIds: publishedIds,
-        remoteVersions: Object.fromEntries(
-          publishedIds.map((id) => [id, remoteVersion(remote.get(id)!, remoteVersions[id])])
-        ),
         publishedBaselineHash: '',
         proofHash: '',
       };
@@ -1562,9 +1425,7 @@ async function synchronizeWorkspace(
         context.parsed,
         journal.ids,
         selection,
-        publishedIds,
-        { kind: 'sync', journalKey: key, planHash, proofHash: journal.final.proofHash },
-        journal.final.remoteVersions
+        { kind: 'sync', journalKey: key, planHash, proofHash: journal.final.proofHash }
       );
       const verification = proofPath
         ? {
@@ -1595,11 +1456,9 @@ async function synchronizeWorkspace(
         updated: plan.changes
           .filter((change) => !change.key.startsWith('new:'))
           .map((change) => change.key),
-        incoming: plan.incoming,
         converged: plan.converged,
         outgoing: plan.changes.map((change) => journal.ids[change.key] ?? change.key),
         metadataRefresh: metadataChanged,
-        resolutions,
         deleted: plan.deletion?.ids ?? [],
         nativeCards: newCards,
         ...(resuming ? { existingCardsPreserved: true } : { cardsPreserved: true }),
@@ -1640,11 +1499,12 @@ export async function recoverWorkspace(
   backendFactory: () => Promise<WorkspaceBackend>
 ): Promise<unknown> {
   const root = await workspaceDirectory(directory);
-  if (await readPublication(root))
-    return recoverPublication(directory, async (publication, before, after) => {
+  if (await readPublication(root)) {
+    const result = await recoverPublication(directory, async (publication, before, after) => {
       const binding = publication.recovery;
       if (binding.kind !== 'sync') throw new Error('Unexpected local publication verifier');
       const journal = await localStore(publication.next.kbId).getLocal<Journal>(binding.journalKey);
+      if (journal) requireLocalAuthority(journal, binding.journalKey);
       if (
         !journal ||
         journal.state !== 'verified' ||
@@ -1688,13 +1548,6 @@ export async function recoverWorkspace(
         if (entry.nativeHash !== hash(rem) || entry.rawHash !== hash(after(entry.rawPath)))
           throw new Error('Staged native manifest changed');
       }
-      for (const id of final.publicationIds)
-        if (
-          remoteVersion(nextNative.get(id)!).contentHash !==
-            final.remoteVersions[id]!.contentHash ||
-          hash(publication.next.remoteVersions?.[id]) !== hash(final.remoteVersions[id])
-        )
-          throw new Error('Staged publication content version proof changed');
       const backend = await backendFactory();
       if ((await backend.identity()).kbId !== publication.next.kbId)
         throw new Error('Recovery KB mismatch');
@@ -1712,11 +1565,17 @@ export async function recoverWorkspace(
       )
         throw new Error('Projected publication baseline changed');
     });
+    return { ...(result as Record<string, unknown>), contentAuthority: 'local' };
+  }
   return withWorkspaceLock(root, async () => {
     // A writer may have published a ledger after the unlocked routing lookup.
     // Refuse under this lock; retrying recovery must choose the staged path explicitly.
     await requireNoPublication(root);
     const state = await authoritativeState(root);
+    if (state.pending) {
+      const pending = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
+      if (pending) requireLocalAuthority(pending, state.pending.journalKey);
+    }
     let repaired = false;
     try {
       await loadState(root);
@@ -1724,11 +1583,18 @@ export async function recoverWorkspace(
       await writePrivate(root, STATE, serializeState(state));
       repaired = true;
     }
-    if (!state.pending) return { status: 'nothing-to-recover', complete: true, remoteWrites: 0 };
+    if (!state.pending)
+      return {
+        contentAuthority: 'local',
+        status: 'nothing-to-recover',
+        complete: true,
+        remoteWrites: 0,
+      };
     const journal = await localStore(state.kbId).getLocal<Journal>(state.pending.journalKey);
     if (repaired && journal?.state === 'preview')
       return {
         status: 'state-mirror-repaired',
+        contentAuthority: 'local',
         complete: true,
         remoteWrites: 0,
         pending: state.pending,
@@ -1780,16 +1646,20 @@ export async function recoverWorkspace(
       local.parsed,
       journal.ids,
       journal.selection,
-      final.publicationIds,
       {
         kind: 'sync',
         journalKey: state.pending.journalKey,
         planHash: journal.planHash,
         proofHash: final.proofHash,
-      },
-      final.remoteVersions
+      }
     );
-    return { status: 'recovered', complete: true, remoteWrites: 0, ids: journal.ids };
+    return {
+      contentAuthority: 'local',
+      status: 'recovered',
+      complete: true,
+      remoteWrites: 0,
+      ids: journal.ids,
+    };
   });
 }
 

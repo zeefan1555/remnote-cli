@@ -51,7 +51,7 @@ function pathOptions(command: Command): Command {
 export function registerSyncCommands(program: Command): void {
   const workspace = program
     .command('sync')
-    .description('Synchronize local Markdown and RemNote through explicit bounded commands');
+    .description('Publish local-authoritative Markdown to RemNote through bounded commands');
 
   async function execute(
     name:
@@ -129,7 +129,7 @@ export function registerSyncCommands(program: Command): void {
     const command = pathOptions(workspace.command(name + ' <directory>'))
       .description(
         name === 'plan'
-          ? 'Preview bidirectional synchronization with zero native writes'
+          ? 'Preview local-authoritative publication with zero native writes'
           : 'Plan, check, apply and verify synchronization in one invocation'
       )
       .addOption(
@@ -196,7 +196,7 @@ export function registerSyncCommands(program: Command): void {
     .action(async (directory: string, path: string) => execute('read', directory, {}, path));
   workspace
     .command('save <directory> <path>')
-    .description('Save local Markdown offline and bind changed Rem content to this save time')
+    .description('Save local Markdown offline under the current source hash')
     .requiredOption('--content-file <path|->', 'Complete edited Markdown file, or - for stdin')
     .requiredOption('--expected-file-hash <sha256>', 'Exact fileHash returned by sync read')
     .action(async (directory: string, path: string, options: SyncOptions) =>

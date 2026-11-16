@@ -203,6 +203,7 @@ function assertPublishedBlocks(source, identity, ids, blocks) {
 }
 
 function assertCoverage(value) {
+  assert.equal(value.contentAuthority, 'local');
   assert.equal(value.discoveryScope, 'bound-ids');
   assert.equal(value.globalDiscoveryComplete, false);
   assert.equal(value.remoteChecked, true);
@@ -247,10 +248,11 @@ function assertPlanningConflict(value, id) {
   assert.equal(value.conflicts.length, 1);
   const conflict = value.conflicts[0];
   assert.equal(conflict.id, id);
-  assert.equal(conflict.reason, 'untrusted-edit-order');
+  assert.equal(conflict.reason, 'remote-content-drift');
   for (const key of ['baseHash', 'localHash', 'remoteHash'])
     assert.match(conflict[key], /^[a-f0-9]{64}$/);
-  assert.equal(new Set([conflict.baseHash, conflict.localHash, conflict.remoteHash]).size, 3);
+  assert.notEqual(conflict.localHash, conflict.remoteHash);
+  assert.notEqual(conflict.baseHash, conflict.remoteHash);
   assert.match(
     conflict.remoteSnapshot,
     /^\.sync\/conflicts\/[a-f0-9]{64}\/[A-Za-z0-9_-]+-[a-f0-9]{64}\.json$/
@@ -260,28 +262,6 @@ function assertPlanningConflict(value, id) {
     /^\.sync\/conflicts\/[a-f0-9]{64}\/[A-Za-z0-9_-]+-[a-f0-9]{64}\.local\.json$/
   );
   return conflict;
-}
-
-function assertVersionResolution(value, id, winner) {
-  assertCoverage(value);
-  assert.equal(value.resolutions.length, 1);
-  const decision = value.resolutions[0];
-  assert.equal(decision.id, id);
-  assert.equal(decision.policy, 'version-time-lww');
-  assert.equal(decision.winner, winner);
-  assert.equal(decision.local.source, 'cli-save');
-  assert.equal(decision.remote.source, 'rem-updated-at');
-  for (const version of [decision.local, decision.remote]) {
-    assert.match(version.contentHash, /^[a-f0-9]{64}$/);
-    assert.ok(Number.isSafeInteger(version.timestamp) && version.timestamp > 0);
-  }
-  assert.notEqual(decision.local.contentHash, decision.remote.contentHash);
-  assert.ok(
-    decision[winner].timestamp > decision[winner === 'local' ? 'remote' : 'local'].timestamp
-  );
-  assert.match(decision.historyPath, /^\.sync\/conflicts\/[a-f0-9]{64}\/[A-Za-z0-9_-]+\.json$/);
-  assert.match(decision.historyHash, /^[a-f0-9]{64}$/);
-  return decision;
 }
 
 function cardReadback(value, requestedIds) {
@@ -301,7 +281,9 @@ function cardReadback(value, requestedIds) {
 function assertDirections(value, expected, assigned = {}) {
   assertCoverage(value);
   assert.equal(value.atomic, false);
-  for (const key of ['incoming', 'outgoing', 'converged']) {
+  assert.equal('incoming' in value, false);
+  assert.equal('resolutions' in value, false);
+  for (const key of ['outgoing', 'converged']) {
     assert.ok(Array.isArray(value[key]), `Missing ${key} receipt`);
     assert.deepEqual([...value[key]].sort(), expected[key].map((id) => assigned[id] ?? id).sort());
   }
@@ -462,6 +444,7 @@ async function main(argv) {
     const path = relative(workspace, markdownPath);
     const source = await sync(`${label}-read`, 'read', [path]);
     assert.equal(source.status, 'read');
+    assert.equal(source.contentAuthority, 'local');
     assert.equal(source.remoteWrites, 0);
     assert.equal(source.content, await markdown());
     const contentFile = join(directory, `${label}.md`);
@@ -477,7 +460,7 @@ async function main(argv) {
     assert.equal(result.remoteWrites, 0);
     return result;
   }
-  async function apply(label, expected, extra = [], expectedResolution) {
+  async function apply(label, expected, extra = []) {
     const deleting = extra.includes('--id');
     const selection = deleting ? extra : ['--scope', 'all', ...extra];
     const preview = await sync(`${label}-preview`, deleting ? 'delete' : 'plan', selection);
@@ -487,21 +470,6 @@ async function main(argv) {
     assertDirections(preview, expected);
     assert.equal(preview.creates, expected.outgoing.filter((id) => id.startsWith('new:')).length);
     assert.equal(preview.updates, expected.outgoing.filter((id) => !id.startsWith('new:')).length);
-    if (expectedResolution)
-      assertVersionResolution(preview, expectedResolution.id, expectedResolution.winner);
-    else assert.deepEqual(preview.resolutions, []);
-    const histories = new Map();
-    for (const resolution of preview.resolutions) {
-      const { hash } = await import('../dist/business/workspace/types.js');
-      const { historyPath, historyHash, ...decision } = resolution;
-      const source = await readFile(join(workspace, historyPath), 'utf8');
-      const record = JSON.parse(source);
-      assert.deepEqual(record.decision, decision);
-      assert.equal(hash(record), historyHash);
-      assert.equal(hash(record.local), decision.local.contentHash);
-      assert.equal(hash(record.remote), decision.remote.contentHash);
-      histories.set(historyPath, source);
-    }
     if (deleting)
       assert.deepEqual(
         [...preview.deletion.ids].sort(),
@@ -522,13 +490,6 @@ async function main(argv) {
       expected.outgoing.filter((id) => !id.startsWith('new:')).sort()
     );
     assert.equal(applied.planHash, preview.planHash);
-    assert.deepEqual(applied.resolutions, preview.resolutions);
-    for (const [path, content] of histories)
-      assert.equal(
-        await readFile(join(workspace, path), 'utf8'),
-        content,
-        'Winner history changed'
-      );
     return applied;
   }
 
@@ -613,15 +574,14 @@ async function main(argv) {
     assert.equal(delta.changes.length, 2);
     assert.equal(delta.remoteChecked, false);
     const createdCard = await apply('create-card', {
-      incoming: [],
       outgoing: Object.values(receipt.localKeys),
       converged: [],
     });
     await assertPublished();
     assert.deepEqual(
       JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8')).localVersions,
-      {},
-      'Assigned native IDs retained temporary local clocks'
+      undefined,
+      'New publications must not generate edit clocks'
     );
     const ids = [receipt.testIds.root, receipt.testIds.question, receipt.testIds.answer];
     assert.equal(new Set(ids).size, 3);
@@ -671,7 +631,7 @@ async function main(argv) {
       )
     );
     assert.equal((await sync('update-lint', 'lint')).ok, true);
-    await apply('update-card', { incoming: [], outgoing: [question.id, answer.id], converged: [] });
+    await apply('update-card', { outgoing: [question.id, answer.id], converged: [] });
     const updated = await inspect('updated-readback', ids);
     assert.deepEqual(remById(updated, question.id).text, ['Sync acceptance revised question']);
     assert.deepEqual(remById(updated, answer.id).text, ['Sync acceptance revised answer']);
@@ -690,36 +650,52 @@ async function main(argv) {
     await unchanged('noop-sync');
     assert.deepEqual(await inspect('noop-readback', ids), updated);
 
-    await remoteText('remote-question-edit', question.id, 'Sync acceptance incoming question');
-    await apply('incoming-only', { incoming: [question.id], outgoing: [], converged: [] });
-    assert.ok((await markdown()).includes(`Sync acceptance incoming question ^${blocks.question}`));
-    await assertPublished();
-    assert.deepEqual(remById(await inspect('incoming-readback', ids), question.id).text, [
-      'Sync acceptance incoming question',
-    ]);
-
-    await writeMarkdown(
+    async function assertZeroWriteDrift(label, id) {
+      const source = await markdown();
+      const identity = await readFile(join(workspace, '.remnote/identity.json'), 'utf8');
+      const state = JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8'));
+      const native = await inspect(label + '-before', ids);
+      for (const command of ['plan', 'apply']) {
+        assertPlanningConflict(
+          await sync(label + '-' + command, command, ['--scope', 'all'], 1),
+          id
+        );
+        assert.equal(await markdown(), source, 'Drift overwrote local source');
+        assert.equal(await readFile(join(workspace, '.remnote/identity.json'), 'utf8'), identity);
+        const after = JSON.parse(await readFile(join(workspace, '.sync/state.json'), 'utf8'));
+        for (const key of ['entries', 'documents', 'localVersions', 'remoteVersions'])
+          assert.deepEqual(after[key], state[key], 'Drift advanced the baseline');
+        assert.deepEqual(
+          await inspect(label + '-' + command + '-after', ids),
+          native,
+          'Drift wrote native content'
+        );
+      }
+    }
+    await remoteText('remote-question-edit', question.id, 'Sync acceptance observed question');
+    await assertZeroWriteDrift('remote-only-drift', question.id);
+    // Deliberate fixture-only authoring of the observed value, never automatic importing.
+    await saveMarkdown('explicit-question-convergence', (source) =>
       replaceBodyOnce(
-        await markdown(),
-        'Sync acceptance incoming question',
-        'Sync acceptance mixed question'
+        source,
+        'Sync acceptance revised question',
+        'Sync acceptance observed question'
       )
     );
+    await apply('explicit-question-convergence', { outgoing: [], converged: [question.id] });
+    await saveMarkdown('local-mixed-question', (source) =>
+      replaceBodyOnce(source, 'Sync acceptance observed question', 'Sync acceptance mixed question')
+    );
     await remoteText('remote-answer-edit', answer.id, 'Sync acceptance mixed answer');
-    await apply('mixed-directions', {
-      incoming: [answer.id],
-      outgoing: [question.id],
-      converged: [],
-    });
+    await assertZeroWriteDrift('mixed-drift', answer.id);
+    await saveMarkdown('explicit-answer-convergence', (source) =>
+      replaceBodyOnce(source, 'Sync acceptance revised answer', 'Sync acceptance mixed answer')
+    );
+    await apply('mixed-resolved', { outgoing: [question.id], converged: [answer.id] });
     const mixed = await inspect('mixed-readback', ids);
-    assert.deepEqual(remById(mixed, question.id).text, ['Sync acceptance mixed question']);
-    assert.deepEqual(remById(mixed, answer.id).text, ['Sync acceptance mixed answer']);
-    assert.deepEqual(cardIdentity(mixed), cardIdentity(before), 'Bidirectional sync changed cards');
-    assert.ok((await markdown()).includes(`Sync acceptance mixed answer ^${blocks.answer}`));
+    assert.deepEqual(cardIdentity(mixed), cardIdentity(before), 'Publishing changed cards');
     await assertPublished();
-    assert.deepEqual((await sync('mixed-diff', 'diff')).changes, []);
     await unchanged('mixed-noop');
-
     await writeMarkdown(
       replaceBodyOnce(
         await markdown(),
@@ -728,7 +704,7 @@ async function main(argv) {
       )
     );
     await remoteText('same-result-remote-edit', question.id, 'Sync acceptance identical question');
-    await apply('same-result', { incoming: [], outgoing: [], converged: [question.id] });
+    await apply('same-result', { outgoing: [], converged: [question.id] });
     await assertPublished();
     const sameResult = await inspect('same-result-readback', ids);
     assert.deepEqual(remById(sameResult, question.id).text, ['Sync acceptance identical question']);
@@ -773,7 +749,7 @@ async function main(argv) {
     // Resolve only this deliberate, known zero-write synthetic conflict by matching
     // local text to the observed remote value. Never retry an unknown mutation.
     await writeMarkdown(replaceBodyOnce(conflictSource, localConflictText, remoteConflictText));
-    await apply('conflict-converged', { incoming: [], outgoing: [], converged: [question.id] });
+    await apply('conflict-converged', { outgoing: [], converged: [question.id] });
     assert.deepEqual(
       JSON.parse(await readFile(join(workspace, conflict.remoteSnapshot), 'utf8')),
       remoteCopy,
@@ -785,42 +761,8 @@ async function main(argv) {
     assert.deepEqual(cardIdentity(resolved), cardIdentity(before));
     await unchanged('conflict-resolved-noop');
 
-    let commonText = remoteConflictText;
-    for (const winner of ['local', 'remote']) {
-      const localText = `Sync acceptance ${winner}-winner local version`;
-      const remoteValue = `Sync acceptance ${winner}-winner remote version`;
-      const saveLocal = () =>
-        saveMarkdown(`${winner}-winner-local`, (source) =>
-          replaceBodyOnce(source, commonText, localText)
-        );
-      if (winner === 'local') {
-        await remoteText('local-winner-remote-edit', question.id, remoteValue);
-        await saveLocal();
-      } else {
-        await saveLocal();
-        await remoteText('remote-winner-remote-edit', question.id, remoteValue);
-      }
-      await apply(
-        `${winner}-version-wins`,
-        {
-          incoming: winner === 'remote' ? [question.id] : [],
-          outgoing: winner === 'local' ? [question.id] : [],
-          converged: [],
-        },
-        [],
-        { id: question.id, winner }
-      );
-      commonText = winner === 'local' ? localText : remoteValue;
-      const verified = await inspect(`${winner}-winner-readback`, ids);
-      assert.deepEqual(remById(verified, question.id).text, [commonText]);
-      assert.deepEqual(cardIdentity(verified), cardIdentity(before));
-      assert.ok((await markdown()).includes(`${commonText} ^${blocks.question}`));
-      await assertPublished();
-      await unchanged(`${winner}-winner-noop`);
-    }
-
     const deletion = ['--id', question.id, '--scope-root', receipt.testIds.root];
-    await apply('delete-card', { incoming: [], outgoing: [], converged: [] }, deletion);
+    await apply('delete-card', { outgoing: [], converged: [] }, deletion);
     const remaining = remById(
       await inspect('delete-readback', [receipt.testIds.root]),
       receipt.testIds.root
@@ -1049,6 +991,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
   );
 
   const coverage = {
+    contentAuthority: 'local',
     discoveryScope: 'bound-ids',
     globalDiscoveryComplete: false,
     remoteChecked: true,
@@ -1056,7 +999,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     checkedCount: 2,
     selection: { scope: 'all', reconcileIds: ['existing'], verificationIds: ['root'] },
   };
-  const directions = { incoming: ['existing'], outgoing: ['new:question'], converged: [] };
+  const directions = { outgoing: ['new:question'], converged: [] };
   assertDirections({ ...coverage, atomic: false, ...directions }, directions);
   assertDirections(
     { ...coverage, atomic: false, ...directions, outgoing: ['nativeQuestion'] },
@@ -1064,6 +1007,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     { 'new:question': 'nativeQuestion' }
   );
   assert.throws(() => assertCoverage({ ...coverage, globalDiscoveryComplete: true }));
+  assert.throws(() => assertCoverage({ ...coverage, contentAuthority: undefined }));
   assert.throws(() => assertCoverage({ ...coverage, checkedCount: 3 }));
   assert.throws(() => assertCoverage({ ...coverage, checkedIds: ['existing', 'existing'] }));
   const absentIds = ['question', 'answer'];
@@ -1145,6 +1089,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     parsed: new Map([['Note.md', local]]),
   };
   const localPlan = {
+    contentAuthority: 'local',
     version: 1,
     directory: '/synthetic',
     kbId: 'synthetic',
@@ -1168,9 +1113,9 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     localPlan,
     new Map([['root', { ...root, text: ['Remote edit'] }]])
   );
-  assert.equal(conflict.plan.conflicts[0].reason, 'untrusted-edit-order');
+  assert.equal(conflict.plan.conflicts[0].reason, 'remote-content-drift');
   assert.equal(conflict.plan.conflicts[0].remoteUpdatedAt, null);
-  assert.equal(conflict.plan.changes.length, 0);
+  assert.equal(conflict.plan.changes.length, 1);
   assert.equal(JSON.stringify([root, local, localPlan]), frozenInput, 'Conflict modified input');
   const conflictReceipt = {
     ...coverage,
@@ -1199,8 +1144,9 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
       },
     },
   };
-  for (const winner of ['local', 'remote']) {
-    const resolved = reconcile(
+  for (const offset of [-1_000, 0, 1_000]) {
+    const frozen = JSON.stringify(versioned);
+    const observed = reconcile(
       versioned,
       localPlan,
       new Map([
@@ -1209,27 +1155,16 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
           {
             ...root,
             text: ['Remote edit'],
-            public: { updatedAt: timestamp + (winner === 'local' ? -1_000 : 1_000) },
+            public: { updatedAt: timestamp + offset },
           },
         ],
       ])
     );
-    assert.deepEqual(resolved.plan.conflicts, []);
-    const resolution = {
-      ...resolved.plan.resolutions[0],
-      historyPath: `.sync/conflicts/${hash(resolved.plan)}/root.json`,
-      historyHash: hash('synthetic-archive'),
-    };
-    assertVersionResolution({ ...coverage, resolutions: [resolution] }, 'root', winner);
-    assert.throws(() =>
-      assertVersionResolution(
-        { ...coverage, resolutions: [{ ...resolution, winner: 'wrong' }] },
-        'root',
-        winner
-      )
-    );
-    assert.equal(resolved.plan.changes.length, winner === 'local' ? 1 : 0);
-    assert.deepEqual(resolved.plan.incoming, winner === 'remote' ? ['root'] : []);
+    assert.equal(observed.plan.conflicts[0].reason, 'remote-content-drift');
+    assert.equal(observed.plan.changes.length, 1);
+    assert.equal('incoming' in observed.plan, false);
+    assert.equal('resolutions' in observed.plan, false);
+    assert.equal(JSON.stringify(versioned), frozen, 'Legacy clocks changed');
   }
   assert.deepEqual(
     reconcile(context, localPlan, new Map([['root', { ...root, text: ['Local edit'] }]])).plan
@@ -1241,8 +1176,8 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
       { ...context, parsed: new Map([['Note.md', baseline]]) },
       { ...localPlan, changes: [] },
       new Map([['root', { ...root, text: ['Remote edit'] }]])
-    ).plan.incoming,
-    ['root']
+    ).plan.conflicts[0].reason,
+    'remote-content-drift'
   );
   assert.equal(reconcile(context, localPlan, new Map()).plan.conflicts[0].reason, 'remote-missing');
   assert.equal(
@@ -1251,7 +1186,7 @@ else if (argv.length === 1 && argv[0] === '--self-test') {
     'remote-structure'
   );
   console.log(
-    'Offline driver self-test passed: codec, stable blocks, parent identity, receipt bounds, retained IDs, three-way conflicts and version-time winners; no live calls or filesystem writes.'
+    'Offline driver self-test passed: codec, stable blocks, parent identity, receipt bounds, retained IDs, local authority, zero-write drift and clock invariance; no live calls or filesystem writes.'
   );
 } else {
   await main(argv).catch(() => {

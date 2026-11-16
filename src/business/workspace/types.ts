@@ -62,7 +62,7 @@ export interface WorkspaceDocument {
   fileHash: string;
   nodeIds: string[];
 }
-/** Millisecond version evidence, not a claim about cross-device physical edit order. */
+/** Immutable legacy evidence only. Never generated or used to decide publication. */
 export interface ContentVersion {
   contentHash: string;
   timestamp: number | null;
@@ -138,6 +138,7 @@ export interface WorkspaceChange {
   tags?: { before: string[]; after: string[] };
 }
 export interface WorkspacePlan {
+  contentAuthority: 'local';
   version: 1;
   directory: string;
   kbId: string;
@@ -160,33 +161,20 @@ export interface SyncSelection {
   outgoingKeys: string[];
   reconcileIds: string[];
   verificationIds: string[];
-  /** Fully read native descendants newly discovered below selected, already bound Rems. */
-  addedIds?: string[];
 }
 export interface SyncConflict {
   id: string;
   path: string;
-  reason: 'untrusted-edit-order' | 'remote-structure' | 'remote-missing';
+  reason: 'remote-content-drift' | 'remote-structure' | 'remote-missing';
   baseHash: string;
   localHash: string;
   remoteHash: string | null;
   remoteUpdatedAt: number | null;
 }
-export interface SyncResolution {
-  id: string;
-  path: string;
-  baseHash: string;
-  local: ContentVersion;
-  remote: ContentVersion;
-  policy: 'version-time-lww';
-  winner: 'local' | 'remote';
-}
 export interface SyncPlan extends WorkspacePlan {
   remoteHashes: Record<string, string>;
-  incoming: string[];
   converged: string[];
   conflicts: SyncConflict[];
-  resolutions: SyncResolution[];
 }
 export interface MetadataStore {
   getLocal<T>(key: string): Promise<T | undefined>;

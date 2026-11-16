@@ -172,13 +172,13 @@ and [task plans](../../docs/guides/task-plans.md).
 
 For local Markdown editing/import, read the [sync command reference](../../docs/guides/remnote-cli-command-reference.md#sync)
 before creating a vault. Users in Obsidian and agents with file tools edit the same
-human-readable Markdown files; RemNote is also an editable endpoint. Use a
-common baseline for per-Rem semantic three-way merge. One-sided changes propagate,
-equal changes converge and edits to different Rems merge. For conflicting
-edits, use newer content only when trustworthy version evidence is comparable;
-otherwise preserve both versions. Never use whole-file mtime, sync capture time or
-review time to pick a winner. Review history and scheduling remain RemNote-owned;
-local snapshots are read-only and must not be sent back.
+human-readable Markdown files. After explicit empty-vault import, local source is
+the sole content authority and RemNote is the publishing/review target. Compare
+baseline B, local L and native R: publish L when R=B; accept equal L=R; otherwise
+archive native content/tag drift and stop the whole batch with zero writes.
+Native-only children are structural conflicts, never recursive source imports.
+Review history, scheduling and native runtime flags remain remote-owned snapshots,
+not fields to write. Timestamps never choose content.
 Use an authorized private directory excluded from code Git. A separate private
 Git repository may track content; network backup needs explicit user authorization.
 To rename/move the vault, stop its other writers and use `sync relocate OLD NEW`.
@@ -197,27 +197,21 @@ only for a new empty vault. Verify reported scope and completeness; repeated
 import is not a merge. `sync` is a pure command group: use `sync plan DIR` for a
 zero-native-write preview and `sync apply DIR` for execution, with no `--apply`
 flag on apply. Do not restore root actions or `pull`/`push` aliases.
-Preview/apply reports `incoming`, `outgoing`,
-`converged`, `metadataRefresh` and archived `resolutions`. Continuous reads follow
-selected bound Rems' native children (batches of at most 50), including fully
-observed new empty Rems, nested Documents/Folders and Portal/query descendants.
-Check `selection.addedIds` in the frozen plan; these are native identities, not
-local creations. Receipts report `bound-descendants` when additions are found,
-otherwise `bound-ids`, always with `globalDiscoveryComplete: false`; new top-level
-roots and children of unselected Rems remain outside scope. Missing old objects,
-movement, reordering and same-parent local/remote insertion fail or conflict.
-See the command reference for discovery, raw-fact and recovery guarantees.
-Direct Markdown edits followed by one `sync apply DIR` are the daily
-path; no manual read/save/lint/diff/preview pipeline is required. When controlled
-Agent edit clocks are needed, optionally use `sync read DIR PATH`, then
-`sync save DIR PATH --content-file FILE --expected-file-hash HASH` with the same
-read's hash. Save binds clocks only to changed semantic Rem versions and stays
-offline. Same-Rem divergence uses whole-Rem
-`version-time-lww` only with comparable, hash-bound clocks; otherwise it preserves
-both versions as `untrusted-edit-order`. Direct file edits have no trusted clock,
-and a no-op save cannot stamp them retroactively. Read the reference's version-time
-limits: RemNote `updatedAt` is not a text-only clock. Inspect both archived versions
-and the selected winner in `resolutions` before applying within the user's scope.
+Read, plan and execution receipts declare fixed `contentAuthority: "local"`.
+Automated callers must verify it on `sync read` before applying; absence rejects
+an older CLI before it can run a two-way write. Preview/apply reports `outgoing`,
+`converged`, `metadataRefresh` and archived `remote-content-drift` conflicts.
+Read selected bound IDs only; do not discover/import native-only descendants.
+Missing objects, movement and reordering remain explicit failures/conflicts.
+Direct Markdown edits followed by one `sync apply DIR` are the daily path.
+For guarded edits use `sync read DIR PATH`, then `sync save DIR PATH
+--content-file FILE --expected-file-hash HASH`. Save stays offline and binds bytes,
+not clocks. Old clock fields are retained as sealed evidence, never read as policy.
+Old pending journals without local authority or with incoming/winner evidence
+must remain intact and fail closed; do not migrate or delete them to resume.
+A normal publish never scans TODOs. Explicit feedback processing is a separate
+caller workflow: read exact feedback, change local source, publish and verify,
+then acknowledge. This layer does not implement native TODO acknowledgement.
 Edit supported list nodes only within the supported surface.
 Keep the single hidden `<!-- remnote:document-key -->` before H1 and existing short
 block anchors. No user attributes means no YAML. Optional title/aliases are
@@ -244,7 +238,7 @@ New imports publish the human format. Explicit offline `sync format DIR` convert
 only a complete, clean sealed legacy publication with no pending write journal,
 preserving native/original records and making zero backend calls. Clean already-human
 input is validated and canonically re-rendered while preserving attributes, anchors,
-native records and clocks; `already-formatted` means no publication was needed.
+native records and sealed evidence; `already-formatted` means no publication was needed.
 Dirty input and damaged identity are refused, not recreated. This is not a
 daily-sync fallback or a way to discard local edits.
 Missing `tagIds` requires this explicit clean format step; old nonempty display-only
@@ -260,8 +254,8 @@ also audits full native flags/cards in the selected paths; no path means the ent
 Scope and path are independent, out-of-scope edits remain intact, and full-vault
 local lint/identity/freeze still run. Changed scope is not a remote changes-since
 feed. Offline `sync diff DIR` supports path filtering; status/lint stay full-vault.
-Verification-only dependencies do not advance their native baseline or clocks;
-later all-scope reconciliation must still discover their remote-only edits.
+Verification-only dependencies do not advance their native baseline;
+later selected reconciliation still detects their remote-content drift.
 Only empty selections make no native calls. A clean changed result establishes
 public/tag probing, not fresh card/history proof. For a shared checker that needs
 input-bound native evidence, use `sync read DIR PATH` and then exactly one
@@ -278,15 +272,14 @@ Guarded journals preserve original nativeBefore and input binding before writes;
 exact-plan resume returns that original proof plus fresh nativeAfter, never
 fabricating a before-history from recovery-time values.
 
-Tag deltas merge separately from body clocks. Tag removal keeps native properties
+Direct tags are local desired memberships, not set-merged feedback. Tag removal keeps native properties
 via `removeTag(id, false)`, but the existing Bridge still requires the explicit
 destructive capability gate. Check `plan.tagChanges` and `requiredPermissions`;
 missing permission refuses all writes, including prior text/add operations.
 
 `sync apply DIR --plan-hash HASH` requires a previously reviewed frozen plan with
 matching normalized selectors, selected documents/IDs and all frozen vault files;
-never reuse it for a materially different selection. The plan can include incoming
-and outgoing changes; recheck both endpoints and advance the common baseline only
+never reuse it for a materially different selection. The plan contains local outgoing changes and verified convergence; recheck both endpoints and advance the common baseline only
 after semantic verification. Pre/post checks are optimistic, not an atomic native
 conditional write: concurrent edits can still fall into the check-write window.
 Native transactions stay disabled. Any lint error blocks the whole sync. Preserve opaque

@@ -39,7 +39,6 @@ import {
   originalPath,
   recordPath,
 } from './identity.js';
-import { remoteVersion } from './versions.js';
 import { cardMetadataSchema, nativeDetailsSchema, nativeSchema } from './metadata.js';
 import { mapReads } from './read-pool.js';
 import { pathKey, WorkspaceLinks } from './links.js';
@@ -52,7 +51,6 @@ import {
   type SyncSelection,
   type WorkspaceRem,
   type WorkspaceState,
-  type ContentVersion,
 } from './types.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -300,24 +298,11 @@ export async function prepareSnapshot(
   sources: Map<string, ParsedDocument> = new Map(),
   assignedIds: Record<string, string> = {},
   selection?: SyncSelection,
-  publicationIds?: string[],
-  syncRecovery?: import('./publication.js').SyncRecovery,
-  publishedVersions?: Record<string, ContentVersion>
+  syncRecovery?: import('./publication.js').SyncRecovery
 ) {
   const errors = validateGraph(rems, coverage.rootIds);
   if (errors.length) throw new Error(`Incomplete native graph: ${errors.slice(0, 10).join('; ')}`);
   const byId = new Map(rems.map((rem) => [rem.id, rem]));
-  if (
-    publishedVersions &&
-    (!publicationIds ||
-      hash(Object.keys(publishedVersions).sort()) !== hash([...publicationIds].sort()) ||
-      publicationIds.some(
-        (id) =>
-          !byId.has(id) ||
-          remoteVersion(byId.get(id)!).contentHash !== publishedVersions[id]?.contentHash
-      ))
-  )
-    throw new Error('Publication content version proof does not match projected content');
   const sourcePaths = new Map([...sources].map(([path, source]) => [source.metadata?.root, path]));
   const renamed = previous
     ? {
@@ -400,22 +385,6 @@ export async function prepareSnapshot(
   );
   const files = frozen ?? (await FrozenFiles.capture(root));
   await files.check();
-  const reconciled = new Set(
-    publicationIds ??
-      (selection
-        ? [...selection.reconcileIds, ...(selection.addedIds ?? []), ...Object.values(assignedIds)]
-        : byId.keys())
-  );
-  const localVersions = { ...previous?.localVersions },
-    remoteVersions = { ...previous?.remoteVersions };
-  for (const key of [...reconciled, ...Object.keys(assignedIds), ...removedIds])
-    delete localVersions[key];
-  for (const id of removedIds) delete remoteVersions[id];
-  for (const rem of rems)
-    if (reconciled.has(rem.id))
-      remoteVersions[rem.id] = publishedVersions
-        ? publishedVersions[rem.id]!
-        : remoteVersion(rem, previous?.remoteVersions?.[rem.id]);
   const state: WorkspaceState = {
     version: 1,
     directory: root,
@@ -430,8 +399,9 @@ export async function prepareSnapshot(
     errors: ['Snapshot write in progress'],
     entries: {},
     documents: {},
-    localVersions,
-    remoteVersions,
+    // Preserve old sealed evidence verbatim; publication neither generates nor updates clocks.
+    ...(previous?.localVersions ? { localVersions: previous.localVersions } : {}),
+    ...(previous?.remoteVersions ? { remoteVersions: previous.remoteVersions } : {}),
     // A layout-only publication cannot discard a separate pending native plan.
     ...(selection &&
     !selection.reconcileIds.length &&
@@ -442,7 +412,7 @@ export async function prepareSnapshot(
   };
   const writes = new Map<string, string | null>(originals);
   for (const [id, path] of paths) {
-    if (selection && !selection.files.includes(path) && !selection.addedIds?.includes(id)) {
+    if (selection && !selection.files.includes(path)) {
       const prior = Object.entries(previous?.documents ?? {}).find(([, doc]) => doc.rootId === id);
       if (!prior) throw new Error('Unselected document has no shared baseline');
       const [priorPath, document] = prior;
@@ -464,9 +434,38 @@ export async function prepareSnapshot(
     if (parsed.diagnostics.length)
       throw new Error(`Generated outline failed its own lint: ${parsed.diagnostics[0]!.code}`);
     const current = sources.get(path);
+    if (previous && (!selection || selection.files.includes(path))) {
+      if (!current) throw new Error('Local-authoritative publication requires the selected source');
+      const desiredNodes = current.nodes.filter((node) => !removed.has(node.key));
+      const normalize = (node: ParsedOutline['nodes'][number], desired: boolean) => ({
+        key: desired ? (assignedIds[node.key] ?? node.key) : node.key,
+        kind: node.kind,
+        parent: desired && node.parent ? (assignedIds[node.parent] ?? node.parent) : node.parent,
+        children: node.children
+          .filter((child) => !removed.has(child))
+          .map((child) => (desired ? (assignedIds[child] ?? child) : child)),
+        text: node.text,
+        backText: node.backText,
+        tags: node.tags,
+        ...(node.kind === 'opaque' ? { projection: node.contentHash } : {}),
+      });
+      if (
+        hash(desiredNodes.map((node) => normalize(node, true))) !==
+        hash(parsed.document.nodes.map((node) => normalize(node, false)))
+      )
+        throw new Error(
+          'Local-authoritative publication rejected native content, tags or children backfill'
+        );
+    }
     const semantic = (document: ParsedOutline) =>
       hash({
-        metadata: document.metadata,
+        // Native facts live in records. Refreshing them cannot rewrite local formatting.
+        metadata: {
+          root: document.metadata?.root,
+          title: document.metadata?.title,
+          aliases: document.metadata?.aliases,
+          tags: document.metadata?.tags,
+        },
         nodes: document.nodes.map((node) => ({
           key: node.key,
           block: node.blockId,

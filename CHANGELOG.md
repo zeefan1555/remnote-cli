@@ -7,7 +7,24 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Workspace publishing is local-authoritative after explicit empty-vault import.
+  Local edits publish against the verified baseline; identical content converges.
+  Other native body/tag drift archives both versions and blocks every write; new
+  native children are structural conflicts, never imported into source.
+- Read, plans and execution receipts expose fixed `contentAuthority: "local"`.
+  Remove incoming subtree discovery, tag set merging and timestamp/LWW execution.
+  Guarded offline save binds bytes only. Old clock fields remain immutable sealed
+  evidence; legacy/mixed-authority pending journals fail closed without replay,
+  state migration or publication of old two-way stages. Runtime/card/history
+  snapshots remain native-owned. TODO processing/acknowledgement is a separate layer.
+
 ### Fixed
+
+- Reject native Portal/readonly projection drift before any batch writes. Runtime
+  review/TODO facts refresh only sidecar evidence and preserve authored source
+  bytes, including YAML comments and formatting.
 
 - Inspection receipts and review-stat JSON preserve unavailable Card history as
   `null`, distinct from a known empty array. Inspect summaries omit history proof
@@ -25,8 +42,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   and clocks remain untouched; structural-only parents receive children only.
   Separate frozen native and complete projected-baseline proofs drive recovery,
   including staged sync publications whose next manifest has already installed.
-  Sealed P content-version observations prevent later review timestamps from
-  changing LWW ordering during normal publication or recovery.
   Missing proof fails closed; local-only recovery stays offline, and unknown
   native writes are never replayed. Synthetic call reductions are not native
   persistence or performance acceptance.
@@ -70,24 +85,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   incomplete public `children` fields no longer create false emptiness. Entity IDs,
   uniqueness, parent ownership and declared-child completeness/order are validated;
   read errors and inconsistent lists fail closed. Reordering, moves and removals
-  remain structural conflicts; new descendants use the bounded incoming plan below.
+  remain structural conflicts; new descendants also remain structural conflicts.
 
 ### Added
 
-- Bidirectional sync discovers complete new native branches only below selected,
-  already-bound Rems, including empty Rems, nested documents/folders and read-only
-  Portal/query nodes. Old child IDs retain their order; same-parent local creation
-  races, incomplete facts, duplicate/cyclic identities and missing tag ancestors
-  fail before native writes. Stable new IDs, complete Card snapshots and opaque
-  Query/Filter values are sealed into the plan, optimistic checks and recoverable
-  publication. Portal members remain verification dependencies, not discovery roots.
-  New files and the whole intended publication are validated before mixed writes;
-  unrelated documents and dependency clocks remain untouched. No top-level-root
-  discovery, automatic deletion or uncertain-write replay is introduced.
-
 - Standard Obsidian direct-tag projection: document YAML tags and per-bullet inline
-  tags bind one-to-one to native Tag RemIDs. Independent membership deltas merge
-  separately from body clocks; removal preserves properties and obeys the existing
+  tags bind one-to-one to native Tag RemIDs. Local desired memberships are baseline guarded; removal preserves properties and obeys the existing
   explicit destructive capability gate before any write. Old unbound projection
   requires explicit clean format; unknown/ambiguous tokens fail closed.
 - Default changed sync probes all selected bound IDs for remote-only content/tag
@@ -159,21 +162,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the authoritative manifest or its mirror. Native writes remain serial.
 
 - `sync plan|apply` and `sync import|status|lint|diff|recover` for a private,
-  exact-KB-bound Obsidian vault. The updated design permits edits in both RemNote
-  and the shared Markdown files, using a common baseline and per-Rem
-  semantic three-way merge. Preview/apply reports incoming, outgoing, converged
-  and metadata-only changes; native acceptance remains separate from offline tests.
-- Offline `sync read|save` binds guarded local edits to per-Rem content hashes and
-  save timestamps without advancing the native baseline. Staged recovery retains
-  the original clock; no-op/direct-file edits cannot be retroactively stamped.
-- Whole-Rem `version-time-lww` selects the later comparable, hash-bound local/native
-  version after archiving both versions immutably. Same-content metadata/review
-  drift does not retime observed content; explicit/observed reverts remain new
-  versions until publication. Missing/equal/invalid clocks preserve both versions
-  as `untrusted-edit-order`. Native `updatedAt` is not a text-only chronology, and
-  file mtime is never an ordering signal. Edits to different Rems merge.
-  Review history/scheduling remain RemNote-owned, and local snapshots never write
-  them back. Absence on either side never implies automatic deletion.
+  exact-KB-bound Obsidian vault. Local source is desired content after explicit
+  import. Preview/apply reports outgoing, converged and metadata-only changes;
+  native acceptance remains separate from offline tests.
+- Offline `sync read|save` binds guarded local edits to exact file hashes without
+  advancing the native baseline or generating clocks. Review history/scheduling
+  remain RemNote-owned. Absence on either side never implies automatic deletion.
 - Stable Obsidian block-ID to Rem-ID mapping and full-path wikilinks, preserving
   native identity across local renames. Sparse attributes are edited in Source mode;
   display aliases/tags and embeds are distinct from native Rem relationships.
@@ -190,8 +184,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   Rems and reparenting are rejected or conflicted; new top-level roots are outside
   scope. Client pre/post revision checks are not server-side atomic CAS.
 - A draft opt-in `scripts/sync-agent-acceptance.mjs` driver for serialized, guarded
-  live tests in one synthetic subtree, using hidden/tracked identities and incoming /
-  mixed-direction, convergence and conflict-preservation checks. Deletion uses
+  live tests in one synthetic subtree, using hidden/tracked identities and local
+  outgoing, convergence and whole-batch zero-write drift checks. Deletion uses
   explicit missing-ID receipts and fresh-root cleanup guards. Its synthetic self-test is offline only; a new native
   run still requires exclusive ownership, a frozen candidate and explicit approval.
 
@@ -214,9 +208,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   including line endings and rich-text boundaries. Standard paragraph escaping
   preserves the original whitespace; existing anchors, card types and child order
   remain unchanged.
-- Correct the README sync summary to describe guarded local save clocks and
-  whole-Rem version-time LWW while retaining conflicts for untrusted ordering;
-  no runtime behavior changes.
 - Workspace SDK Card history snapshots omit undefined object properties recursively,
   preserving defined JSON values, unknown fields and review order. Only plain or
   null-prototype objects are accepted. Array holes, undefined array elements and

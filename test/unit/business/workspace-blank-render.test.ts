@@ -163,11 +163,13 @@ async function sealedHuman(text?: unknown) {
   state.localVersions = {
     body: { contentHash: hash('local-evidence'), timestamp: 123, source: 'cli-save' },
   };
-  state.remoteVersions!.blank = {
-    contentHash: hash('remote-evidence'),
-    timestamp: 456,
-    source: 'rem-updated-at',
-    sinceBaseline: true,
+  state.remoteVersions = {
+    blank: {
+      contentHash: hash('remote-evidence'),
+      timestamp: 456,
+      source: 'rem-updated-at',
+      sinceBaseline: true,
+    },
   };
   await fileOps.writePrivate(directory, path, source);
   await fileOps.writePrivate(

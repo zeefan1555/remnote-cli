@@ -4,12 +4,7 @@ import {
   parseDocument,
   renderDocument,
 } from '../../../src/business/workspace/markdown.js';
-import {
-  mergeTags,
-  registerTags,
-  resolveTags,
-  tagIdsSchema,
-} from '../../../src/business/workspace/tags.js';
+import { registerTags, resolveTags, tagIdsSchema } from '../../../src/business/workspace/tags.js';
 import type { WorkspaceRem } from '../../../src/business/workspace/types.js';
 
 const rem = (
@@ -79,10 +74,6 @@ describe('standard Obsidian direct tags', () => {
     f.rems.set('second', rem('second', '事务', 'home'));
     f.rems.get('b')!.tags = ['second'];
     expect(() => registerTags(f.rems)).toThrow('collide');
-  });
-  it('merges independent membership deltas, not body timestamps', () => {
-    expect(mergeTags(['a'], ['b'], ['c'])).toEqual(['b', 'c']);
-    expect(mergeTags(['a', 'b'], ['b'], ['a', 'b', 'c'])).toEqual(['b', 'c']);
   });
   it('binds unused tags only by their complete ancestor path, never a shared basename', () => {
     const rems = new Map([

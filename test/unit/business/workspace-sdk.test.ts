@@ -858,9 +858,12 @@ describe('entity structure sync gates through the actual SDK backend', () => {
   );
 
   it.each(['changed', 'all', 'guarded'])(
-    'imports exact type 6 descendant additions in %s mode without native writes',
+    'rejects exact type 6 descendant additions in %s mode without importing them or writing',
     async (mode) => {
       const f = await imported();
+      const source = await readPrivate(f.directory, 'r0.md'),
+        identity = await readPrivate(f.directory, '.remnote/identity.json');
+      const before = await loadState(f.directory);
       f.entityChildren.set('r1', ['r3']);
       Object.assign(f.objects.get('r3')!, { parent: 'r1', type: 6, children: ['r4'] });
       Object.assign(f.objects.get('r4')!, { parent: 'r3' });
@@ -870,14 +873,19 @@ describe('entity structure sync gates through the actual SDK backend', () => {
           ? { expectedFileHash: (await readWorkspace(f.directory, 'r0.md')).fileHash }
           : { scope: mode };
       expect(await f.apply(options)).toMatchObject({
-        status: 'verified',
-        complete: true,
+        contentAuthority: 'local',
+        status: 'conflict',
+        complete: false,
         remoteWrites: 0,
-        incoming: ['r3', 'r4'],
-        selection: { addedIds: ['r3', 'r4'] },
+        conflicts: [expect.objectContaining({ id: 'r1', reason: 'remote-structure' })],
       });
       noWrites(f);
       expect(f.entityChildren.get('r1')).toEqual(['r3']);
+      expect(await readPrivate(f.directory, 'r0.md')).toBe(source);
+      expect(await readPrivate(f.directory, '.remnote/identity.json')).toBe(identity);
+      expect((await loadState(f.directory)).entries).toEqual(before.entries);
+      expect(f.flags.get('r3')!.getChildrenRem).not.toHaveBeenCalled();
+      expect(f.flags.get('r4')!.getChildrenRem).not.toHaveBeenCalled();
     }
   );
 

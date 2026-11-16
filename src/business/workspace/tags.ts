@@ -131,12 +131,3 @@ export function registerTagIds(
   }
   return tagIdsSchema.parse(registry);
 }
-
-/** Independent set members merge without using body edit timestamps. */
-export function mergeTags(base: string[], local: string[], remote: string[]): string[] {
-  const removed = new Set(base.filter((id) => !local.includes(id)));
-  return tagSet([
-    ...remote.filter((id) => !removed.has(id)),
-    ...local.filter((id) => !base.includes(id)),
-  ]);
-}
