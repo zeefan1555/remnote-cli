@@ -33,6 +33,10 @@ export function planDeletion(context: LocalContext): WorkspacePlan['deletion'] {
     if (rem.parent && !missing.has(rem.parent)) {
       const parent = context.native.get(rem.parent);
       if (!parent) throw new Error(`Cannot verify external deletion parent: ${id}`);
+      if (parent.unsupported || nodeKind(parent, context.native) === 'opaque' || parent.feedback)
+        throw new Error(
+          `Cannot verify deletion parent native identity and structure: ${rem.parent}`
+        );
       if (rem.cardItem === true || nodeKind(parent, context.native) === 'multiline')
         throw new Error(`Cannot delete an individual answer from an existing card: ${id}`);
     }

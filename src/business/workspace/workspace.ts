@@ -39,6 +39,7 @@ import {
   withPublicSnapshot,
 } from './snapshots.js';
 import { recordPath } from './identity.js';
+import { nodeKind } from './markdown.js';
 import { partitionRemote } from './feedback-partition.js';
 import { nodeContent } from './versions.js';
 import { mapReads } from './read-pool.js';
@@ -1082,6 +1083,20 @@ async function synchronizeWorkspace(
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     if (folded)
       for (const id of existingIds) if (!expected.has(id)) expected.set(id, remote.get(id)!);
+    for (const root of plan.deletion?.roots ?? [])
+      if (!expected.has(root.id) || (root.parent && !expected.has(root.parent)))
+        throw new Error(
+          `Deletion target or surviving parent lacks complete guarded proof: ${root.id}`
+        );
+      else if (root.parent) {
+        const parent = expected.get(root.parent)!;
+        if (
+          parent.unsupported ||
+          parent.feedback ||
+          nodeKind(parent, new Map([...context.native, ...expected])) === 'opaque'
+        )
+          throw new Error(`Deletion parent lacks verified native structure: ${root.parent}`);
+      }
     const protectedIds = existingIds.filter((id) => !plan.deletion?.ids.includes(id));
     const guardHash = await backend.guard(protectedIds);
     if (journal && journal.guardHash !== guardHash)

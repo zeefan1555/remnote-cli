@@ -5726,6 +5726,49 @@ describe('controlled RemNote workspace', () => {
     expect(f.calls).toEqual([]);
   });
 
+  it.each(['inline', 'mounted'] as const)(
+    'blocks nested deletion under an unverified surviving parent in %s scope before connecting',
+    async (mode) => {
+      await mkdir(directory, { mode: 0o700 });
+      const rems = [
+        native('doc', ['doc'], { document: true, children: ['parent'] }),
+        native('parent', ['parent'], {
+          parent: 'doc',
+          document: mode === 'mounted',
+          unsupported: 'unverified-native-flags',
+          children: ['child'],
+        }),
+        native('child', ['child'], {
+          parent: 'parent',
+          document: mode === 'mounted',
+          children: ['grandchild'],
+        }),
+        native('grandchild', ['grandchild'], { parent: 'child' }),
+      ];
+      const state = await writeSnapshot(directory, 'kb', rems);
+      const path = state.entries.child!.path;
+      if (mode === 'mounted') await rm(join(directory, path));
+      else {
+        const source = await readPrivate(directory, path);
+        const changed = source.replace(
+          new RegExp(
+            `\\n  - child \\^${state.entries.child!.blockId}\\n    - grandchild \\^${state.entries.grandchild!.blockId}`
+          ),
+          ''
+        );
+        expect(changed).not.toBe(source);
+        await writePrivate(directory, path, changed);
+      }
+      const factory = vi.fn(async () => {
+        throw new Error('Must remain offline');
+      });
+      await expect(
+        syncWorkspace(directory, factory, { apply: true, paths: [path] })
+      ).rejects.toThrow('Cannot verify deletion parent native identity and structure');
+      expect(factory).not.toHaveBeenCalled();
+    }
+  );
+
   it('blocks deletion when an editable surviving Rem has a known native reference to the target', async () => {
     const f = await prepare((fixture) => {
       fixture.rems.get('basic')!.references = ['question'];
