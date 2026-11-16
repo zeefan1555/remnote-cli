@@ -362,6 +362,76 @@ async function edit(path: string, replace: (source: string) => string) {
 }
 
 describe('synthetic history write-first characterization', () => {
+  it('rechecks every affected card after a first write before any later write', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.get('question')!.children.push('answer1b');
+      rems.set('answer1b', native('answer1b', ['Also'], { parent: 'question', cardItem: true }));
+      rems.get('chapter')!.children.push('question2');
+      rems.set(
+        'question2',
+        native('question2', ['Why two?'], {
+          parent: 'chapter',
+          children: ['answer2'],
+          backText: [],
+        })
+      );
+      rems.set(
+        'answer2',
+        native('answer2', ['Because two'], { parent: 'question2', cardItem: true })
+      );
+    });
+    await edit(f.path, (source) =>
+      source
+        .replace(
+          `Because ^${f.state.entries.answer!.blockId}`,
+          `Changed ^${f.state.entries.answer!.blockId}`
+        )
+        .replace('Also', 'Also edited')
+        .replace('Because two', 'Because two edited')
+    );
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      if (f.calls.length === 1) f.rems.get('question2')!.cards = unknown('question2');
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({
+      status: 'unknown',
+      remoteWrites: 1,
+      error: expect.stringContaining('Native card history changed'),
+    });
+    expect(f.calls).toHaveLength(1);
+  });
+  it('rechecks every explicitly required card after a first write before any later write', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.get('question')!.children.push('answer2');
+      rems.set('answer2', native('answer2', ['Also'], { parent: 'question', cardItem: true }));
+    });
+    await edit(f.path, (source) =>
+      source.replace('Because', 'Because edited').replace('Also', 'Also edited')
+    );
+    const file = await workspace.readWorkspace(directory, f.path);
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      if (f.calls.length === 1) f.rems.get('basic')!.cards = unknown('basic');
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: file.fileHash,
+      requireHistoryRem: ['basic'],
+    });
+    expect(result).toMatchObject({
+      status: 'unknown',
+      remoteWrites: 1,
+      error: expect.stringContaining('Native card history changed'),
+    });
+    expect(f.calls).toHaveLength(1);
+  });
   it('guards the whole nested card-item owner chain and rejects cycles', () => {
     const rems = new Map([
       ['item', native('item', ['item'], { cardItem: true, parent: 'nested' })],

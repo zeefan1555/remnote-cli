@@ -1350,7 +1350,9 @@ async function synchronizeWorkspace(
     async function preflight(step?: string): Promise<void> {
       await checkFiles(root, plan);
       const createdIds = resuming ? new Set(Object.values(journal!.ids)) : new Set<string>();
-      const scopedIds = boundaryIds(step);
+      // A review change anywhere in this operation's protected set must stop later writes,
+      // even when the next mutation targets another Card. Read the union in the same batch.
+      const scopedIds = [...new Set([...boundaryIds(step), ...historyIds])].sort();
       const fresh = await readExact(
         backend,
         scopedIds.filter((id) => !createdIds.has(id)),
