@@ -154,6 +154,14 @@ export async function alignWorkspaceBaseline(
     const ids = tagSet(selection.files.flatMap((path) => previous.documents[path]!.nodeIds));
     if (parents.some((id) => !ids.includes(id)))
       throw new Error('Exact new-child parent must be bound in the selected documents');
+    const rejectPortalParents = (records: Map<string, WorkspaceRem>) => {
+      for (const parent of parents) {
+        const rem = records.get(parent)!;
+        if (rem.type === 6 || rem.portal)
+          throw new Error(`Exact new-child acceptance cannot traverse a Portal: ${parent}`);
+      }
+    };
+    rejectPortalParents(context.native);
     for (const id of addedIds)
       if (context.native.has(id) || previous.entries[id])
         throw new Error(`New child is already bound: ${id}`);
@@ -173,7 +181,9 @@ export async function alignWorkspaceBaseline(
     const backend = await connect();
     if ((await backend.identity()).kbId !== previous.kbId)
       throw new Error('Native KB binding changed');
-    const observed = await readExact(backend, [...ids, ...addedIds], context);
+    const observed = await readExact(backend, ids, context);
+    rejectPortalParents(observed);
+    for (const [id, rem] of await readExact(backend, addedIds, context)) observed.set(id, rem);
     if (options.acceptNativeSource)
       addedIds = await readNativeSourceClosure(context, selection.files, observed, (newIds) =>
         readExact(backend, newIds, context)
@@ -209,7 +219,9 @@ export async function alignWorkspaceBaseline(
       // The SDK does not always collect this supplemental relationship list.
       // Preserve an old known observation when absent; inline references are in text/backText.
       const sourceCurrent =
-        options.acceptNativeSource && ids.includes(id) && current.references == null
+        (options.acceptNativeSource || parents.length > 0) &&
+        ids.includes(id) &&
+        current.references == null
           ? { ...current, references: before.references }
           : current;
       const next = alignRecord(
@@ -548,7 +560,14 @@ export async function alignWorkspaceBaseline(
     }
     if (options.planHash !== planHash)
       throw new Error('Baseline alignment preview changed; review a fresh plan hash');
-    const verified = await readExact(backend, [...observed.keys()].sort(), context);
+    const verified = await readExact(
+      backend,
+      [...observed.keys()].filter((id) => !parents.length || !addedIds.includes(id)).sort(),
+      context
+    );
+    rejectPortalParents(verified);
+    if (parents.length)
+      for (const [id, rem] of await readExact(backend, addedIds, context)) verified.set(id, rem);
     if (hash(proof(verified)) !== hash(nativeBefore))
       throw new Error('Native observations changed before baseline publication');
     await frozen.check();

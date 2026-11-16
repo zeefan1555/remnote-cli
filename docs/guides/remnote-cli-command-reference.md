@@ -491,7 +491,10 @@ children must remain an ordered subsequence, and the complete difference must
 equal the supplied set. The parent's content kind cannot change. New leaves are
 inserted at their exact native positions using renderer-produced bullets while
 all existing source bytes and node identities remain intact. Other drift still
-blocks. Preview reports `childrenAccepted`; apply requires the same exact options
+blocks. Known or observed Portal parents are rejected before reading any new
+children, including on apply verification. When the SDK omits the supplemental
+reference list, an already known list is preserved; explicit drift still blocks.
+Preview reports `childrenAccepted`; apply requires the same exact options
 and `planHash`, with fresh proof for the parent and all new leaves. Reapplying the
 set after publication refuses the now-bound IDs. This is not discovery, incoming
 sync, a timestamp merge, or permission to modify native Cards or history.

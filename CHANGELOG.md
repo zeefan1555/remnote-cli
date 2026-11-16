@@ -41,7 +41,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Extend that explicit initializer with repeated `--accept-new-parent ID` and
   `--accept-new-child ID` for exact authorized sets of unbound native leaves.
   Preserve old child order, parent content kind, source bytes and Card/history
-  records; reject other drift. Bind the exact set and fresh leaf snapshots into
+  records; reject other drift. Reject known or observed Portal parents before
+  reading new children and retain known references when the SDK omits them.
+  Bind the exact set and fresh leaf snapshots into
   the preview hash and use the same zero-native-write local recovery path.
 
 - Workspace publishing is local-authoritative after explicit empty-vault import.

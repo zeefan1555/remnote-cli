@@ -49,7 +49,7 @@ function native(id: string, extra: Partial<WorkspaceRem> = {}): WorkspaceRem {
     ...extra,
   };
 }
-async function fixture(multiline = false) {
+async function fixture(multiline = false, knownReferences = false) {
   const old = [
     native('doc', { document: true, children: ['parent', 'sibling'] }),
     native('parent', {
@@ -81,6 +81,7 @@ async function fixture(multiline = false) {
     old[4]!.cardItem = true;
     old.splice(3, 1);
   }
+  if (knownReferences) old.find((rem) => rem.id === 'last')!.references = ['known'];
   const state = await writeSnapshot(directory, 'kb', old);
   const path = state.entries.doc!.path;
   const rems = new Map(old.map((rem) => [rem.id, structuredClone(rem)]));
@@ -116,6 +117,109 @@ async function fixture(multiline = false) {
 }
 
 describe('explicit exact new children baseline initialization', () => {
+  it.each([
+    'old-type',
+    'old-portal',
+    'old-type-changed',
+    'current-type',
+    'current-portal',
+  ] as const)('never reads an exact child across a Portal boundary: %s', async (variant) => {
+    const portal = { type: null, directlyIncludedRemIds: [], query: null, filter: null };
+    const isOldPortal = variant === 'old-type' || variant === 'old-type-changed';
+    const old = [
+      native('doc', { document: true, children: ['parent'] }),
+      native('parent', {
+        parent: 'doc',
+        ...(isOldPortal ? { type: 6, portal } : {}),
+        ...(variant === 'old-portal' ? { portal } : {}),
+      }),
+    ];
+    const state = await writeSnapshot(directory, 'kb', old);
+    const path = state.entries.doc!.path;
+    const source = await files.readPrivate(directory, path);
+    const rems = new Map(old.map((rem) => [rem.id, structuredClone(rem)]));
+    const parent = rems.get('parent')!;
+    parent.children.push('new');
+    if (variant === 'old-type-changed') {
+      parent.type = null;
+      delete parent.portal;
+    }
+    if (variant === 'current-type') parent.type = 6;
+    if (variant === 'current-portal') parent.portal = portal;
+    rems.set('new', native('new', { parent: 'parent' }));
+    const backend = {
+      identity: vi.fn(async () => ({ kbId: 'kb', writable: false })),
+      read: vi.fn(async (ids: string[]) => ids.map((id) => structuredClone(rems.get(id)!))),
+    } as unknown as WorkspaceBackend;
+    await expect(
+      alignWorkspaceBaseline(directory, async () => backend, {
+        paths: [path],
+        acceptNewParent: ['parent'],
+        acceptNewChild: ['new'],
+      })
+    ).rejects.toThrow(/Portal/);
+    expect(backend.read).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['new']),
+      expect.anything()
+    );
+    expect(await files.readPrivate(directory, path)).toBe(source);
+    expect(await loadState(directory)).toEqual(state);
+    expect(await readPublication(directory)).toBeUndefined();
+  });
+  it('retains known references when the SDK omits this supplemental field', async () => {
+    const f = await fixture(false, true);
+    delete f.rems.get('last')!.references;
+    const preview = await alignWorkspaceBaseline(directory, f.connect, f.options);
+    await alignWorkspaceBaseline(directory, f.connect, {
+      ...f.options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    expect((await inspectLocal(directory)).native.get('last')!.references).toEqual(['known']);
+  });
+  it('checks the parent again before re-reading new children during apply', async () => {
+    const f = await fixture();
+    const source = await files.readPrivate(directory, f.path);
+    const preview = await alignWorkspaceBaseline(directory, f.connect, f.options);
+    let parentReads = 0;
+    const calls: string[][] = [];
+    vi.spyOn(f.backend, 'read').mockImplementation(async (ids) => {
+      calls.push(ids);
+      if (ids.includes('parent') && ++parentReads === 2) f.rems.get('parent')!.type = 6;
+      return ids.map((id) => structuredClone(f.rems.get(id)!));
+    });
+    await expect(
+      alignWorkspaceBaseline(directory, f.connect, {
+        ...f.options,
+        apply: true,
+        planHash: preview.planHash,
+      })
+    ).rejects.toThrow(/Portal/);
+    expect(calls.filter((ids) => ids.includes('added_0'))).toHaveLength(1);
+    expect(await files.readPrivate(directory, f.path)).toBe(source);
+    expect(await loadState(directory)).toEqual(f.state);
+    expect(await readPublication(directory)).toBeUndefined();
+  });
+  it('does not mask unknown tags when preserving uncollected references', async () => {
+    const f = await fixture(false, true);
+    delete f.rems.get('last')!.references;
+    f.rems.get('last')!.tags = null;
+    await expect(alignWorkspaceBaseline(directory, f.connect, f.options)).rejects.toThrow(
+      'Unknown native tags'
+    );
+    expect(await loadState(directory)).toEqual(f.state);
+  });
+  it.each([[[]], [['different']]])(
+    'rejects actually observed reference drift %j',
+    async (references) => {
+      const f = await fixture(false, true);
+      f.rems.get('last')!.references = references;
+      await expect(alignWorkspaceBaseline(directory, f.connect, f.options)).rejects.toThrow(
+        'drifted'
+      );
+      expect(await loadState(directory)).toEqual(f.state);
+    }
+  );
   it('inserts under two exact parents without changing any existing source bytes', async () => {
     const f = await fixture();
     const additions = ['added_0', 'sibling_added'];
