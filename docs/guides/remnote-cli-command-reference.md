@@ -481,6 +481,12 @@ Review `planHash` from the preview, then run the same command and selectors with
 operation makes zero native writes and preserves sealed Card/history/original
 records; its history count reports only freshly known histories, never claims
 that unknown history is empty. Interrupted local publication uses `sync recover`.
+After feedback roles are bound, each selected Rem must have fresh known direct
+tags without TODO/DONE, no sealed nonempty feedback attachment partition, and
+unchanged physical children. Unknown or drifting evidence refuses before local
+publication. Lifecycle tags are never imported as authored source. Before role
+binding, their identity is unknown: later binding refuses any matching authored
+role tokens and requires explicit source alignment.
 
 Only with explicit authorization to accept an already-reviewed exact set of new
 native leaves, repeat `--accept-new-parent ID` and `--accept-new-child ID` for

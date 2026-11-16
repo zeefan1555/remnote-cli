@@ -142,6 +142,8 @@ Markdown or initializes missing native evidence; existing authored role tokens
 are a reported blocker. Only with explicit baseline-initialization authorization,
 use `sync baseline-align DIR [--path PATH]` to preview missing observations, then
 the same selectors with `--apply --plan-hash HASH`; see the command reference.
+After role binding, alignment refuses TODO/DONE lifecycle tags, unknown direct
+tags, nonempty feedback partitions and physical-child drift before local writes.
 Only when the user also authorizes exact native additions, add
 `--accept-new-parent ID --accept-new-child ID` (repeat both options for the
 complete reviewed sets). Every selected parent must have a selected child. This

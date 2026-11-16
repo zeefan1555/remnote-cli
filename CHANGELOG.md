@@ -60,6 +60,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Refuse baseline alignment when bound feedback roles appear on selected Rems,
+  or their feedback attachment and physical-child evidence is unsafe.
 - Require exact bound TODO/DONE roles and freshly observed empty physical feedback
   partitions before mirrored deletion; unknown or changed feedback stops mutation.
 - Never discover native descendants through a Portal during explicit source adoption, including when

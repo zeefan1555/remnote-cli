@@ -184,6 +184,24 @@ export async function alignWorkspaceBaseline(
     if ((await backend.identity()).kbId !== previous.kbId)
       throw new Error('Native KB binding changed');
     const observed = await readExact(backend, ids, context);
+    if (previous.feedbackRoles) {
+      const roles = previous.feedbackRoles;
+      for (const id of ids) {
+        const before = context.native.get(id)!,
+          current = observed.get(id)!;
+        if (!Array.isArray(current.tags)) throw new Error(`Unknown native feedback tags: ${id}`);
+        if (current.tags.includes(roles.todoTagId) || current.tags.includes(roles.doneTagId))
+          throw new Error(`Feedback lifecycle tags cannot be imported into local source: ${id}`);
+        for (const rem of [before, current])
+          if (
+            rem.feedback &&
+            (hash(rem.feedback.roles) !== hash(roles) || rem.feedback.attachmentIds.length)
+          )
+            throw new Error(`Feedback partition is not safely empty for baseline alignment: ${id}`);
+        if (hash(before.children) !== hash(current.children))
+          throw new Error(`Physical feedback partition changed during baseline alignment: ${id}`);
+      }
+    }
     rejectPortalParents(observed);
     for (const [id, rem] of await readExact(backend, addedIds, context)) observed.set(id, rem);
     if (options.acceptNativeSource)

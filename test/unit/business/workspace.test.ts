@@ -361,6 +361,184 @@ async function edit(path: string, replace: (source: string) => string) {
 }
 
 describe('exact feedback partition regression', () => {
+  it.each(['todo', 'done'] as const)(
+    'does not import a fresh %s lifecycle tag while aligning an unknown baseline',
+    async (role) => {
+      const f = await prepare(({ rems }) => {
+        rems.set('todo', native('todo', ['TODO']));
+        rems.set('done', native('done', ['DONE']));
+        delete rems.get('question')!.tags;
+      });
+      await bindFeedbackRoles(directory, async () => f.backend, {
+        todoTagId: 'todo',
+        doneTagId: 'done',
+      });
+      f.rems.get('question')!.tags = [role];
+      const state = await loadState(directory);
+      const source = await readPrivate(directory, f.path);
+      const raw = await readPrivate(directory, state.entries.question!.rawPath);
+      const identity = await readPrivate(directory, IDENTITY);
+      await expect(
+        alignWorkspaceBaseline(directory, async () => f.backend, { paths: [f.path] })
+      ).rejects.toThrow('Feedback lifecycle tags cannot be imported');
+      expect(await loadState(directory)).toEqual(state);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPrivate(directory, state.entries.question!.rawPath)).toBe(raw);
+      expect(await readPrivate(directory, IDENTITY)).toBe(identity);
+      expect(await readPublication(directory)).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('aligns an observed non-lifecycle tag after binding without fabricating feedback', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.set('todo', native('todo', ['TODO']));
+      rems.set('done', native('done', ['DONE']));
+      delete rems.get('question')!.tags;
+    });
+    await bindFeedbackRoles(directory, async () => f.backend, {
+      todoTagId: 'todo',
+      doneTagId: 'done',
+    });
+    f.rems.get('question')!.tags = ['basic'];
+    const options = { paths: [f.path] };
+    const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
+    await alignWorkspaceBaseline(directory, async () => f.backend, {
+      ...options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    const local = await inspectLocal(directory);
+    expect(local.diagnostics).toEqual([]);
+    expect(local.native.get('question')!.tags).toEqual(['basic']);
+    expect(local.native.get('question')!.feedback).toBeUndefined();
+    expect(local.parsed.get(f.path)!.nodes.find((node) => node.key === 'question')!.tags).toContain(
+      'basic'
+    );
+    expect(f.calls).toEqual([]);
+  });
+  it.each(['todo', 'done', 'unknown', 'added-child', 'removed-child'] as const)(
+    'refuses %s drift after a clean alignment preview with no local publication',
+    async (change) => {
+      const f = await prepare(({ rems }) => {
+        rems.set('todo', native('todo', ['TODO']));
+        rems.set('done', native('done', ['DONE']));
+        delete rems.get('question')!.tags;
+      });
+      await bindFeedbackRoles(directory, async () => f.backend, {
+        todoTagId: 'todo',
+        doneTagId: 'done',
+      });
+      f.rems.get('question')!.tags = [];
+      const options = { paths: [f.path] };
+      const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
+      const state = await loadState(directory),
+        source = await readPrivate(directory, f.path);
+      if (change === 'todo' || change === 'done') f.rems.get('question')!.tags = [change];
+      if (change === 'unknown') {
+        const read = f.backend.read;
+        f.backend.read = vi.fn(async (ids, readOptions) =>
+          (await read(ids, readOptions)).map((rem) =>
+            rem.id === 'question' ? { ...rem, tags: undefined } : rem
+          )
+        );
+      }
+      if (change === 'added-child') {
+        f.rems.get('question')!.children.push('feedback-new');
+        f.rems.set(
+          'feedback-new',
+          native('feedback-new', ['feedback'], { parent: 'question', tags: ['todo'] })
+        );
+      }
+      if (change === 'removed-child') f.rems.get('question')!.children = [];
+      await expect(
+        alignWorkspaceBaseline(directory, async () => f.backend, {
+          ...options,
+          apply: true,
+          planHash: preview.planHash,
+        })
+      ).rejects.toThrow();
+      expect(await loadState(directory)).toEqual(state);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPublication(directory)).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('before roles are bound, preserves a baseline tag and then refuses to bind it as lifecycle', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.set('todo', native('todo', ['TODO']));
+      rems.set('done', native('done', ['DONE']));
+      delete rems.get('question')!.tags;
+    });
+    f.rems.get('question')!.tags = ['todo'];
+    const options = { paths: [f.path] };
+    const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
+    await alignWorkspaceBaseline(directory, async () => f.backend, {
+      ...options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    const state = await loadState(directory),
+      source = await readPrivate(directory, f.path);
+    await expect(
+      bindFeedbackRoles(directory, async () => f.backend, { todoTagId: 'todo', doneTagId: 'done' })
+    ).rejects.toThrow('Feedback role tokens require explicit source alignment');
+    expect(await loadState(directory)).toEqual(state);
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(f.calls).toEqual([]);
+  });
+  it.each(['todo', 'child'] as const)(
+    'refuses %s feedback drift at the final alignment read',
+    async (change) => {
+      const f = await prepare(({ rems }) => {
+        rems.set('todo', native('todo', ['TODO']));
+        rems.set('done', native('done', ['DONE']));
+        delete rems.get('question')!.tags;
+      });
+      await bindFeedbackRoles(directory, async () => f.backend, {
+        todoTagId: 'todo',
+        doneTagId: 'done',
+      });
+      f.rems.get('question')!.tags = [];
+      const options = { paths: [f.path] };
+      const preview = await alignWorkspaceBaseline(directory, async () => f.backend, options);
+      const state = await loadState(directory),
+        source = await readPrivate(directory, f.path);
+      const read = f.backend.read;
+      let questionReads = 0;
+      f.backend.read = vi.fn(async (ids, readOptions) => {
+        if (ids.includes('question') && ++questionReads === 2) {
+          if (change === 'todo') f.rems.get('question')!.tags = ['todo'];
+          else f.rems.get('question')!.children.push('feedback-race');
+        }
+        return read(ids, readOptions);
+      });
+      await expect(
+        alignWorkspaceBaseline(directory, async () => f.backend, {
+          ...options,
+          apply: true,
+          planHash: preview.planHash,
+        })
+      ).rejects.toThrow('Native observations changed before baseline publication');
+      expect(questionReads).toBe(2);
+      expect(await loadState(directory)).toEqual(state);
+      expect(await readPrivate(directory, f.path)).toBe(source);
+      expect(await readPublication(directory)).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('refuses alignment of a sealed nonempty feedback partition without local writes', async () => {
+    const f = await publishedFeedback();
+    f.calls.length = 0;
+    const state = await loadState(directory),
+      source = await readPrivate(directory, f.path);
+    await expect(
+      alignWorkspaceBaseline(directory, async () => f.backend, { paths: [f.path] })
+    ).rejects.toThrow('Feedback partition is not safely empty');
+    expect(await loadState(directory)).toEqual(state);
+    expect(await readPrivate(directory, f.path)).toBe(source);
+    expect(await readPublication(directory)).toBeUndefined();
+    expect(f.calls).toEqual([]);
+  }, 15000);
   async function nestedRoles() {
     const f = await prepare(({ rems }) => {
       rems.set(
