@@ -1101,9 +1101,9 @@ async function synchronizeWorkspace(
       );
     let existingIds = affectedIds(plan, remote, metadataChanged);
     const publishing = publicationIds(plan, metadataChanged);
-    const verificationIds = publicVerificationIds(context, plan, remote, publishing, existingIds);
+    let verificationIds = publicVerificationIds(context, plan, remote, publishing, existingIds);
     const missingProof = verificationIds.filter((id) => !remote.has(id));
-    for (let start = 0; start < missingProof.length; start += 50) {
+    for (let start = 0; start < missingProof.length;) {
       const batch = missingProof.slice(start, start + 50),
         probes = await backend.readProbe(batch, {
           powerupCodes: knownPowerupCodes(context.native),
@@ -1118,13 +1118,19 @@ async function synchronizeWorkspace(
         if (typeof id !== 'string' || !batch.includes(id) || !context.native.has(id))
           throw new Error('Unexpected public verification dependency');
         const before = context.native.get(id)!;
+        // Absent/null memberships were never collected, not an observed empty set. Complete
+        // that fact for this proof only; keep every previously known semantic field guarded.
+        const expected = before.tags == null ? { ...before, tags: probe.tags } : before;
         if (
           publicationRevisionHash({
             ...withPublicSnapshot(before, probe.snapshot),
             tags: probe.tags,
-          }) !== publicationRevisionHash(before)
+          }) !== publicationRevisionHash(expected)
         )
           throw new Error(`Unobserved verification dependency changed: ${id}`);
+        for (const tag of probe.tags)
+          if (!context.native.has(tag))
+            throw new Error(`Verification dependency tag has no sealed native baseline: ${tag}`);
         for (const code of knownPowerupCodes(context.native)[id] ?? []) {
           const expected =
             before.powerupPresence?.[code] ??
@@ -1141,6 +1147,12 @@ async function synchronizeWorkspace(
           ...(probe.powerupPresence ? { powerupPresence: probe.powerupPresence } : {}),
         });
       }
+      // A newly collected tag set can introduce further proof dependencies. Close G before
+      // either public boundary, without adding merge candidates to S or publications to P.
+      verificationIds = publicVerificationIds(context, plan, remote, publishing, existingIds);
+      for (const id of verificationIds)
+        if (!remote.has(id) && !missingProof.includes(id)) missingProof.push(id);
+      start += batch.length;
     }
     if (selection.scope === 'changed') {
       const extra = verificationIds.filter(

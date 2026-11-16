@@ -1389,6 +1389,198 @@ describe('scoped publication proof', () => {
     }
   );
 
+  it.each([undefined, null])(
+    'observes previously uncollected tag dependencies (%s) without publishing their baseline',
+    async (unknownTags) => {
+      const f = await prepare((f) => {
+        f.rems.get('subdoc')!.tags = ['basic'];
+        f.rems.get('basic')!.tags = unknownTags;
+      });
+      const path = f.state.entries.subdoc!.path;
+      const before = await loadState(directory);
+      const raw = await readPrivate(directory, before.entries.basic!.rawPath);
+      f.rems.get('subdoc')!.text = ['Incoming child document'];
+      vi.mocked(f.backend.readProbe).mockClear();
+      const result = await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [path],
+      });
+      expect(result).toMatchObject({ status: 'verified', incoming: ['subdoc'], remoteWrites: 0 });
+      expect(result.selection!.reconcileIds).toEqual(['subdoc']);
+      expect(vi.mocked(f.backend.readProbe).mock.calls[0]![0]).toEqual(['subdoc']);
+      const probes = vi.mocked(f.backend.readProbe).mock.calls.map(([ids]) => ids);
+      expect(probes.slice(-2)).toEqual([
+        ['basic', 'daily', 'home', 'subdoc'],
+        ['basic', 'daily', 'home', 'subdoc'],
+      ]);
+      const after = await loadState(directory);
+      for (const id of Object.keys(before.entries).filter((id) => id !== 'subdoc')) {
+        expect(after.entries[id]).toEqual(before.entries[id]);
+        expect(after.localVersions?.[id]).toEqual(before.localVersions?.[id]);
+        expect(after.remoteVersions?.[id]).toEqual(before.remoteVersions?.[id]);
+      }
+      expect(await readPrivate(directory, before.entries.basic!.rawPath)).toEqual(raw);
+      expect((await inspectLocal(directory)).native.get('subdoc')!.text).toEqual([
+        'Incoming child document',
+      ]);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it('closes newly observed dependency tags transitively without expanding S or P', async () => {
+    const f = await prepare((f) => {
+      f.rems.get('subdoc')!.tags = ['basic'];
+      f.rems.get('basic')!.tags = undefined;
+      f.rems.get('opaque')!.tags = undefined;
+    });
+    const path = f.state.entries.subdoc!.path;
+    await edit(f.path, (source) => source.replace('Front', 'Unselected local front'));
+    const untouched = await readPrivate(directory, f.path);
+    f.rems.get('subdoc')!.text = ['Incoming child document'];
+    f.rems.get('basic')!.tags = ['opaque'];
+    f.rems.get('opaque')!.tags = ['chapter'];
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [path],
+    });
+    expect(result).toMatchObject({ status: 'verified', incoming: ['subdoc'], remoteWrites: 0 });
+    expect(result.selection!.reconcileIds).toEqual(['subdoc']);
+    expect(await readPrivate(directory, f.path)).toEqual(untouched);
+    const probes = vi.mocked(f.backend.readProbe).mock.calls.map(([ids]) => ids);
+    const expected = ['basic', 'chapter', 'daily', 'home', 'opaque', 'subdoc'];
+    expect(probes.slice(-2)).toEqual([expected, expected]);
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(['known-tags', 'text', 'children', 'parent', 'type', 'powerup', 'unbound-tag'] as const)(
+    'refuses an unobserved dependency with changed %s before journal or publication',
+    async (change) => {
+      const f = await prepare((f) => {
+        f.rems.get('subdoc')!.tags = ['basic'];
+        if (change !== 'known-tags') f.rems.get('basic')!.tags = undefined;
+        if (change === 'powerup') f.rems.get('basic')!.powerupPresence = { cc: false };
+      });
+      const before = await loadState(directory);
+      const path = before.entries.subdoc!.path;
+      const markdown = await readPrivate(directory, path);
+      f.rems.get('subdoc')!.text = ['Incoming child document'];
+      const dependency = f.rems.get('basic')!;
+      if (change === 'known-tags') dependency.tags = ['chapter'];
+      if (change === 'text') dependency.text = ['Changed dependency'];
+      if (change === 'children') dependency.children = ['opaque'];
+      if (change === 'parent') dependency.parent = 'home';
+      if (change === 'type') dependency.type = 1;
+      if (change === 'powerup') dependency.powerupPresence!.cc = true;
+      if (change === 'unbound-tag') dependency.tags = ['unbound'];
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { apply: true, paths: [path] })
+      ).rejects.toThrow(/verification dependency|Verification dependency/);
+      expect(await loadState(directory)).toEqual(before);
+      expect(await readPrivate(directory, path)).toEqual(markdown);
+      expect(await readPublication(directory)).toBeUndefined();
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it.each(['full-read', 'before', 'after'] as const)(
+    'refuses newly observed dependency membership drift at the %s boundary',
+    async (boundary) => {
+      const f = await prepare((f) => {
+        f.rems.get('subdoc')!.tags = ['basic'];
+        f.rems.get('basic')!.tags = undefined;
+      });
+      const path = f.state.entries.subdoc!.path;
+      const markdown = await readPrivate(directory, path);
+      f.rems.get('subdoc')!.text = ['Incoming child document'];
+      const probe = f.backend.readProbe,
+        read = f.backend.read;
+      if (boundary === 'full-read')
+        f.backend.read = async (ids, options) => {
+          if (ids.includes('basic')) f.rems.get('basic')!.tags = ['chapter'];
+          return read(ids, options);
+        };
+      let publicChecks = 0;
+      f.backend.readProbe = async (ids, options) => {
+        if (ids.includes('basic') && ids.includes('subdoc')) {
+          publicChecks++;
+          if (publicChecks === (boundary === 'before' ? 1 : 2))
+            f.rems.get('basic')!.tags = ['chapter'];
+        }
+        return probe(ids, options);
+      };
+      const result = syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [path],
+      });
+      if (boundary === 'full-read')
+        await expect(result).rejects.toThrow('Verification dependency changed: basic');
+      else
+        expect(await result).toMatchObject({
+          status: 'conflict',
+          complete: false,
+          error: expect.stringMatching(/Concurrent remote change.*basic/),
+        });
+      expect(await readPrivate(directory, path)).toEqual(markdown);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it.each(['unstaged', 'staged'] as const)(
+    'recovers %s publication using frozen newly observed tags, never the unknown baseline',
+    async (point) => {
+      const f = await prepare((f) => {
+        f.rems.get('subdoc')!.tags = ['basic'];
+        f.rems.get('basic')!.tags = undefined;
+      });
+      const path = f.state.entries.subdoc!.path;
+      const before = await loadState(directory);
+      const raw = await readPrivate(directory, before.entries.basic!.rawPath);
+      f.rems.get('subdoc')!.text = ['Incoming child document'];
+      const original = LocalState.prototype.setLocal,
+        link = fileOps.linkPrivate;
+      const storeSpy = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (point === 'unstaged' && key.startsWith('publication:') && value !== null)
+            throw new Error('Before publication');
+          return original.call(this, key, value);
+        });
+      const fileSpy = vi
+        .spyOn(fileOps, 'linkPrivate')
+        .mockImplementation(async (root, from, to) => {
+          if (point === 'staged' && to === before.entries.subdoc!.rawPath)
+            throw new Error('After displacement');
+          return link(root, from, to);
+        });
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [path] })
+      ).toMatchObject({ status: 'publication-incomplete' });
+      storeSpy.mockRestore();
+      fileSpy.mockRestore();
+      const state = await loadState(directory);
+      const journal = (await localStore('kb').getLocal<Journal>(state.pending!.journalKey))!;
+      expect(journal.final!.publicationIds).toEqual(['subdoc']);
+      expect(Object.keys(journal.final!.hashes).sort()).toEqual([
+        'basic',
+        'daily',
+        'home',
+        'subdoc',
+      ]);
+      f.rems.get('basic')!.tags = ['chapter'];
+      await expect(recoverWorkspace(directory, async () => f.backend)).rejects.toThrow(
+        'Remote changed after verified sync'
+      );
+      f.rems.get('basic')!.tags = [];
+      expect(await recoverWorkspace(directory, async () => f.backend)).toMatchObject({
+        status: 'recovered',
+        remoteWrites: 0,
+      });
+      expect(await readPrivate(directory, before.entries.basic!.rawPath)).toEqual(raw);
+      expect((await loadState(directory)).entries.basic).toEqual(before.entries.basic);
+      expect(f.calls).toEqual([]);
+    }
+  );
+
   it.each(['staging', 'installed'] as const)(
     'verifies frozen G while recovering %s publication after pending disappears',
     async (point) => {

@@ -9,6 +9,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Changed sync can freshly observe a verification-only dependency whose direct tags
+  were never collected, without mistaking unknown membership for an empty baseline.
+  Newly observed tag dependencies extend the proof to a fixed point; known tags,
+  content, structure and later verification boundaries remain guarded. Unselected
+  baselines and clocks are not refreshed by those observations.
+
 - Ordinary changed sync retains full selected-ID discovery but bounds later public
   verification to actual publication/mutation dependencies. Unpublished records
   and clocks remain untouched; structural-only parents receive children only.

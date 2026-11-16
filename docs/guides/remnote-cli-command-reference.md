@@ -99,6 +99,13 @@ write dependencies. All scope additionally audits full native snapshots for ever
 selected Rem. A clean changed invocation performs no full card/history reads.
 Neither scope is a remote changes-since API or discovers unbound roots.
 
+Verification-only dependencies may have uncollected direct tags (absent/null),
+which are not an observed empty set. Changed sync freshly reads that membership
+and all newly reached sealed tag dependencies before either later public check.
+Known membership, content and structure still must match; missing dependency
+baselines fail closed. These proof observations do not expand the selected merge
+scope or refresh unpublished records and clocks.
+
 Paths are vault-relative Markdown files or directories, not globs or native IDs.
 Repeated/equivalent paths such as `Folder` and `./Folder` are normalized and
 deduplicated. Missing paths, paths outside the vault, symlinks and non-content
