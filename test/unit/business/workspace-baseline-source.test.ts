@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { alignWorkspaceBaseline } from '../../../src/business/workspace/baseline.js';
 import { readNativeSourceClosure } from '../../../src/business/workspace/baseline-source.js';
+import { planLocal } from '../../../src/business/workspace/workspace.js';
+import { selectPlan } from '../../../src/business/workspace/selection.js';
 import {
   inspectLocal,
   loadState,
@@ -111,6 +113,45 @@ async function fixture(knownObservations = false) {
   };
 }
 describe('explicit selected native source adoption', () => {
+  it('refuses native source adoption while a local deletion is pending, without connecting', async () => {
+    const f = await fixture();
+    const source = await files.readPrivate(directory, f.path);
+    const changed = source.replace(`- old ^${f.state.entries.old!.blockId}\n`, '');
+    expect(changed).not.toBe(source);
+    await files.writePrivate(directory, f.path, changed);
+    await expect(alignWorkspaceBaseline(directory, f.connect, f.options)).rejects.toThrow(
+      'unpublished local source edits'
+    );
+    expect(f.connect).not.toHaveBeenCalled();
+    expect(await files.readPrivate(directory, f.path)).toBe(changed);
+    expect(await loadState(directory)).toEqual(f.state);
+  });
+
+  it('makes a newly adopted subtree eligible for a later local-authoritative deletion', async () => {
+    const f = await fixture();
+    const preview = await alignWorkspaceBaseline(directory, f.connect, f.options);
+    await alignWorkspaceBaseline(directory, f.connect, {
+      ...f.options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    const state = await loadState(directory);
+    const source = await files.readPrivate(directory, f.path);
+    const changed = source.replace(
+      new RegExp(
+        `\\n- new \\^${state.entries.new!.blockId}\\n  - nested new body \\^${state.entries.nested!.blockId}`
+      ),
+      ''
+    );
+    expect(changed).not.toBe(source);
+    await files.writePrivate(directory, f.path, changed);
+    const local = await inspectLocal(directory);
+    const plan = await selectPlan(local, planLocal(local), { paths: [f.path] });
+    expect(plan.deletion?.ids).toEqual(['nested', 'new']);
+    expect(plan.deletion?.roots).toEqual([{ id: 'new', parent: 'doc' }]);
+    expect(f.rems.has('new')).toBe(true);
+    expect(f.rems.has('nested')).toBe(true);
+  });
   it('refuses whole-page adoption if an unrelated source format cannot be preserved', async () => {
     const f = await fixture();
     const source = (await files.readPrivate(directory, f.path)).replace('- old ', '-   old  ');
