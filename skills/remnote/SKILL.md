@@ -314,6 +314,13 @@ Never pretend that a tag named cc is the Powerup. Normal probes verify known cc 
 Guarded journals preserve original nativeBefore and input binding before writes;
 exact-plan resume returns that original proof plus fresh nativeAfter, never
 fabricating a before-history from recovery-time values.
+Default apply checks fresh SDK histories of the actually affected surviving Cards
+before any mutation, including a changed answer's owning question. Unknown
+Card/history blocks; an observed empty history array is valid. Guarded callers
+may repeat `--require-history-rem ID` for other exact existing selected Cards.
+Automated callers pass `--require-sdk-history-guard` to reject older CLIs before
+apply. Verify `historyVerification` before/after over its exact `checkedRemIds`;
+it describes only SDK-returned arrays, not all server history or atomic writes.
 
 Direct tags are local desired memberships, not set-merged feedback. Tag removal keeps native properties
 via `removeTag(id, false)`. Each exact planned removal is narrowly authorized and

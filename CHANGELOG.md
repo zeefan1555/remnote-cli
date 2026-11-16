@@ -42,6 +42,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Guard affected surviving Card IDs and fresh SDK-returned repetition histories
+  before any sync mutation; bind and compare the exact proof through recovery.
 - Disable native-source and exact-child adoption before connecting, because
   unbound content may be feedback even without lifecycle tags. Unclassified
   nonempty native tags require exact role binding before alignment.

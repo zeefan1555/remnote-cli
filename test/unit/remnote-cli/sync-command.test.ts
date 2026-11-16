@@ -295,6 +295,28 @@ describe('sync command interface', () => {
       ['--path', 'Folder', '--path', './Folder'],
       { apply: true, scope: 'changed', paths: ['Folder', './Folder'] },
     ],
+    [
+      'apply',
+      [
+        '--path',
+        'Note.md',
+        '--expected-file-hash',
+        'a'.repeat(64),
+        '--require-sdk-history-guard',
+        '--require-history-rem',
+        'one',
+        '--require-history-rem',
+        'two',
+      ],
+      {
+        apply: true,
+        scope: 'changed',
+        paths: ['Note.md'],
+        expectedFileHash: 'a'.repeat(64),
+        requireSdkHistoryGuard: true,
+        requireHistoryRem: ['one', 'two'],
+      },
+    ],
   ] as const)('routes %s with selectors %j exactly once', async (name, options, expected) => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');

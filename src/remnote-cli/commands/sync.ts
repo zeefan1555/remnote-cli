@@ -34,6 +34,8 @@ interface SyncOptions {
   editableRootId?: string;
   contentFile?: string;
   expectedFileHash?: string;
+  requireHistoryRem?: string[];
+  requireSdkHistoryGuard?: boolean;
   acceptNewParent?: string[];
   acceptNewChild?: string[];
   acceptNativeSource?: boolean;
@@ -44,6 +46,8 @@ interface SelectionOptions {
   path: string[];
   planHash?: string;
   expectedFileHash?: string;
+  requireHistoryRem?: string[];
+  requireSdkHistoryGuard?: boolean;
 }
 
 function pathOptions(command: Command): Command {
@@ -212,6 +216,15 @@ export function registerSyncCommands(program: Command): void {
         .option(
           '--expected-file-hash <sha256>',
           'Guard one exact --path from sync read and return full native file verification (includes cards/history and known Powerup codes; slower than the default probe)'
+        )
+        .option(
+          '--require-history-rem <id>',
+          'Additionally guard this exact existing selected Card Rem; repeatable',
+          (value: string, ids: string[] = []) => ids.concat(value)
+        )
+        .option(
+          '--require-sdk-history-guard',
+          'Require this CLI to support mandatory affected-card SDK history guards'
         );
     command.action(async (directory: string, { path, ...options }: SelectionOptions) =>
       execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })

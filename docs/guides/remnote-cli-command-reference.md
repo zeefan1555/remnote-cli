@@ -659,6 +659,26 @@ A mutation-stage failure may also use status
 `conflict`, but carries `journalKey`, known `ids` and `steps` instead of the
 planning `remoteWrites: 0` guarantee: inspect that evidence before any next action.
 
+Before any mutation, normal apply checks the fresh SDK Card snapshots of every
+actually affected surviving Rem and, for an answer, its owning question. Missing
+Card arrays or repetition histories stop the batch before native writes; an
+observed empty repetition-history array is valid. Existing Card IDs must match
+known sealed identities. Entirely deleted Cards and new Cards have no surviving
+old history claim; unrelated Cards are outside this check. Successful receipts
+include `historyVerification` with `source: sdk-returned-history`, exact
+`checkedRemIds`, and matching `before`/`after` maps of Card IDs and review hashes.
+These compare only SDK-returned arrays; they do not certify complete server-side
+history or atomicity. If a history changes after a native write, preserve the
+unknown journal and reconcile exact IDs without automatic replay.
+
+Guarded one-file callers may repeat `--require-history-rem ID` to include exact
+existing selected Cards even when the plan does not modify them. Automated
+callers can pass `--require-sdk-history-guard` on every apply: older CLI builds
+reject the unknown option before applying; the current guard is mandatory whether
+or not this marker is present. An unchanged offline result has no native history
+proof. Resume preserves the original history guard; a pending legacy journal
+without one cannot resume native writes automatically.
+
 Deleting a bound outline node or tracked document locally expresses deletion intent.
 `sync plan DIR` previews exact `deletion.roots` and descendant `deletion.ids`;
 `sync apply DIR` performs the selected deletion with fresh conflict checks and

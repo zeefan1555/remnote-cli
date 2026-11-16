@@ -79,6 +79,7 @@ import { formatWorkspace } from '../../../src/business/workspace/format.js';
 import { alignWorkspaceBaseline } from '../../../src/business/workspace/baseline.js';
 import { requireEmptyDeletionFeedback } from '../../../src/business/workspace/deletion.js';
 import { partitionRemote } from '../../../src/business/workspace/feedback-partition.js';
+import { historyCandidates } from '../../../src/business/workspace/history.js';
 import {
   bindFeedbackRoles,
   captureFeedback,
@@ -359,6 +360,423 @@ async function prepareDeletion(setup?: (f: ReturnType<typeof fixture>) => void) 
 async function edit(path: string, replace: (source: string) => string) {
   await writePrivate(directory, path, replace(await readPrivate(directory, path)));
 }
+
+describe('synthetic history write-first characterization', () => {
+  it('guards the whole nested card-item owner chain and rejects cycles', () => {
+    const rems = new Map([
+      ['item', native('item', ['item'], { cardItem: true, parent: 'nested' })],
+      ['nested', native('nested', ['nested'], { cardItem: true, parent: 'question' })],
+      ['question', native('question')],
+    ]);
+    const plan = { changes: [{ key: 'item' }] } as Parameters<typeof historyCandidates>[0];
+    expect(historyCandidates(plan, rems, [])).toEqual(['item', 'nested', 'question']);
+    rems.get('nested')!.parent = 'item';
+    expect(() => historyCandidates(plan, rems, [])).toThrow(
+      'Native card owner cannot be determined'
+    );
+  });
+  const unknown = (id: string, cardId = `card_${id}`) => [
+    {
+      id: cardId,
+      remId: id,
+      type: 'forward' as const,
+      createdAt: 1,
+      repetitionHistory: null,
+      nextRepetitionTime: null,
+      lastRepetitionTime: null,
+      timesWrongInRow: null,
+    },
+  ];
+  async function twoCards() {
+    const f = await prepare(({ rems }) => {
+      rems.get('chapter')!.children.push('question2');
+      rems.set(
+        'question2',
+        native('question2', ['Why two?'], {
+          parent: 'chapter',
+          children: ['answer2'],
+          backText: [],
+        })
+      );
+      rems.set(
+        'answer2',
+        native('answer2', ['Because two'], { parent: 'question2', cardItem: true })
+      );
+    });
+    f.rems.get('question2')!.cards = unknown('question2');
+    return f;
+  }
+  it.each(['changed', 'guarded'] as const)(
+    'blocks an answer edit with unknown owner-card history before any %s write',
+    async (mode) => {
+      const f = await prepare();
+      f.rems.get('question')!.cards = [
+        {
+          id: 'card_question',
+          remId: 'question',
+          type: 'forward',
+          createdAt: 1,
+          repetitionHistory: null,
+          nextRepetitionTime: null,
+          lastRepetitionTime: null,
+          timesWrongInRow: null,
+        },
+      ];
+      await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+      const before = await workspace.readWorkspace(directory, f.path);
+      await expect(
+        syncWorkspace(directory, async () => f.backend, {
+          apply: true,
+          paths: [f.path],
+          ...(mode === 'guarded' ? { expectedFileHash: before.fileHash } : {}),
+        })
+      ).rejects.toThrow('Native card history unavailable');
+      expect(f.calls).toEqual([]);
+      expect(f.rems.get('answer')!.text).toEqual(['Because']);
+    }
+  );
+  it('allows a known empty repetition history and reports exact checked scope', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      remoteWrites: 1,
+      historyVerification: {
+        source: 'sdk-returned-history',
+        checkedRemIds: ['answer', 'question'],
+        before: { question: { cardIds: ['card_question'], reviewHash: expect.any(String) } },
+      },
+    });
+    expect(f.calls).toEqual(['answer:text']);
+  });
+  it('creates a new note without inventing an old Card history', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source + '\n- A plain new note\n');
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      historyVerification: { checkedRemIds: ['daily'] },
+    });
+    expect(f.rems.get('created_1')!.text).toEqual(['A plain new note']);
+  });
+  it('refuses a changed SDK history between preview and apply', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const preview = (await syncWorkspace(directory, async () => f.backend, {
+      paths: [f.path],
+    })) as { planHash: string };
+    f.rems.get('question')!.cards = [
+      { ...unknown('question')[0]!, repetitionHistory: [{ score: 1 }] },
+    ];
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        planHash: preview.planHash,
+      })
+    ).rejects.toThrow('Native card history changed since the frozen preview');
+    expect(f.calls).toEqual([]);
+  });
+  it('does not claim a history check for unchanged offline apply', async () => {
+    const f = await prepare();
+    const factory = vi.fn(async () => f.backend);
+    const result = await syncWorkspace(directory, factory, { apply: true });
+    expect(result).toMatchObject({ status: 'unchanged', remoteChecked: false, remoteWrites: 0 });
+    expect(result).not.toHaveProperty('historyVerification');
+    expect(factory).not.toHaveBeenCalled();
+  });
+  it('ignores an unrelated same-file card with unknown history', async () => {
+    const f = await twoCards();
+    await edit(f.path, (source) =>
+      source.replace(
+        `Because ^${f.state.entries.answer!.blockId}`,
+        `Edited ^${f.state.entries.answer!.blockId}`
+      )
+    );
+    const read = await workspace.readWorkspace(directory, f.path);
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      remoteWrites: 1,
+      historyVerification: { checkedRemIds: ['answer', 'question'] },
+    });
+    expect(f.calls).toEqual(['answer:text']);
+  });
+  it('blocks every write when a second changed same-file answer has unknown owner history', async () => {
+    const f = await twoCards();
+    await edit(f.path, (source) =>
+      source
+        .replace(
+          `Because ^${f.state.entries.answer!.blockId}`,
+          `Edited ^${f.state.entries.answer!.blockId}`
+        )
+        .replace(
+          `Because two ^${f.state.entries.answer2!.blockId}`,
+          `Edited two ^${f.state.entries.answer2!.blockId}`
+        )
+    );
+    const read = await workspace.readWorkspace(directory, f.path);
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: read.fileHash,
+      })
+    ).rejects.toThrow('Native card history unavailable: question2');
+    expect(f.calls).toEqual([]);
+  });
+  it('allows the guarded caller to require an additional exact existing card', async () => {
+    const f = await twoCards();
+    await edit(f.path, (source) =>
+      source.replace(
+        `Because ^${f.state.entries.answer!.blockId}`,
+        `Edited ^${f.state.entries.answer!.blockId}`
+      )
+    );
+    const read = await workspace.readWorkspace(directory, f.path);
+    await expect(
+      syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: read.fileHash,
+        requireHistoryRem: ['question2'],
+      })
+    ).rejects.toThrow('Native card history unavailable: question2');
+    expect(f.calls).toEqual([]);
+  });
+  it('binds an additional existing card into matching same-run proofs', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+      requireHistoryRem: ['basic'],
+    })) as {
+      historyVerification: {
+        checkedRemIds: string[];
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+      };
+      verification: { nativeBefore: Record<string, unknown>; nativeAfter: Record<string, unknown> };
+    };
+    expect(result.historyVerification.checkedRemIds).toEqual(['answer', 'basic', 'question']);
+    expect(result.historyVerification.before.basic).toEqual(result.verification.nativeBefore.basic);
+    expect(result.historyVerification.after.basic).toEqual(result.verification.nativeAfter.basic);
+    expect(result.historyVerification.before).toEqual(result.historyVerification.after);
+  });
+  it.each(['unguarded', 'unknown', 'duplicate', 'other-file'] as const)(
+    'rejects %s additional history ID before connecting',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+      const read = await workspace.readWorkspace(directory, f.path);
+      const factory = vi.fn(async () => f.backend);
+      const ids =
+        kind === 'unknown'
+          ? ['does-not-exist']
+          : kind === 'duplicate'
+            ? ['question', 'question']
+            : kind === 'other-file'
+              ? ['subdoc']
+              : ['question'];
+      await expect(
+        syncWorkspace(directory, factory, {
+          apply: true,
+          paths: [f.path],
+          ...(kind === 'unguarded' ? {} : { expectedFileHash: read.fileHash }),
+          requireHistoryRem: ids,
+        })
+      ).rejects.toThrow('History guard requires exact existing Rem IDs');
+      expect(factory).not.toHaveBeenCalled();
+    }
+  );
+  it('rejects an absent fresh cards field instead of inheriting sealed cards', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = f.backend.read;
+    f.backend.read = vi.fn(async (ids, options) =>
+      (await read(ids, options)).map((rem) =>
+        rem.id === 'question' ? { ...rem, cards: undefined } : rem
+      )
+    );
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Native card history unavailable: question');
+    expect(f.calls).toEqual([]);
+  });
+  it.each(['missing-history', 'missing-createdAt', 'wrong-owner', 'duplicate-card'] as const)(
+    'rejects malformed fresh %s before writing',
+    async (kind) => {
+      const f = await prepare();
+      await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+      const read = f.backend.read;
+      f.backend.read = vi.fn(async (ids, options) =>
+        (await read(ids, options)).map((rem) => {
+          if (rem.id !== 'question') return rem;
+          const card = { ...rem.cards![0]! };
+          if (kind === 'missing-history') card.repetitionHistory = undefined as never;
+          if (kind === 'missing-createdAt') card.createdAt = null;
+          if (kind === 'wrong-owner') card.remId = 'elsewhere';
+          return { ...rem, cards: kind === 'duplicate-card' ? [card, card] : [card] };
+        })
+      );
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).rejects.toThrow('Native card history unavailable: question');
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('blocks a history change after the initial snapshot but before the first write', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const guard = f.backend.guard;
+    let calls = 0;
+    f.backend.guard = vi.fn(async (ids) => {
+      const result = await guard(ids);
+      if (++calls === 1)
+        f.rems.get('question')!.cards = [
+          { ...unknown('question')[0]!, repetitionHistory: [{ score: 1 }] },
+        ];
+      return result;
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({
+      status: 'conflict',
+      complete: false,
+      remoteWrites: 0,
+      error: expect.stringContaining('Native card history changed'),
+    });
+    expect(f.calls).toEqual([]);
+  });
+  it('blocks a tag change on a Card with unknown history', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.get('home')!.children.push('unused');
+      rems.set('unused', native('unused', ['Unused'], { parent: 'home' }));
+    });
+    f.rems.get('basic')!.cards = unknown('basic');
+    await edit(f.path, (source) => source.replace('Front', 'Front #HOME/Unused'));
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Native card history unavailable: basic');
+    expect(f.calls).toEqual([]);
+  });
+  it('rejects a history change detected after the first write without replaying it', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      f.rems.get('question')!.cards = [
+        {
+          ...unknown('question')[0]!,
+          repetitionHistory: [{ score: 1 }],
+        },
+      ];
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({
+      status: 'unknown',
+      complete: false,
+      remoteWrites: 1,
+      error: expect.stringContaining('Native card history changed'),
+    });
+    expect(f.calls).toEqual(['answer:text']);
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow();
+    expect(f.calls).toEqual(['answer:text']);
+  });
+  it('preserves the original history guard and refuses replay after an unknown write', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) =>
+      source.replace('Because', 'Because edited').replace('Front', 'Front edited')
+    );
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      f.rems.get('question')!.cards = [
+        { ...unknown('question')[0]!, repetitionHistory: [{ score: 1 }] },
+      ];
+      throw new Error('lost acknowledgement');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    })) as { status: string; planHash: string; remoteWrites: number };
+    expect(result).toMatchObject({ status: 'unknown', remoteWrites: 1 });
+    const calls = [...f.calls];
+    await expect(
+      resumeWorkspace(directory, async () => f.backend, result.planHash)
+    ).rejects.toThrow('Native card history changed');
+    expect(f.calls).toEqual(calls);
+  });
+  it('returns the original before and fresh after proofs for a verified guarded resume', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+      requireHistoryRem: ['basic'],
+    })) as { planHash: string; historyVerification: { before: unknown; after: unknown } };
+    const calls = [...f.calls];
+    const resumed = await resumeWorkspace(directory, async () => f.backend, result.planHash);
+    expect(resumed).toMatchObject({
+      status: 'verified',
+      resumed: true,
+      remoteWrites: 0,
+      historyVerification: {
+        before: result.historyVerification.before,
+        after: result.historyVerification.after,
+      },
+    });
+    expect(f.calls).toEqual(calls);
+    f.rems.get('question')!.cards = unknown('question');
+    await expect(
+      resumeWorkspace(directory, async () => f.backend, result.planHash)
+    ).rejects.toThrow('Native card history changed');
+    expect(f.calls).toEqual(calls);
+  });
+  it('does not require history of a whole Card explicitly deleted', async () => {
+    const f = await prepareDeletion();
+    f.rems.get('question')!.cards = unknown('question');
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      deleted: ['answer', 'question'],
+      historyVerification: { checkedRemIds: ['chapter'] },
+    });
+    expect(f.rems.has('question')).toBe(false);
+  });
+});
 
 describe('exact feedback partition regression', () => {
   it.each(['todo', 'done'] as const)(
@@ -6994,7 +7412,7 @@ describe('controlled RemNote workspace', () => {
     await edit(f.path, (s) => s.replace('Because', 'Local answer'));
     f.rems.get('question')!.cards = [
       {
-        id: 'card-question',
+        id: 'card_question',
         remId: 'question',
         type: 'forward',
         createdAt: 1,
@@ -7043,7 +7461,7 @@ describe('controlled RemNote workspace', () => {
     expect(meta.native.isTodo).toBeNull();
     expect(meta.native.isQuote).toBeNull();
   });
-  it('accepts review-only changes between preview and apply without overwriting history or scheduling', async () => {
+  it('refuses changed review history between preview and apply without overwriting it', async () => {
     const f = await prepare();
     await edit(f.path, (source) => source.replace('Because', 'Local answer'));
     const preview = (await pushWorkspace(directory, async () => f.backend)) as { planHash: string };
@@ -7057,20 +7475,18 @@ describe('controlled RemNote workspace', () => {
       },
     ];
     f.rems.get('question')!.public = { updatedAt: 25, localUpdatedAt: 50 };
-    expect(
-      await pushWorkspace(directory, async () => f.backend, {
+    await expect(
+      pushWorkspace(directory, async () => f.backend, {
         apply: true,
         planHash: preview.planHash,
       })
-    ).toMatchObject({ status: 'verified', updated: ['answer'] });
-    const state = await loadState(directory),
-      raw = JSON.parse(await readPrivate(directory, state.entries.question!.rawPath));
-    expect(raw.cards[0]).toMatchObject({
+    ).rejects.toThrow('Native card history changed since the frozen preview');
+    expect(f.rems.get('question')!.cards![0]).toMatchObject({
       id: card.id,
       repetitionHistory: [{ time: 25 }],
       nextRepetitionTime: 40,
     });
-    expect(f.calls).toEqual(['answer:text']);
+    expect(f.calls).toEqual([]);
   });
 
   it('keeps an entire mixed batch write-free when one Rem has an unordered content conflict', async () => {

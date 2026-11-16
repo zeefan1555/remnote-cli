@@ -34,7 +34,8 @@ export async function readRemote(
   local: WorkspacePlan,
   backend: WorkspaceBackend,
   powerupCodes?: Record<string, string[]>,
-  created: Map<string, WorkspaceRem> = new Map()
+  created: Map<string, WorkspaceRem> = new Map(),
+  freshNative: Map<string, WorkspaceRem> = new Map()
 ): Promise<Map<string, WorkspaceRem>> {
   const result = new Map(created),
     ids = local.selection
@@ -132,6 +133,7 @@ export async function readRemote(
     )
       throw new Error('Incomplete exact native reconciliation read');
     for (const rem of rems) {
+      freshNative.set(rem.id, rem);
       if (powerupCodes?.[rem.id]?.length) {
         const baseline = context.native.get(rem.id)!;
         for (const code of powerupCodes[rem.id]) {

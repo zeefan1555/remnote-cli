@@ -179,12 +179,10 @@ format and write boundaries.
 Keep the vault root 0700; Obsidian-saved Markdown may be 0644, CLI-created Markdown
 is 0600, and private sidecars/state remain 0600. Exclude `.obsidian/`, `.trash/`
 and `.DS_Store` from content scans, frozen plans and Git; also ignore `.sync/`,
-locks and credentials in Git. Existing Rem/card IDs, parent/order and review
-history are protected; file removal is not a delete or move instruction. Preview
-deletion separately with `sync delete DIR --id ID --scope-root ID`; execution
-also requires `--apply --plan-hash HASH`, destructive authorization and live write
-gates. Delete accepts no scope/path filters. For
-native syntax, explicit deletion and recovery, see the
+locks and credentials in Git. Local removal of a bound note expresses deletion
+intent for the selected mirror; the normal sync applies it only after safety
+checks. Unknown SDK history of an affected surviving Card blocks before native
+writes. For native syntax, deletion and recovery, see the
 [sync reference](docs/guides/remnote-cli-command-reference.md#sync).
 Writes are sequential, not atomic. Pre/post revision hashes are client optimistic
 checks, not native conditional setters; the check-write window remains. Native

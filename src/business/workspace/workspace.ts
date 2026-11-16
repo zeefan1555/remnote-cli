@@ -38,7 +38,17 @@ import {
   withNativeSnapshot,
   withPublicSnapshot,
 } from './snapshots.js';
-import { recordPath } from './identity.js';
+import { idSchema, recordPath } from './identity.js';
+import {
+  assertKnownCardIdentities,
+  historyBinding,
+  historyCandidates,
+  HistoryChangedError,
+  observedHistory,
+  requireUnchangedHistory,
+  type HistoryGuard,
+  type HistoryProof,
+} from './history.js';
 import { nodeKind } from './markdown.js';
 import { partitionRemote } from './feedback-partition.js';
 import { nodeContent } from './versions.js';
@@ -589,7 +599,12 @@ async function checkFiles(root: string, plan: WorkspacePlan): Promise<void> {
 export async function pushWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string } = {}
+  options: SelectionOptions & {
+    apply?: boolean;
+    planHash?: string;
+    expectedFileHash?: string;
+    requireHistoryRem?: string[];
+  } = {}
 ): Promise<unknown> {
   return synchronizeWorkspace(directory, backendFactory, options);
 }
@@ -609,6 +624,13 @@ export async function resumeWorkspace(
   if (journal) requireLocalAuthority(journal, key);
   if (journal?.state === 'verified' && journal.final) {
     requireFinalProof(journal);
+    if (
+      journal.historyGuard &&
+      (journal.historyGuard.version !== 1 ||
+        journal.historyGuard.binding !==
+          historyBinding(planHash, journal.historyGuard.requested, journal.historyGuard.proofs))
+    )
+      throw new Error('Original native card history guard is invalid; preserve the journal');
     const binding = guardedBinding(journal);
     if (state.pending?.planHash === planHash || (await readPublication(root))) {
       const result = await recoverWorkspace(root, backendFactory);
@@ -635,6 +657,7 @@ export async function resumeWorkspace(
           powerupCodes: knownPowerupCodes(context.native),
         });
         for (const [id, rem] of remote) {
+          if (journal.historyGuard) requireUnchangedHistory(journal.historyGuard, id, rem);
           const baseline = context.native.get(id);
           const current = baseline ? withNativeSnapshot(baseline, rem) : rem;
           if (
@@ -672,6 +695,27 @@ export async function resumeWorkspace(
           ids: journal.ids,
           deleted: journal.final!.deleted,
           remoteWrites: 0,
+          ...(journal.historyGuard
+            ? {
+                historyVerification: {
+                  source: 'sdk-returned-history',
+                  checkedRemIds: Object.keys(journal.historyGuard.proofs).sort(),
+                  before: journal.historyGuard.proofs,
+                  after: Object.fromEntries(
+                    Object.keys(journal.historyGuard.proofs)
+                      .sort()
+                      .map((id) => [
+                        id,
+                        observedHistory(
+                          remote.get(id),
+                          id,
+                          journal.historyGuard!.requested.includes(id)
+                        ),
+                      ])
+                  ),
+                },
+              }
+            : {}),
           verification: {
             fileHash: binding.fileHash,
             planHash,
@@ -700,7 +744,12 @@ export async function resumeWorkspace(
 async function synchronizeWorkspace(
   directory: string,
   backendFactory: () => Promise<WorkspaceBackend>,
-  options: SelectionOptions & { apply?: boolean; planHash?: string; expectedFileHash?: string },
+  options: SelectionOptions & {
+    apply?: boolean;
+    planHash?: string;
+    expectedFileHash?: string;
+    requireHistoryRem?: string[];
+  },
   resumeHash?: string
 ): Promise<unknown> {
   const root = await workspaceDirectory(directory);
@@ -715,6 +764,15 @@ async function synchronizeWorkspace(
       if (!resuming || resuming.version !== 2 || resuming.planHash !== resumeHash)
         throw new Error('Resume cannot find the exact original journal for this vault and KB');
       requireLocalAuthority(resuming, key);
+      if (
+        !resuming.historyGuard ||
+        resuming.historyGuard.version !== 1 ||
+        resuming.historyGuard.binding !==
+          historyBinding(resumeHash, resuming.historyGuard.requested, resuming.historyGuard.proofs)
+      )
+        throw new Error(
+          'Original native card history guard is missing or invalid; preserve the journal'
+        );
       if (
         !state.pending &&
         !context.diagnostics.length &&
@@ -747,12 +805,32 @@ async function synchronizeWorkspace(
         planHash: resumeHash,
         scope: resuming.selection.scope,
         paths: resuming.selection.paths,
+        ...(resuming.historyGuard?.requested.length
+          ? { requireHistoryRem: resuming.historyGuard.requested }
+          : {}),
         ...(guardedBinding(resuming)
           ? { expectedFileHash: guardedBinding(resuming)!.fileHash }
           : {}),
       };
     }
     const proofPath = options.expectedFileHash === undefined ? undefined : options.paths?.[0];
+    const requestedHistory = options.requireHistoryRem ?? [];
+    if (
+      requestedHistory.length &&
+      (!proofPath ||
+        !options.apply ||
+        new Set(requestedHistory).size !== requestedHistory.length ||
+        requestedHistory.some(
+          (id) =>
+            !idSchema.safeParse(id).success ||
+            !state.entries[id] ||
+            !context.parsed
+              .get(proofPath)
+              ?.nodes.some((node) => node.key === id && node.kind !== 'mount')
+        ))
+    )
+      throw new Error('History guard requires exact existing Rem IDs within the one guarded file');
+    requestedHistory.sort();
     if (options.expectedFileHash !== undefined) {
       if (
         !options.apply ||
@@ -769,6 +847,8 @@ async function synchronizeWorkspace(
       options = { ...options, scope: 'all' };
     }
     const localPlan = await selectPlan(context, planLocal(context), options);
+    if (requestedHistory.some((id) => localPlan.deletion?.ids.includes(id)))
+      throw new Error('History guard cannot require a deleted Rem');
     if (resuming?.proof) localPlan.guarded = guardedBinding(resuming);
     if (proofPath)
       localPlan.selection.verificationIds = [
@@ -902,9 +982,17 @@ async function synchronizeWorkspace(
       identity = await backend.identity();
     if (identity.kbId !== state.kbId)
       throw new Error('Connected KB does not match workspace binding');
+    const freshNative = new Map<string, WorkspaceRem>();
     const remote =
       rebuiltRemote ??
-      (await readRemote(context, localPlan, backend, knownPowerupCodes(context.native)));
+      (await readRemote(
+        context,
+        localPlan,
+        backend,
+        knownPowerupCodes(context.native),
+        new Map(),
+        freshNative
+      ));
     if (localPlan.deletion && state.feedbackRoles)
       for (const role of [state.feedbackRoles.todoTagId, state.feedbackRoles.doneTagId])
         for (let id: string | null = role; id; id = context.native.get(id)?.parent ?? null) {
@@ -1014,6 +1102,40 @@ async function synchronizeWorkspace(
       !context.dirty.some((path) => selection.files.includes(path))
     )
       return { status: 'unchanged', complete: true, changes: 0, remoteWrites: 0, ...coverage };
+    const historyIds = historyCandidates(plan, remote, requestedHistory);
+    let historyGuard: HistoryGuard;
+    if (resuming) {
+      historyGuard = resuming.historyGuard!;
+      if (
+        hash(Object.keys(historyGuard.proofs).sort()) !== hash(historyIds) ||
+        hash(historyGuard.requested) !== hash(requestedHistory)
+      )
+        throw new Error('Original native card history guard does not match the resumed plan');
+      const fresh = await readExact(backend, historyIds, {
+        tags: true,
+        powerupCodes: knownPowerupCodes(context.native),
+      });
+      for (const id of historyIds) requireUnchangedHistory(historyGuard, id, fresh.get(id));
+    } else {
+      const proofs: Record<string, HistoryProof> = {};
+      const seenCards = new Set<string>();
+      for (const id of historyIds) {
+        const fresh = freshNative.get(id);
+        const proof = observedHistory(fresh, id, requestedHistory.includes(id));
+        assertKnownCardIdentities(context.native.get(id)!, fresh!);
+        for (const card of proof.cardIds) {
+          if (seenCards.has(card)) throw new Error(`Duplicate native Card ID: ${card}`);
+          seenCards.add(card);
+        }
+        proofs[id] = proof;
+      }
+      historyGuard = {
+        version: 1,
+        requested: requestedHistory,
+        proofs,
+        binding: historyBinding(planHash, requestedHistory, proofs),
+      };
+    }
     const key = `workspace-v2:${state.kbId}:${hash(root)}:${planHash}`;
     let journal = resuming ?? (await store.getLocal<Journal>(key));
     if (
@@ -1028,6 +1150,8 @@ async function synchronizeWorkspace(
       throw new Error(
         'Prior write outcome requires exact-ID reconciliation; automatic replay is forbidden'
       );
+    if (journal && (!journal.historyGuard || hash(journal.historyGuard) !== hash(historyGuard)))
+      throw new Error('Native card history changed since the frozen preview');
     let existingIds = affectedIds(plan, remote, metadataChanged);
     const publishing = publicationIds(plan, metadataChanged);
     let verificationIds = publicVerificationIds(context, plan, remote, publishing, existingIds);
@@ -1107,6 +1231,9 @@ async function synchronizeWorkspace(
     let expected = folded?.expected ?? new Map(existingIds.map((id) => [id, remote.get(id)!]));
     if (folded)
       for (const id of existingIds) if (!expected.has(id)) expected.set(id, remote.get(id)!);
+    for (const id of historyIds)
+      if (!expected.has(id))
+        throw new Error(`Native card history guard is outside apply scope: ${id}`);
     for (const root of plan.deletion?.roots ?? [])
       if (!expected.has(root.id) || (root.parent && !expected.has(root.parent)))
         throw new Error(
@@ -1150,6 +1277,7 @@ async function synchronizeWorkspace(
       steps: {},
       ids: {},
       selection,
+      historyGuard,
       ...(plan.physicalBaseline
         ? { physicalBaseline: structuredClone(plan.physicalBaseline) }
         : {}),
@@ -1254,6 +1382,7 @@ async function synchronizeWorkspace(
         }
       for (const id of scopedIds) {
         const rem = expected.get(id)!;
+        requireUnchangedHistory(historyGuard, id, fresh.get(id));
         const current = withNativeSnapshot(rem, fresh.get(id)!);
         if (revisionHash(current) !== revisionHash(rem))
           throw new Error(`Concurrent remote change on ${id}`);
@@ -1560,6 +1689,19 @@ async function synchronizeWorkspace(
         planHash,
         ids: journal.ids,
         ...(verification ? { verification, outline, deletionParents } : {}),
+        historyVerification: {
+          source: 'sdk-returned-history',
+          checkedRemIds: Object.keys(historyGuard.proofs).sort(),
+          before: historyGuard.proofs,
+          after: Object.fromEntries(
+            Object.keys(historyGuard.proofs)
+              .sort()
+              .map((id) => [
+                id,
+                observedHistory(expected.get(id), id, historyGuard.requested.includes(id)),
+              ])
+          ),
+        },
         updated: plan.changes
           .filter((change) => !change.key.startsWith('new:'))
           .map((change) => change.key),
@@ -1586,7 +1728,11 @@ async function synchronizeWorkspace(
       };
     } catch (error) {
       if (active) journal.steps[active] = 'unknown';
-      if (journal.state !== 'verified') journal.state = active ? 'unknown' : 'conflict';
+      if (journal.state !== 'verified')
+        journal.state =
+          active || (remoteWrites > 0 && error instanceof HistoryChangedError)
+            ? 'unknown'
+            : 'conflict';
       await store.setLocal(key, journal);
       return {
         status: journal.state === 'verified' ? 'publication-incomplete' : journal.state,

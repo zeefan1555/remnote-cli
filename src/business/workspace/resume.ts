@@ -13,6 +13,7 @@ import {
 } from './types.js';
 import { nativeProof } from './outline.js';
 import type { ContentVersion } from './types.js';
+import type { HistoryGuard } from './history.js';
 import type { LocalState } from '../../remnote-cli/client/local-state.js';
 
 /** Workspace locking serializes captures and executions; gaps after interruption are safe. */
@@ -40,6 +41,8 @@ export interface Journal {
   ids: Record<string, string>;
   selection: SyncSelection;
   physicalBaseline?: SyncPlan['physicalBaseline'];
+  /** Same-plan fresh SDK card-history observations, never inferred from sealed records. */
+  historyGuard?: HistoryGuard;
   /** Monotonic actual-apply ordering, allocated durably before any native setter. */
   executionSequence?: number;
   /** Exact-ID resume collected tags on created Rems; recovery must use the same projection. */
@@ -68,6 +71,7 @@ export function finalProofHash(journal: Journal): string {
       ? {}
       : { executionSequence: journal.executionSequence }),
     selection: journal.selection,
+    ...(journal.historyGuard ? { historyGuard: journal.historyGuard } : {}),
     ids: journal.ids,
     final,
   });
