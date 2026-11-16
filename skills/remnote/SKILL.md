@@ -262,7 +262,9 @@ their native targets/ancestors are checked before any write and the registry is
 updated only on successful publication. Unknown or colliding tokens fail before connection.
 New multiline questions need `rems.<short-key>.content: multiline`
 and a matching question anchor with direct leaf answer bullets. Existing types
-come from identity-bound native records. A direct text answer leaf may be empty
+come from identity-bound native records. Edit an existing answer's text in place;
+adding or deleting individual answers of an existing multiline card is unsupported.
+A new multiline card can include answers when created. A direct text answer leaf may be empty
 with a stable anchor; it is a cardItem, never an empty topic/question or standalone card.
 Ordinary new bullets need no manual YAML
 or anchors. Tracked `.remnote/identity.json` holds KB/document/block and tag-token identity;

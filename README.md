@@ -150,7 +150,9 @@ can be selected by its complete unique sealed ancestor path; new bindings are
 verified remotely and published only after success. Missing or ambiguous tokens fail.
 A new multiline question needs an explicit
 `rems.<short-key>.content: multiline` attribute. Existing card types are recovered
-through identity-bound native records. New ordinary bullets need no hand-written
+through identity-bound native records. An existing multiline card's answer text
+can be edited, but individual answers cannot be added or deleted; a new card can
+include its answers when created. New ordinary bullets need no hand-written
 YAML or anchor; verified publication assigns identity.
 
 For a new ordinary topic only, `rems.<short-key>.cardCluster: true` requests native

@@ -365,7 +365,10 @@ New ordinary bullets need neither YAML nor an anchor; successful apply assigns
 their native identity and publishes short anchors. A valid unique manual short
 key is also accepted. New multiline questions require a short question anchor
 and matching `rems` attribute; direct leaf answer bullets may omit anchors.
-Creating those answers sets native `isCardItem: true`. New basic cards remain
+Creating those answers sets native `isCardItem: true`. Existing multiline answer
+text can be edited in place, but adding or deleting an individual answer of an
+existing card is unsupported. A new card can include its answers when created.
+New basic cards remain
 unsupported. Engine-generated `new:key` values in receipts are temporary keys,
 not frontmatter users must type. References to unpublished targets are rejected
 until native identity exists.
