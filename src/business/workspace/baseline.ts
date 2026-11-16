@@ -1,6 +1,14 @@
 import { insertBaselineTags } from './baseline-tags.js';
+import { insertBaselineChildren, verifyNewChildren } from './baseline-children.js';
 import { readPrivate, withWorkspaceLock, workspaceDirectory } from './files.js';
-import { IDENTITY, workspaceIdentity } from './identity.js';
+import {
+  IDENTITY,
+  idSchema,
+  originalPath,
+  recordPath,
+  shortBlockId,
+  workspaceIdentity,
+} from './identity.js';
 import { inspectLocal, loadState, type LocalContext } from './local.js';
 import { WorkspaceLinks } from './links.js';
 import {
@@ -8,6 +16,8 @@ import {
   documentMetadata,
   parsePreparedDocument,
   prepareDocument,
+  nodeKind,
+  renderDocument,
   titleOf,
 } from './markdown.js';
 import { knownPowerupCodes, nativeProof } from './outline.js';
@@ -89,10 +99,28 @@ function authored(node: OutlineNode) {
 export async function alignWorkspaceBaseline(
   directory: string,
   connect: () => Promise<WorkspaceBackend>,
-  options: { paths?: string[]; apply?: boolean; planHash?: string } = {}
+  options: {
+    paths?: string[];
+    apply?: boolean;
+    planHash?: string;
+    acceptNewParent?: string;
+    acceptNewChild?: string[];
+  } = {}
 ) {
   if (options.apply && !/^[a-f0-9]{64}$/.test(options.planHash ?? ''))
     throw new Error('baseline-align --apply requires an exact --plan-hash');
+  const addedIds = options.acceptNewChild ?? [];
+  if (options.acceptNewParent !== undefined || addedIds.length) {
+    if (
+      !idSchema.safeParse(options.acceptNewParent).success ||
+      !addedIds.length ||
+      addedIds.some((id) => !idSchema.safeParse(id).success) ||
+      new Set(addedIds).size !== addedIds.length
+    )
+      throw new Error(
+        'Exact child acceptance requires one parent and a nonempty unique new-child ID list'
+      );
+  }
   const root = await workspaceDirectory(directory);
   return withWorkspaceLock(root, async () => {
     await requireNoPublication(root);
@@ -109,6 +137,11 @@ export async function alignWorkspaceBaseline(
     const selection = await selectFiles(context, options.paths);
     if (!selection.files.length) throw new Error('Baseline alignment selected no bound documents');
     const ids = tagSet(selection.files.flatMap((path) => previous.documents[path]!.nodeIds));
+    if (options.acceptNewParent && !ids.includes(options.acceptNewParent))
+      throw new Error('Exact new-child parent must be bound in the selected documents');
+    for (const id of addedIds)
+      if (context.native.has(id) || previous.entries[id])
+        throw new Error(`New child is already bound: ${id}`);
     const frozen = await context.inputs.freeze();
     // The old native projection, never the source itself, establishes an absent readonly seal.
     for (const path of selection.files) {
@@ -125,7 +158,14 @@ export async function alignWorkspaceBaseline(
     const backend = await connect();
     if ((await backend.identity()).kbId !== previous.kbId)
       throw new Error('Native KB binding changed');
-    const observed = await readExact(backend, ids, context);
+    const observed = await readExact(backend, [...ids, ...addedIds], context);
+    if (options.acceptNewParent)
+      verifyNewChildren(
+        context.native.get(options.acceptNewParent)!,
+        observed.get(options.acceptNewParent)!,
+        addedIds,
+        observed
+      );
     const neededTags = tagSet([...observed.values()].flatMap((rem) => rem.tags ?? []));
     const dependencies = new Set<string>();
     for (const tag of neededTags) {
@@ -142,9 +182,23 @@ export async function alignWorkspaceBaseline(
       observed.set(id, rem);
     const nextNative = new Map(context.native);
     for (const [id, current] of observed) {
-      const next = alignRecord(context.native.get(id)!, current);
+      if (addedIds.includes(id)) {
+        nextNative.set(id, structuredClone(current));
+        continue;
+      }
+      const before = context.native.get(id)!;
+      const next = alignRecord(
+        id === options.acceptNewParent ? { ...before, children: current.children } : before,
+        current
+      );
       if (ids.includes(id)) nextNative.set(id, next);
     }
+    if (
+      options.acceptNewParent &&
+      nodeKind(context.native.get(options.acceptNewParent)!, context.native) !==
+        nodeKind(nextNative.get(options.acceptNewParent)!, nextNative)
+    )
+      throw new Error('Exact new children would change the existing parent content kind');
     const next = structuredClone(previous);
     next.tagIds = registerTagIds(nextNative, neededTags, previous.tagIds);
     const paths = new Map(
@@ -153,6 +207,12 @@ export async function alignWorkspaceBaseline(
     const blocks = new Map(
       Object.entries(previous.entries).map(([id, entry]) => [id, entry.blockId])
     );
+    const usedBlocks = new Set(blocks.values());
+    for (const id of addedIds) {
+      const block = shortBlockId(id, usedBlocks);
+      blocks.set(id, block);
+      usedBlocks.add(block);
+    }
     const originalIds = new Set(
       Object.entries(previous.entries)
         .filter(([, entry]) => entry.originalHash)
@@ -206,7 +266,37 @@ export async function alignWorkspaceBaseline(
             portalFieldsAligned++;
       }
       const source = await context.inputs.read(path);
-      const content = insertBaselineTags(path, source, rootTags, blockTags);
+      let content = insertBaselineTags(path, source, rootTags, blockTags);
+      const accepting =
+        options.acceptNewParent && previous.entries[options.acceptNewParent]!.path === path;
+      let renderedNodes = new Map<string, OutlineNode>();
+      if (accepting) {
+        const rendered = renderDocument(rootId, path, nextNative, paths, {
+          blocks,
+          tagIds: next.tagIds,
+          links,
+        });
+        const canonical = parsePreparedDocument(
+          bindPreparedDocument(prepareDocument(path, rendered), metadata(rootId)),
+          links,
+          next.tagIds,
+          nextNative
+        );
+        if (canonical.diagnostics.length)
+          throw new Error(`New children have no supported source projection: ${path}`);
+        renderedNodes = new Map(canonical.document.nodes.map((node) => [node.key, node]));
+        content = insertBaselineChildren(
+          path,
+          content,
+          rendered,
+          {
+            block: blocks.get(options.acceptNewParent!)!,
+            root: options.acceptNewParent === rootId,
+          },
+          nextNative.get(options.acceptNewParent!)!.children.map((id) => blocks.get(id)!),
+          new Set(addedIds.map((id) => blocks.get(id)!))
+        );
+      }
       const parsed = parsePreparedDocument(
         bindPreparedDocument(prepareDocument(path, content), metadata(rootId)),
         links,
@@ -215,19 +305,64 @@ export async function alignWorkspaceBaseline(
       );
       if (
         parsed.diagnostics.length ||
-        hash(before.nodes.map(authored)) !== hash(parsed.document.nodes.map(authored))
+        hash(
+          before.nodes.map((node) =>
+            authored(
+              node.key === options.acceptNewParent
+                ? { ...node, children: nextNative.get(node.key)!.children }
+                : node
+            )
+          )
+        ) !==
+          hash(
+            parsed.document.nodes.filter((node) => !addedIds.includes(node.key)).map(authored)
+          ) ||
+        (accepting &&
+          addedIds.some(
+            (id) =>
+              hash(authored(renderedNodes.get(id)!)) !==
+              hash(authored(parsed.document.nodes.find((node) => node.key === id)!))
+          ))
       )
-        throw new Error(`Tag alignment changed authored content or structure: ${path}`);
+        throw new Error(
+          `Baseline alignment changed existing authored content or structure: ${path}`
+        );
       const parsedNodes = new Map(
         parsed.document.nodes
           .filter((node) => node.kind !== 'mount')
           .map((node) => [node.key, node])
       );
-      for (const id of previous.documents[path]!.nodeIds) {
+      next.documents[path]!.nodeIds = parsed.document.nodes
+        .filter((node) => node.kind !== 'mount')
+        .map((node) => node.key);
+      for (const id of next.documents[path]!.nodeIds) {
         const rem = nextNative.get(id)!;
         const node = parsedNodes.get(id)!;
         if (!node || hash(tagSet(node.tags ?? [])) !== hash(tagSet(rem.tags ?? [])))
           throw new Error(`Native tags have no exact source projection: ${path}/${id}`);
+        if (addedIds.includes(id)) {
+          const rawPath = recordPath(id);
+          if (
+            Object.hasOwn(frozen.hashes(), rawPath) ||
+            Object.hasOwn(frozen.hashes(), originalPath('public', id))
+          )
+            throw new Error(`Unbound child would overwrite existing private evidence: ${id}`);
+          const raw = JSON.stringify(rem, null, 2) + '\n';
+          writes.set(rawPath, raw);
+          next.entries[id] = {
+            path,
+            blockId: blocks.get(id)!,
+            rawPath,
+            rawHash: hash(raw),
+            nativeHash: hash(rem),
+            editable: true,
+          };
+          if (rem.public) {
+            const publicText = JSON.stringify(rem.public, null, 2) + '\n';
+            writes.set(originalPath('public', id), publicText);
+            next.entries[id]!.publicHash = hash(publicText);
+          }
+        }
         const entry = next.entries[id]!;
         if (hash(rem) !== entry.nativeHash) {
           const raw = JSON.stringify(rem, null, 2) + '\n';
@@ -256,6 +391,7 @@ export async function alignWorkspaceBaseline(
               tags: rem.tags,
               powerupPresence: rem.powerupPresence,
               ...nativeProof(rem),
+              ...(addedIds.includes(id) ? { acceptedRecordHash: hash(rem) } : {}),
             },
           ])
       );
@@ -264,6 +400,7 @@ export async function alignWorkspaceBaseline(
       previous,
       files: frozen.hashes(),
       selection,
+      acceptedChildren: { parent: options.acceptNewParent ?? null, ids: addedIds },
       nativeBefore,
       next,
       writes: [...writes],
@@ -279,6 +416,7 @@ export async function alignWorkspaceBaseline(
       tagsAligned,
       portalFieldsAligned,
       sealsAligned,
+      childrenAccepted: addedIds.length,
       localFilesChanged: writes.size,
       nativeProofHash: hash(nativeBefore),
       documentIdentityHash: hash(workspaceIdentity(next).documents),

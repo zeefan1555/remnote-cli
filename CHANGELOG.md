@@ -22,6 +22,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   rejects known drift and local edits, inserts exact YAML/bullet tag tokens without
   rerendering authored Markdown, and uses recoverable local publication. It never
   creates or changes native Rems, Cards or review history.
+- Extend that explicit initializer with `--accept-new-parent ID` and repeated
+  `--accept-new-child ID` for one exact authorized set of unbound native leaves.
+  Preserve old child order, parent content kind, source bytes and Card/history
+  records; reject other drift. Bind the exact set and fresh leaf snapshots into
+  the preview hash and use the same zero-native-write local recovery path.
 
 - Workspace publishing is local-authoritative after explicit empty-vault import.
   Local edits publish against the verified baseline; identical content converges.

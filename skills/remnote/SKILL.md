@@ -135,6 +135,11 @@ Markdown or initializes missing native evidence; existing authored role tokens
 are a reported blocker. Only with explicit baseline-initialization authorization,
 use `sync baseline-align DIR [--path PATH]` to preview missing observations, then
 the same selectors with `--apply --plan-hash HASH`; see the command reference.
+Only when the user also authorizes exact native additions, add
+`--accept-new-parent ID --accept-new-child ID` (repeat the child option for the
+complete reviewed set). This accepts supported unbound leaves only, preserves
+old child order and parent kind, and rejects every other content/identity drift;
+never infer these IDs from a failed sync or use this as automatic conflict repair.
 This separate local publication makes zero native writes and is never an implicit
 step of bind, capture or ordinary sync. Capture also requires clean source, one separate direct
 physical non-card TODO subtree, and a preexisting exact native reference plus

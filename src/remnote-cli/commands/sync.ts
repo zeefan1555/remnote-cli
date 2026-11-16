@@ -36,6 +36,8 @@ interface SyncOptions {
   editableRootId?: string;
   contentFile?: string;
   expectedFileHash?: string;
+  acceptNewParent?: string;
+  acceptNewChild?: string[];
 }
 
 interface SelectionOptions {
@@ -222,6 +224,15 @@ export function registerSyncCommands(program: Command): void {
     )
     .option('--apply', 'Publish the exact reviewed local baseline alignment')
     .option('--plan-hash <sha256>', 'Exact preview hash required with --apply')
+    .option(
+      '--accept-new-parent <id>',
+      'Explicitly accept exact new native leaves under this bound parent'
+    )
+    .option(
+      '--accept-new-child <id>',
+      'Exact unbound leaf ID to accept; repeat for the complete new-child set',
+      (value: string, ids: string[] = []) => ids.concat(value)
+    )
     .action(
       async (
         directory: string,

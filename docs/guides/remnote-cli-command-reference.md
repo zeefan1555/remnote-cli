@@ -477,6 +477,19 @@ operation makes zero native writes and preserves sealed Card/history/original
 records; its history count reports only freshly known histories, never claims
 that unknown history is empty. Interrupted local publication uses `sync recover`.
 
+Only with explicit authorization to accept an already-reviewed exact set of new
+native leaves, add `--accept-new-parent ID` and repeat `--accept-new-child ID` for
+every new child. The parent must be bound in the selected files; every supplied
+child must be unbound, a supported leaf and directly parented there. The original
+children must remain an ordered subsequence, and the complete difference must
+equal the supplied set. The parent's content kind cannot change. New leaves are
+inserted at their exact native positions using renderer-produced bullets while
+all existing source bytes and node identities remain intact. Other drift still
+blocks. Preview reports `childrenAccepted`; apply requires the same exact options
+and `planHash`, with fresh proof for the parent and all new leaves. Reapplying the
+set after publication refuses the now-bound IDs. This is not discovery, incoming
+sync, a timestamp merge, or permission to modify native Cards or history.
+
 `sync format DIR` is an explicit offline conversion of a clean, sealed legacy
 publication to human Markdown, or canonical rendering of a clean already-human
 publication. It requires a complete manifest, no pending remote
