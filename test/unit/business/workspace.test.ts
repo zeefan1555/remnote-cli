@@ -5769,6 +5769,61 @@ describe('controlled RemNote workspace', () => {
     }
   );
 
+  it.each([
+    ['inline', 'first'],
+    ['inline', 'later'],
+    ['mounted', 'first'],
+    ['mounted', 'later'],
+  ] as const)(
+    'blocks deletion if the fresh %s parent becomes unverified on its %s read',
+    async (mode, when) => {
+      const f = await prepare();
+      const path = mode === 'inline' ? f.path : f.state.entries.subdoc!.path;
+      const parentId = mode === 'inline' ? 'chapter' : 'daily';
+      if (mode === 'inline')
+        await removeQuestion(
+          f.path,
+          f.state.entries.question!.blockId,
+          f.state.entries.answer!.blockId
+        );
+      else await rm(join(directory, path));
+      const read = f.backend.read;
+      let parentReads = 0;
+      f.backend.read = vi.fn(async (ids, options) => {
+        const result = await read(ids, options);
+        if (ids.includes(parentId)) parentReads++;
+        return result.map((rem) =>
+          rem.id === parentId && (when === 'first' || parentReads >= 2)
+            ? { ...rem, unsupported: 'unverified-native-flags' }
+            : rem
+        );
+      });
+      let outcome: { status: string; remoteWrites?: number } | undefined;
+      let rejection: unknown;
+      try {
+        outcome = (await syncWorkspace(directory, async () => f.backend, {
+          apply: true,
+          paths: [path],
+        })) as { status: string; remoteWrites?: number };
+      } catch (error) {
+        rejection = error;
+      }
+      if (outcome) {
+        expect(outcome.status).not.toBe('verified');
+        expect(outcome.remoteWrites).toBe(0);
+      } else {
+        expect(String(rejection)).toMatch(
+          /verification dependency|native structure|concurrent remote change/i
+        );
+      }
+      expect(parentReads).toBeGreaterThanOrEqual(when === 'first' ? 1 : 2);
+      expect(f.backend.remove).not.toHaveBeenCalled();
+      expect(f.calls).toEqual([]);
+      for (const id of mode === 'inline' ? ['question', 'answer'] : ['subdoc'])
+        expect(f.rems.has(id)).toBe(true);
+    }
+  );
+
   it('blocks deletion when an editable surviving Rem has a known native reference to the target', async () => {
     const f = await prepare((fixture) => {
       fixture.rems.get('basic')!.references = ['question'];
