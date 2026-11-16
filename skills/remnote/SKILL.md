@@ -316,6 +316,11 @@ Never pretend that a tag named cc is the Powerup. Normal probes verify known cc 
 Guarded journals preserve original nativeBefore and input binding before writes;
 exact-plan resume returns that original proof plus fresh nativeAfter, never
 fabricating a before-history from recovery-time values.
+Guarded mutation-stage receipts and verified resume also include `frozenHistory`: the
+original plan hash, guard checksum and requested IDs, checked IDs and before proofs,
+updated IDs, new keys, existing creation parents and deletion roots. Preserve the first
+receipt and compare the complete frozen evidence on resume; missing evidence is not
+permission to reconstruct it. These are checksums, not signatures or native CAS.
 Default apply checks fresh SDK histories of the actually affected surviving Cards
 before any mutation, including a changed answer's owning question. Unknown
 Card/history blocks; an observed empty history array is valid. Guarded callers

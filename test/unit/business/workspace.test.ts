@@ -827,6 +827,211 @@ describe('synthetic history write-first characterization', () => {
     ).rejects.toThrow('Native card history changed');
     expect(f.calls).toEqual(calls);
   });
+  it('binds a guarded unknown receipt to the exact history scope on successful resume', async () => {
+    const f = await prepare();
+    await edit(
+      f.path,
+      (source) =>
+        source.replace('Because', 'Because edited') +
+        '\n- Added note ^local-new\n  - Nested new ^local-child\n'
+    );
+    const read = await workspace.readWorkspace(directory, f.path);
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      throw new Error('lost acknowledgement');
+    });
+    const interrupted = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+      requireHistoryRem: ['basic'],
+    })) as {
+      planHash: string;
+      frozenHistory: { before: unknown; checkedRemIds: string[]; createdKeys: string[] };
+      ids: Record<string, string>;
+    };
+    expect(interrupted).toMatchObject({
+      status: 'unknown',
+      remoteWrites: 1,
+      frozenHistory: {
+        planHash: interrupted.planHash,
+        requested: ['basic'],
+        updated: ['answer'],
+        createParents: ['daily'],
+        deletionRoots: [],
+      },
+    });
+    expect(interrupted.frozenHistory.checkedRemIds).toEqual([
+      'answer',
+      'basic',
+      'daily',
+      'question',
+    ]);
+    expect(interrupted.frozenHistory.createdKeys).toHaveLength(2);
+    expect(interrupted.frozenHistory.before).toMatchObject({
+      question: { cardIds: ['card_question'] },
+    });
+    expect(JSON.stringify(interrupted.frozenHistory)).not.toContain('Because');
+    f.backend.writeField = write;
+    const resumed = await resumeWorkspace(directory, async () => f.backend, interrupted.planHash);
+    expect(resumed).toMatchObject({
+      status: 'verified',
+      resumed: true,
+      frozenHistory: interrupted.frozenHistory,
+      updated: ['answer'],
+      historyVerification: { before: interrupted.frozenHistory.before },
+    });
+  });
+  it('exposes the frozen scope without claiming a write on a guarded pre-write conflict', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    const guard = f.backend.guard;
+    f.backend.guard = vi.fn(async (ids) => {
+      const result = await guard(ids);
+      f.rems.get('question')!.cards = [
+        { ...unknown('question')[0]!, repetitionHistory: [{ score: 1 }] },
+      ];
+      return result;
+    });
+    const result = await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+    });
+    expect(result).toMatchObject({
+      status: 'conflict',
+      remoteWrites: 0,
+      frozenHistory: { updated: ['answer'], checkedRemIds: ['answer', 'question'] },
+    });
+    expect(f.calls).toEqual([]);
+  });
+  it('binds mixed deletion and edit to the original guarded evidence without replaying deletion', async () => {
+    const f = await prepareDeletion();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    await edit(f.path, (source) => source.replace('Front', 'Front edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    const remove = f.backend.removeMirror;
+    f.backend.removeMirror = vi.fn(async (id) => {
+      await remove(id);
+      throw new Error('lost deletion acknowledgement');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+    })) as { planHash: string };
+    expect(result).toMatchObject({
+      status: 'unknown',
+      remoteWrites: 1,
+      frozenHistory: {
+        planHash: result.planHash,
+        updated: ['basic'],
+        deletionRoots: read.deletion.roots,
+        checkedRemIds: ['basic', 'chapter'],
+        createParents: [],
+      },
+    });
+    await expect(
+      resumeWorkspace(directory, async () => f.backend, result.planHash)
+    ).rejects.toThrow('Resume requires');
+    expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+  });
+  it('rejects a corrupted frozen history binding before reconnecting', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      throw new Error('lost acknowledgement');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+    })) as { planHash: string };
+    const pending = (await loadState(directory)).pending!;
+    const journal = (await f.backend.journal.getLocal<Journal>(pending.journalKey))!;
+    journal.historyGuard!.proofs.question!.reviewHash = '0'.repeat(64);
+    await f.backend.journal.setLocal(pending.journalKey, journal);
+    const factory = vi.fn(async () => f.backend);
+    await expect(resumeWorkspace(directory, factory, result.planHash)).rejects.toThrow(
+      'history guard is missing or invalid'
+    );
+    expect(factory).not.toHaveBeenCalled();
+  });
+  it('does not resume an unobserved failed setter from a before-state snapshot', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    f.backend.writeField = vi.fn(async () => {
+      throw new Error('request not acknowledged');
+    });
+    const result = (await syncWorkspace(directory, async () => f.backend, {
+      apply: true,
+      paths: [f.path],
+      expectedFileHash: read.fileHash,
+    })) as { planHash: string };
+    expect(result).toMatchObject({
+      status: 'unknown',
+      remoteWrites: 1,
+      frozenHistory: { updated: ['answer'] },
+    });
+    await expect(
+      resumeWorkspace(directory, async () => f.backend, result.planHash)
+    ).rejects.toThrow();
+    expect(f.backend.writeField).toHaveBeenCalledTimes(1);
+  });
+  it('returns matching frozen evidence through the public CLI after a lost write acknowledgement', async () => {
+    const f = await prepare();
+    await edit(f.path, (source) => source.replace('Because', 'Because edited'));
+    const read = await workspace.readWorkspace(directory, f.path);
+    const write = f.backend.writeField;
+    f.backend.writeField = vi.fn(async (id, field, value) => {
+      await write(id, field, value);
+      throw new Error('lost acknowledgement');
+    });
+    const first = await syntheticCli(f.backend, [
+      'sync',
+      'apply',
+      directory,
+      '--path',
+      f.path,
+      '--expected-file-hash',
+      read.fileHash,
+      '--require-sdk-history-guard',
+      '--require-history-rem',
+      'basic',
+    ]).result;
+    expect(first.code).toBe(1);
+    const interrupted = JSON.parse(first.stdout) as { planHash: string; frozenHistory: unknown };
+    expect(interrupted).toMatchObject({
+      status: 'unknown',
+      remoteWrites: 1,
+      frozenHistory: { updated: ['answer'] },
+    });
+    f.backend.writeField = write;
+    const second = await syntheticCli(f.backend, [
+      'sync',
+      'resume',
+      directory,
+      '--plan-hash',
+      interrupted.planHash,
+    ]).result;
+    expect(second.code, second.stderr).toBe(0);
+    expect(JSON.parse(second.stdout)).toMatchObject({
+      status: 'verified',
+      resumed: true,
+      frozenHistory: interrupted.frozenHistory,
+      updated: ['answer'],
+    });
+  });
   it('does not require history of a whole Card explicitly deleted', async () => {
     const f = await prepareDeletion();
     f.rems.get('question')!.cards = unknown('question');
@@ -6691,12 +6896,19 @@ describe('controlled RemNote workspace', () => {
       status: string;
       deleted: string[];
       planHash: string;
+      frozenHistory: { deletionRoots: unknown; checkedRemIds: string[] };
       verification: { observedHashes: Record<string, string> };
       deletionParents: Record<string, { observed: { children: string[]; revisionHash: string } }>;
     };
     const parent = read.deletion.roots[0]!.parent!;
     expect(result.status).toBe('verified');
     expect(result.deleted).toEqual(['subdoc']);
+    expect(result.frozenHistory).toMatchObject({
+      deletionRoots: read.deletion.roots,
+      updated: [],
+      createParents: [],
+    });
+    expect(result.frozenHistory.checkedRemIds).toContain(parent);
     expect(result.deletionParents[parent]!.observed.children).not.toContain('subdoc');
     expect(result.verification.observedHashes[parent]).toBe(
       result.deletionParents[parent]!.observed.revisionHash
@@ -6708,6 +6920,7 @@ describe('controlled RemNote workspace', () => {
       remoteWrites: 0,
       outline: { path, nodes: {} },
       deletionParents: { [parent]: { observed: { revisionHash: expect.any(String) } } },
+      frozenHistory: result.frozenHistory,
     });
     expect(recovered).not.toHaveProperty('cardsPreserved');
     expect(recovered).not.toHaveProperty('existingCardsPreserved');

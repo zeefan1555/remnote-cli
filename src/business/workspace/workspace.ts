@@ -59,6 +59,7 @@ import {
   foldResume,
   requireLocalAuthority,
   guardedBinding,
+  frozenHistoryEvidence,
   verifyResumeReadback,
   finalProofHash,
   requireFinalProof,
@@ -632,6 +633,7 @@ export async function resumeWorkspace(
     )
       throw new Error('Original native card history guard is invalid; preserve the journal');
     const binding = guardedBinding(journal);
+    const frozenHistory = binding ? frozenHistoryEvidence(journal) : undefined;
     if (state.pending?.planHash === planHash || (await readPublication(root))) {
       const result = await recoverWorkspace(root, backendFactory);
       if (!binding) return result;
@@ -695,6 +697,7 @@ export async function resumeWorkspace(
           ids: journal.ids,
           deleted: journal.final!.deleted,
           remoteWrites: 0,
+          ...(frozenHistory ? { frozenHistory, updated: frozenHistory.updated } : {}),
           ...(journal.historyGuard
             ? {
                 historyVerification: {
@@ -1283,6 +1286,7 @@ async function synchronizeWorkspace(
         : {}),
       ...(nativeBefore ? { proof: { plan: structuredClone(plan), nativeBefore } } : {}),
     };
+    const frozenHistory = journal.proof ? frozenHistoryEvidence(journal) : undefined;
     await store.setLocal(key, journal);
     state.pending = { planHash, journalKey: key };
     await persistState();
@@ -1690,6 +1694,7 @@ async function synchronizeWorkspace(
         complete: true,
         planHash,
         ids: journal.ids,
+        ...(frozenHistory ? { frozenHistory } : {}),
         ...(verification ? { verification, outline, deletionParents } : {}),
         historyVerification: {
           source: 'sdk-returned-history',
@@ -1743,6 +1748,7 @@ async function synchronizeWorkspace(
         journalKey: key,
         ids: journal.ids,
         steps: journal.steps,
+        ...(frozenHistory ? { frozenHistory } : {}),
         error: error instanceof Error ? error.message : String(error),
         remoteWrites,
         atomic: false,

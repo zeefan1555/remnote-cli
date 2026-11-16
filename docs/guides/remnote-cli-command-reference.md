@@ -681,6 +681,15 @@ reject the unknown option before applying; the current guard is mandatory whethe
 or not this marker is present. An unchanged offline result has no native history
 proof. Resume preserves the original history guard; a pending legacy journal
 without one cannot resume native writes automatically.
+Guarded mutation-stage receipts and verified resume expose identical `frozenHistory`
+derived from the original journal: `planHash`, `binding`, `requested`, `checkedRemIds`,
+`before`, `updated`, `createdKeys`, `createParents`, and `deletionRoots` (plus version).
+These contain IDs and hashes, not note text or raw history. `updated` contains only
+existing Rem IDs; `createParents` contains existing parents at the boundary of new
+chains. Preserve the original receipt and compare all fields before treating a
+recovery as independently verified. Missing original evidence cannot be recreated
+from a later observation. The binding is an integrity checksum, not a signature
+or native compare-and-swap; unverified deletion is never automatically replayed.
 
 Deleting a bound outline node or tracked document locally expresses deletion intent.
 `sync plan DIR` previews exact `deletion.roots` and descendant `deletion.ids`;

@@ -13,7 +13,7 @@ import {
 } from './types.js';
 import { nativeProof } from './outline.js';
 import type { ContentVersion } from './types.js';
-import type { HistoryGuard } from './history.js';
+import { historyBinding, type HistoryGuard } from './history.js';
 import type { LocalState } from '../../remnote-cli/client/local-state.js';
 
 /** Workspace locking serializes captures and executions; gaps after interruption are safe. */
@@ -126,6 +126,62 @@ export function guardedBinding(journal: Journal) {
       'Original guarded proof binding was modified; preserve the journal without replay'
     );
   return binding;
+}
+
+/** Minimal original-plan evidence; this checksum is not an authentication signature. */
+export function frozenHistoryEvidence(journal: Journal) {
+  if (!guardedBinding(journal) || !journal.proof || !journal.historyGuard)
+    throw new Error('Original guarded history evidence is missing; preserve the journal');
+  const { plan } = journal.proof;
+  const guard = journal.historyGuard;
+  if (
+    guard.version !== 1 ||
+    guard.binding !== historyBinding(journal.planHash, guard.requested, guard.proofs)
+  )
+    throw new Error('Original native card history guard is invalid; preserve the journal');
+  const checkedRemIds = Object.keys(guard.proofs).sort();
+  const checked = new Set(checkedRemIds);
+  const deleted = new Set(plan.deletion?.ids ?? []);
+  const updated = plan.changes
+    .filter((change) => !change.key.startsWith('new:'))
+    .map((change) => change.key);
+  const createdKeys = plan.changes
+    .filter((change) => change.key.startsWith('new:'))
+    .map((change) => change.key);
+  const createParents = [
+    ...new Set(
+      plan.changes
+        .filter(
+          (change) =>
+            change.key.startsWith('new:') && change.parent && !change.parent.startsWith('new:')
+        )
+        .map((change) => change.parent!)
+    ),
+  ].sort();
+  const deletionRoots = structuredClone(plan.deletion?.roots ?? []);
+  const required = [
+    ...guard.requested,
+    ...updated,
+    ...createParents,
+    ...deletionRoots.flatMap((root) => (root.parent ? [root.parent] : [])),
+  ];
+  if (
+    required.some((id) => !checked.has(id) || deleted.has(id)) ||
+    checkedRemIds.some((id) => deleted.has(id))
+  )
+    throw new Error('Original history guard does not cover the frozen plan; preserve the journal');
+  return {
+    version: 1 as const,
+    planHash: journal.planHash,
+    binding: guard.binding,
+    requested: [...guard.requested],
+    checkedRemIds,
+    before: structuredClone(guard.proofs),
+    updated,
+    createdKeys,
+    createParents,
+    deletionRoots,
+  };
 }
 
 /** Fold the one attempted prefix, never infer a new plan from the current remote state. */
