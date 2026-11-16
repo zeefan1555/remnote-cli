@@ -3,7 +3,14 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { alignWorkspaceBaseline } from '../../../src/business/workspace/baseline.js';
-import { inspectLocal, loadState, writeSnapshot } from '../../../src/business/workspace/local.js';
+import { readNativeSourceClosure } from '../../../src/business/workspace/baseline-source.js';
+import {
+  inspectLocal,
+  loadState,
+  saveState,
+  writeSnapshot,
+  type LocalContext,
+} from '../../../src/business/workspace/local.js';
 import * as files from '../../../src/business/workspace/files.js';
 import { readPublication, recoverWorkspace } from '../../../src/business/workspace/publication.js';
 import {
@@ -42,7 +49,7 @@ function native(id: string, extra: Partial<WorkspaceRem> = {}): WorkspaceRem {
     ...extra,
   };
 }
-async function fixture() {
+async function fixture(knownObservations = false) {
   const old = [
     native('doc', { document: true, children: ['question', 'old'] }),
     native('question', {
@@ -69,6 +76,10 @@ async function fixture() {
     native('other', { document: true }),
     native('tag'),
   ];
+  if (knownObservations) {
+    old[0]!.tags = ['tag'];
+    old[1]!.references = ['other'];
+  }
   const state = await writeSnapshot(directory, 'kb', old);
   const path = state.entries.doc!.path;
   const rems = new Map(old.map((r) => [r.id, structuredClone(r)]));
@@ -100,6 +111,82 @@ async function fixture() {
   };
 }
 describe('explicit selected native source adoption', () => {
+  it('preserves uncollected references and YAML comments when an approved root tag is removed', async () => {
+    const f = await fixture(true);
+    delete f.rems.get('question')!.references;
+    f.rems.get('doc')!.tags = [];
+    const source = (await files.readPrivate(directory, f.path)).replace(
+      '---\n',
+      '---\n# local rationale\naliases: [Local] # explanation\n'
+    );
+    await files.writePrivate(directory, f.path, source);
+    f.state.documents[f.path]!.fileHash = hash(source);
+    await saveState(directory, f.state);
+    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+    const preview = await alignWorkspaceBaseline(directory, f.connect, f.options);
+    expect(preview.sourceChanges.find((change) => change.id === 'question')!.fields).not.toContain(
+      'references'
+    );
+    await alignWorkspaceBaseline(directory, f.connect, {
+      ...f.options,
+      apply: true,
+      planHash: preview.planHash,
+    });
+    const after = await inspectLocal(directory);
+    expect(after.diagnostics).toEqual([]);
+    expect(after.dirty).toEqual([]);
+    expect(after.native.get('question')!.references).toEqual(['other']);
+    expect(after.native.get('doc')!.tags).toEqual([]);
+    expect(await files.readPrivate(directory, f.path)).toContain(
+      '# local rationale\naliases: [Local] # explanation\n'
+    );
+  });
+  it('rejects a new Portal before reading anything through it', async () => {
+    const f = await fixture();
+    f.rems.get('new')!.type = 6;
+    f.rems.get('new')!.portal = {
+      type: null,
+      directlyIncludedRemIds: [],
+      query: null,
+      filter: null,
+    };
+    await expect(alignWorkspaceBaseline(directory, f.connect, f.options)).rejects.toThrow(
+      'unsafe boundary'
+    );
+    expect(f.backend.read).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['nested']),
+      expect.anything()
+    );
+    expect(await loadState(directory)).toEqual(f.state);
+  });
+  it.each([6, null])(
+    'rejects changed children of an existing Portal when its reported type is %s',
+    async (reportedType) => {
+      const doc = native('doc', { document: true, children: ['portal'] });
+      const portal = native('portal', { parent: 'doc', type: 6 });
+      const context = {
+        state: {
+          documents: { 'test.md': { rootId: 'doc', nodeIds: ['doc', 'portal'] } },
+          entries: { doc: { path: 'test.md' }, portal: { path: 'test.md' } },
+        },
+        native: new Map([
+          ['doc', doc],
+          ['portal', portal],
+        ]),
+      } as unknown as LocalContext;
+      const observed = new Map([
+        ['doc', structuredClone(doc)],
+        ['portal', { ...portal, type: reportedType, children: ['new-below-portal'] }],
+      ]);
+      const read = vi.fn(
+        async (ids: string[]) => new Map(ids.map((id) => [id, native(id, { parent: 'portal' })]))
+      );
+      await expect(readNativeSourceClosure(context, ['test.md'], observed, read)).rejects.toThrow(
+        'Portal children'
+      );
+      expect(read).not.toHaveBeenCalled();
+    }
+  );
   it('previews then adopts only approved source and descendants, preserving old Cards/history/originals', async () => {
     const f = await fixture();
     const source = await files.readPrivate(directory, f.path);

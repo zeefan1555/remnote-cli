@@ -1,6 +1,7 @@
 import { insertBaselineTags } from './baseline-tags.js';
 import { insertBaselineChildren, verifyNewChildren } from './baseline-children.js';
 import { nativeSourceChanges, readNativeSourceClosure } from './baseline-source.js';
+import { preserveSourceHeader } from './baseline-source-header.js';
 import { readPrivate, withWorkspaceLock, workspaceDirectory } from './files.js';
 import {
   IDENTITY,
@@ -205,6 +206,12 @@ export async function alignWorkspaceBaseline(
         continue;
       }
       const before = context.native.get(id)!;
+      // The SDK does not always collect this supplemental relationship list.
+      // Preserve an old known observation when absent; inline references are in text/backText.
+      const sourceCurrent =
+        options.acceptNativeSource && ids.includes(id) && current.references == null
+          ? { ...current, references: before.references }
+          : current;
       const next = alignRecord(
         options.acceptNativeSource && ids.includes(id)
           ? {
@@ -213,12 +220,12 @@ export async function alignWorkspaceBaseline(
               backText: current.backText,
               children: current.children,
               tags: current.tags,
-              references: current.references,
+              references: sourceCurrent.references,
             }
           : id === options.acceptNewParent
             ? { ...before, children: current.children }
             : before,
-        current
+        sourceCurrent
       );
       if (ids.includes(id)) nextNative.set(id, next);
     }
@@ -315,6 +322,13 @@ export async function alignWorkspaceBaseline(
             source: before,
           })
         : insertBaselineTags(path, source, rootTags, blockTags);
+      if (options.acceptNativeSource)
+        content = preserveSourceHeader(
+          path,
+          source,
+          content,
+          renderTags(nextNative.get(rootId)!.tags ?? [], next.tagIds)
+        );
       const accepting =
         options.acceptNewParent && previous.entries[options.acceptNewParent]!.path === path;
       let renderedNodes = new Map<string, OutlineNode>();

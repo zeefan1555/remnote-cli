@@ -11,7 +11,10 @@ export function nativeSourceChanges(before: WorkspaceRem, current: WorkspaceRem)
   ) as string[];
   if (Array.isArray(before.tags) && hash(tagSet(before.tags)) !== hash(tagSet(current.tags ?? [])))
     fields.push('tags');
-  if (hash(before.references ?? null) !== hash(current.references ?? null))
+  if (
+    Array.isArray(current.references) &&
+    hash(before.references ?? null) !== hash(current.references)
+  )
     fields.push('references');
   if (hash(before.children) !== hash(current.children)) fields.push('children');
   return {
@@ -44,6 +47,11 @@ export async function readNativeSourceClosure(
       throw new Error(`Native source adoption refuses deletion or reparenting: ${id}`);
     if (before.feedback)
       throw new Error(`Native source adoption refuses feedback-partitioned nodes: ${id}`);
+    if (
+      (before.type === 6 || current.type === 6) &&
+      hash(before.children) !== hash(current.children)
+    )
+      throw new Error(`Native source adoption cannot traverse changed Portal children: ${id}`);
   }
   for (;;) {
     const pending = new Map<string, { parent: string; path: string }>();
@@ -74,6 +82,7 @@ export async function readNativeSourceClosure(
       const owner = pending.get(id)!;
       if (
         rem.parent !== owner.parent ||
+        rem.type === 6 ||
         rem.document !== false ||
         rem.folder !== false ||
         typeof rem.cardItem !== 'boolean' ||
