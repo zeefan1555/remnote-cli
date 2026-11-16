@@ -155,6 +155,7 @@ export async function formatWorkspace(directory: string) {
         display: display(id),
         attributes: attributes.get(id),
         tagIds: next.tagIds,
+        source: sources?.get(path),
       };
       const result = renderParsedDocument(id, path, input.native, paths, options);
       if (result.diagnostics.length)

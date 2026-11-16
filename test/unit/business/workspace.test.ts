@@ -318,7 +318,7 @@ async function prepare(setup?: (f: ReturnType<typeof fixture>) => void) {
   setup?.(f);
   expect(await importWorkspace(directory, 'kb', async () => f.backend)).toMatchObject({
     complete: true,
-    rems: 8,
+    rems: f.rems.size,
   });
   const state = await loadState(directory),
     path = state.entries.answer!.path;
@@ -442,6 +442,107 @@ async function save(path: string, replace: (source: string) => string) {
 }
 
 describe('local-authoritative content publisher', () => {
+  it.each([
+    ['portal', false],
+    ['portal', true],
+    ['rich-front', false],
+    ['rich-back', true],
+    ['wrapper-reference', false],
+  ] as const)(
+    'preserves readonly reference labels across local target rename: %s / insertion=%s',
+    async (shape, insertion) => {
+      const f = await prepare(({ rems }) => {
+        const opaque = rems.get('opaque')!;
+        if (shape === 'portal')
+          Object.assign(opaque, {
+            text: ['Reference'],
+            type: 6,
+            portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+          });
+        else if (shape === 'wrapper-reference') {
+          Object.assign(opaque, {
+            type: 6,
+            portal: { type: 0, directlyIncludedRemIds: ['wrapper'] },
+          });
+          // A referenced wrapper remains visible and may itself link to the renamed target.
+          rems.get('chapter')!.children.push('reference-parent');
+          rems.set(
+            'reference-parent',
+            native('reference-parent', [], {
+              parent: 'chapter',
+              type: 6,
+              children: ['wrapper'],
+              portal: { type: 0, directlyIncludedRemIds: [] },
+            })
+          );
+          rems.set(
+            'wrapper',
+            native('wrapper', [], {
+              parent: 'reference-parent',
+              type: 6,
+              portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+            })
+          );
+        } else if (shape === 'rich-front')
+          opaque.text = [{ i: 'q', _id: 'basic', unknownNativeAttribute: true }];
+        else opaque.backText = [{ i: 'q', _id: 'basic' }];
+      });
+      const initial = await readPrivate(directory, f.path);
+      const projection = initial
+        .split('\n')
+        .filter((line) => line.includes('〔只读〕') || line.includes('|Front]]'));
+      const desired =
+        initial.replace('- Front ^', '- Renamed target ^') + (insertion ? '\n- Added note\n' : '');
+      expect(desired).not.toBe(initial);
+      await edit(f.path, () => desired);
+      const beforeOpaque = structuredClone(f.rems.get('opaque'));
+      const result = await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
+      });
+      expect(result).toMatchObject({ status: 'verified', contentAuthority: 'local' });
+      const after = await readPrivate(directory, f.path);
+      for (const line of projection) expect(after).toContain(line);
+      if (!insertion) expect(after).toBe(desired);
+      expect(f.rems.get('basic')!.text).toEqual(['Renamed target']);
+      expect(f.rems.get('opaque')).toEqual(beforeOpaque);
+      expect(f.calls.filter((call) => call.startsWith('opaque:'))).toEqual([]);
+      expect((await loadState(directory)).pending).toBeUndefined();
+      expect(await readPublication(directory)).toBeUndefined();
+      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+      const calls = [...f.calls];
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, scope: 'all' })
+      ).toMatchObject({ status: 'unchanged', remoteWrites: 0 });
+      expect(f.calls).toEqual(calls);
+      await formatWorkspace(directory);
+      for (const line of projection) expect(await readPrivate(directory, f.path)).toContain(line);
+    }
+  );
+
+  it('preserves existing per-occurrence readonly labels without changing native references', async () => {
+    const f = await prepare(({ rems }) => {
+      Object.assign(rems.get('opaque')!, {
+        text: [{ i: 'q', _id: 'basic' }],
+        backText: [{ i: 'q', _id: 'basic' }],
+        type: 6,
+        portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+      });
+    });
+    const initial = await readPrivate(directory, f.path);
+    const desired = initial.replace('- Front ^', '- Renamed target ^') + '\n- Added note\n';
+    await edit(f.path, () => desired);
+    const nativeOpaque = structuredClone(f.rems.get('opaque'));
+    expect(
+      await syncWorkspace(directory, async () => f.backend, { apply: true, scope: 'all' })
+    ).toMatchObject({ status: 'verified' });
+    const after = await readPrivate(directory, f.path);
+    expect(after.match(/\|Front\]\]/g)).toHaveLength(3);
+    expect(f.rems.get('opaque')).toEqual(nativeOpaque);
+    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+  });
+
   it.each(['all', 'guarded', 'changed'] as const)(
     'blocks native readonly Portal projection drift in %s mode before unrelated local writes',
     async (mode) => {
@@ -485,6 +586,253 @@ describe('local-authoritative content publisher', () => {
       expect(f.calls).toEqual([]);
     }
   );
+
+  it.each(['resume', 'recover'] as const)(
+    'finishes a target rename with readonly labels after %s without replay',
+    async (mode) => {
+      const f = await prepare(({ rems }) => {
+        Object.assign(rems.get('opaque')!, {
+          text: ['Reference'],
+          type: 6,
+          portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+        });
+      });
+      await edit(f.path, (source) => source.replace('- Front ^', '- Renamed target ^'));
+      const desired = await readPrivate(directory, f.path),
+        write = f.backend.writeField,
+        set = LocalState.prototype.setLocal;
+      if (mode === 'resume')
+        f.backend.writeField = vi.fn(async (...args) => {
+          await write(...args);
+          throw new Error('Lost target rename acknowledgment');
+        });
+      const interrupt = vi
+        .spyOn(LocalState.prototype, 'setLocal')
+        .mockImplementation(async function (this: LocalState, key, value) {
+          if (mode === 'recover' && key.startsWith('publication:') && value !== null)
+            throw new Error('Before local publication ledger');
+          return set.call(this, key, value);
+        });
+      const result = (await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+        expectedFileHash: (await workspace.readWorkspace(directory, f.path)).fileHash,
+      })) as { planHash: string };
+      expect(result).toMatchObject({
+        status: mode === 'resume' ? 'unknown' : 'publication-incomplete',
+      });
+      interrupt.mockRestore();
+      expect(
+        await (mode === 'resume'
+          ? resumeWorkspace(directory, async () => f.backend, result.planHash)
+          : recoverWorkspace(directory, async () => f.backend))
+      ).toMatchObject({
+        status: mode === 'resume' ? 'verified' : 'recovered',
+        remoteWrites: 0,
+      });
+      expect(f.calls).toEqual(['basic:text']);
+      expect(await readPrivate(directory, f.path)).toBe(desired);
+      expect((await loadState(directory)).pending).toBeUndefined();
+      expect(await readPublication(directory)).toBeUndefined();
+      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+    }
+  );
+
+  it.each(['target', 'body', 'extra-reference', 'embed', 'label'] as const)(
+    'rejects readonly %s edits despite source label binding before backend access',
+    async (change) => {
+      const f = await prepare(({ rems }) => {
+        Object.assign(rems.get('opaque')!, {
+          text: ['Reference'],
+          type: 6,
+          portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+        });
+      });
+      await edit(f.path, (source) => {
+        const target = `#^${f.state.entries.basic!.blockId}|Front]]`;
+        const value =
+          change === 'target'
+            ? source.replace(target, `#^${f.state.entries.chapter!.blockId}|Front]]`)
+            : change === 'body'
+              ? source.replace('Reference〔只读〕', 'Changed〔只读〕')
+              : change === 'label'
+                ? source.replace('|Front]]', '|Unauthorized alias]]')
+                : change === 'embed'
+                  ? source.replace('〔只读〕 [[', '〔只读〕 ![[')
+                  : source.replace('〔只读〕', '〔只读〕 [extra](remnote:basic)');
+        expect(value).not.toBe(source);
+        return value.replace('- Front ^', '- Renamed target ^');
+      });
+      const factory = vi.fn(async () => f.backend);
+      await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        /OPAQUE_EDIT/
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(f.calls).toEqual([]);
+      expect(f.rems.get('basic')!.text).toEqual(['Front']);
+    }
+  );
+
+  it('preserves native remnote link labels during canonical re-render without rebinding the target', async () => {
+    const f = await prepare(({ rems }) => {
+      rems.get('opaque')!.text = [
+        { i: 'q', _id: 'outside-snapshot', unknownNativeAttribute: true },
+      ];
+    });
+    await edit(f.path, (source) => source + '\n- Added note\n');
+    expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+      status: 'verified',
+    });
+    expect(await readPrivate(directory, f.path)).toContain(
+      '[outside-snapshot](remnote:outside-snapshot)'
+    );
+    expect(f.rems.get('opaque')!.text).toEqual([
+      { i: 'q', _id: 'outside-snapshot', unknownNativeAttribute: true },
+    ]);
+    expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+  });
+
+  it.each([true, false])(
+    'preserves selected target rename and unselected labels with saved seal=%s',
+    async (sealed) => {
+      const f = await prepare(({ rems }) => {
+        Object.assign(rems.get('opaque')!, {
+          text: ['Reference'],
+          type: 6,
+          portal: { type: 0, directlyIncludedRemIds: ['subdoc'] },
+        });
+      });
+      if (!sealed) {
+        const old = await loadState(directory);
+        for (const entry of Object.values(old.entries)) delete entry.readonlyHash;
+        await saveState(directory, old);
+      }
+      const originalSource = await readPrivate(directory, f.path),
+        originalIdentity = await readPrivate(directory, IDENTITY),
+        originalDocument = (await loadState(directory)).documents[f.path],
+        originalNative = (await loadState(directory)).entries.opaque!,
+        originalRaw = await readPrivate(directory, originalNative.rawPath),
+        targetPath = f.state.entries.subdoc!.path;
+      await edit(targetPath, (source) => source.replace('# Child doc', '# Renamed target'));
+      expect(
+        await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [targetPath] })
+      ).toMatchObject({ status: 'verified' });
+      expect(await readPrivate(directory, f.path)).toBe(originalSource);
+      const after = await loadState(directory);
+      expect(after.entries.opaque!.readonlyHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(after.entries.opaque!.nativeHash).toBe(originalNative.nativeHash);
+      expect(after.entries.opaque!.rawHash).toBe(originalNative.rawHash);
+      const { readonlyHash: _beforeSeal, ...beforeFields } = originalNative;
+      const { readonlyHash: _afterSeal, ...afterFields } = after.entries.opaque!;
+      expect(afterFields).toEqual(beforeFields);
+      expect(after.documents[f.path]).toEqual(originalDocument);
+      expect(await readPrivate(directory, originalNative.rawPath)).toBe(originalRaw);
+      expect(await readPrivate(directory, IDENTITY)).toBe(originalIdentity);
+      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+      // The new native title must not become a way to edit the sealed readonly alias.
+      await edit(f.path, (source) => source.replace('|Child doc]]', '|Renamed target]]'));
+      const factory = vi.fn(async () => f.backend);
+      await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        /OPAQUE_EDIT/
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(f.calls).toEqual(['subdoc:text']);
+    }
+  );
+
+  it.each(['missing', 'changed'] as const)(
+    'rejects %s readonly seal in the workspace mirror before backend access',
+    async (kind) => {
+      const f = await prepare(),
+        state = await loadState(directory);
+      expect(state.entries.opaque!.readonlyHash).toMatch(/^[a-f0-9]{64}$/);
+      if (kind === 'missing') delete state.entries.opaque!.readonlyHash;
+      else state.entries.opaque!.readonlyHash = hash('changed seal');
+      await writePrivate(directory, fileOps.STATE, JSON.stringify(state));
+      const factory = vi.fn(async () => f.backend);
+      await expect(syncWorkspace(directory, factory, { apply: true })).rejects.toThrow(
+        /integrity mismatch/
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(f.calls).toEqual([]);
+    }
+  );
+
+  it.each([false, true])(
+    'preserves readonly reference seals across exact-ID file rename with additional content=%s',
+    async (additionalContent) => {
+      const f = await prepare(({ rems }) => {
+        Object.assign(rems.get('opaque')!, {
+          text: ['Reference'],
+          type: 6,
+          portal: { type: 0, directlyIncludedRemIds: ['subdoc'] },
+        });
+      });
+      const oldPath = f.state.entries.subdoc!.path,
+        newPath = oldPath.replace('Child doc', 'Renamed file'),
+        beforeNative = structuredClone([...f.rems]),
+        seal = f.state.entries.opaque!.readonlyHash;
+      expect(newPath).not.toBe(oldPath);
+      await rename(join(directory, oldPath), join(directory, newPath));
+      await edit(
+        f.path,
+        (source) =>
+          source.replaceAll(oldPath.replace(/\.md$/, ''), newPath.replace(/\.md$/, '')) +
+          (additionalContent ? '\n- Added note\n' : '')
+      );
+      const desired = await readPrivate(directory, f.path);
+      expect(await syncWorkspace(directory, async () => f.backend, { apply: true })).toMatchObject({
+        status: 'verified',
+      });
+      if (!additionalContent) {
+        expect(await readPrivate(directory, f.path)).toBe(desired);
+        expect([...f.rems]).toEqual(beforeNative);
+        expect(f.calls).toEqual([]);
+      }
+      const after = await loadState(directory);
+      expect(after.entries.subdoc!.path).toBe(newPath);
+      expect(after.entries.opaque!.readonlyHash).toBe(seal);
+      expect((await inspectLocal(directory)).diagnostics).toEqual([]);
+      await formatWorkspace(directory);
+      expect((await loadState(directory)).entries.opaque!.readonlyHash).toBe(seal);
+      expect(await readPrivate(directory, f.path)).toContain('|Child doc]]');
+      expect(f.rems.get('opaque')!.portal!.directlyIncludedRemIds).toEqual(['subdoc']);
+    }
+  );
+
+  it('does not establish a missing readonly seal from an edited alias', async () => {
+    const f = await prepare(({ rems }) => {
+      Object.assign(rems.get('opaque')!, {
+        text: ['Reference'],
+        type: 6,
+        portal: { type: 0, directlyIncludedRemIds: ['basic'] },
+      });
+    });
+    const old = await loadState(directory);
+    delete old.entries.opaque!.readonlyHash;
+    await saveState(directory, old);
+    await edit(f.path, (source) => source.replace('|Front]]', '|Unauthorized label]]'));
+    const context = await inspectLocal(directory);
+    expect(context.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'OPAQUE_EDIT' })])
+    );
+    await expect(
+      prepareSnapshot(
+        directory,
+        'kb',
+        [...context.native.values()],
+        context.state,
+        context.state,
+        await context.inputs.freeze(),
+        undefined,
+        undefined,
+        [],
+        context.parsed
+      )
+    ).rejects.toThrow(/edited readonly source projection/);
+    expect((await loadState(directory)).entries.opaque).not.toHaveProperty('readonlyHash');
+    expect(f.calls).toEqual([]);
+  });
 
   it('rejects readonly projection backfill even when snapshot preparation bypasses reconciliation', async () => {
     const f = await prepare(({ rems }) => {

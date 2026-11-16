@@ -54,6 +54,8 @@ export interface WorkspaceEntry {
   rawHash: string;
   nativeHash: string;
   editable: boolean;
+  /** Sealed local readonly projection, including its existing reference display labels. */
+  readonlyHash?: string;
   publicHash?: string;
   originalHash?: string;
 }
@@ -114,6 +116,10 @@ export interface OutlineNode {
   cardCluster?: true;
   children: string[];
   contentHash: string;
+  /** Local display only, ordered per occurrence. Native reference IDs remain in the sealed projection. */
+  readonlyLinks?: Array<{ id: string; label: string }>;
+  /** Readonly source seal with resolved Wiki paths normalized to exact native identities. */
+  readonlyHash?: string;
 }
 export interface ParsedOutline {
   path: string;

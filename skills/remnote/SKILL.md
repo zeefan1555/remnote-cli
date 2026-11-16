@@ -233,6 +233,10 @@ Generated links use full paths; unique basenames and the named document's curren
 ambiguous or broken targets fail. Local file moves do not move native Rems.
 Portals and auxiliary reference areas are not ordinary diagnostic note text or
 Obsidian dynamic queries. Unverified new embeds fail lint before remote writes.
+Existing explicit reference labels in readonly projections are sealed local
+presentation: target renames preserve them, including during canonical rendering
+and publication recovery. Editing those labels still fails lint before writes;
+native reference IDs, surrounding content and Portal structure remain sealed too.
 
 New imports publish the human format. Explicit offline `sync format DIR` converts
 only a complete, clean sealed legacy publication with no pending write journal,

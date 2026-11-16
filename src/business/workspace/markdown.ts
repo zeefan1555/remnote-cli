@@ -260,6 +260,8 @@ export interface RenderOptions {
   attributes?: DocumentAttributes;
   originalIds?: Set<string>;
   links?: WorkspaceLinks;
+  /** Reuse only exact-target display labels; never substitute source content or native structure. */
+  source?: ParsedOutline;
 }
 
 export function documentMetadata(
@@ -305,11 +307,7 @@ export function documentMetadata(
 }
 
 /** Safe, deliberately read-only display. Rich originals and all unknown fields remain in private sidecars. */
-function readonlyInline(
-  value: unknown,
-  links: WorkspaceLinks,
-  byId: Map<string, WorkspaceRem>
-): PhrasingContent[] {
+function readonlyInline(value: unknown, reference: (id: string) => string): PhrasingContent[] {
   if (!Array.isArray(value)) return [{ type: 'text', value: value == null ? '' : '〔原生内容〕' }];
   return value.flatMap((part): PhrasingContent[] => {
     if (typeof part === 'string') return [{ type: 'text', value: part }];
@@ -319,7 +317,7 @@ function readonlyInline(
       return [
         {
           type: 'html',
-          value: links.render(p._id, byId.has(p._id) ? titleOf(byId.get(p._id)!) : p._id),
+          value: reference(p._id),
         },
       ];
     if (p.i === 'i' && typeof p.url === 'string' && /^https?:\/\//i.test(p.url))
@@ -358,12 +356,21 @@ function renderParts(
         metadata: id === rootId ? metadata : documentMetadata(id, byId, documents, options),
       }))
     );
+  const sourceNodes = new Map(options.source?.nodes.map((node) => [node.key, node]));
   function ownContent(rem: WorkspaceRem, heading = false): RootContent[] {
     const kind = nodeKind(rem, byId),
       anchor = metadata.rems[rem.id]!.block;
+    const labels = new Map<string, string[]>();
+    for (const { id, label } of sourceNodes.get(rem.id)?.readonlyLinks ?? []) {
+      const values = labels.get(id) ?? [];
+      values.push(label);
+      labels.set(id, values);
+    }
+    const reference = (id: string) =>
+      links.render(id, labels.get(id)?.shift() ?? (byId.has(id) ? titleOf(byId.get(id)!) : id));
     let front: RootContent =
       kind === 'opaque'
-        ? { type: 'paragraph', children: readonlyInline(rem.text, links, byId) }
+        ? { type: 'paragraph', children: readonlyInline(rem.text, reference) }
         : block(rem.text, links, byId);
     const extra: RootContent[] = [];
     if (front.type === 'code') {
@@ -375,20 +382,20 @@ function renderParts(
       if (!front.children.length)
         front.children.push({ type: 'text', value: rem.type === 6 ? '关联引用' : '原生内容' });
       front.children.push({ type: 'text', value: '〔只读〕' });
-      if (Array.isArray(rem.backText) && rem.backText.length)
-        extra.push({
-          type: 'blockquote',
-          children: [{ type: 'paragraph', children: readonlyInline(rem.backText, links, byId) }],
-        });
       if (rem.type === 6) {
         const targets = branches.get(rem.id)?.targets ?? rem.portal?.directlyIncludedRemIds ?? [];
         front.children.push(
           ...targets.flatMap((id): PhrasingContent[] => [
             { type: 'text', value: ' ' },
-            { type: 'html', value: links.render(id, byId.has(id) ? titleOf(byId.get(id)!) : id) },
+            { type: 'html', value: reference(id) },
           ])
         );
       }
+      if (Array.isArray(rem.backText) && rem.backText.length)
+        extra.push({
+          type: 'blockquote',
+          children: [{ type: 'paragraph', children: readonlyInline(rem.backText, reference) }],
+        });
     } else if (kind === 'basic')
       extra.push({
         type: 'blockquote',
@@ -852,6 +859,34 @@ function parseOutline(
         fail(line, 'EMPTY_ANSWER', 'Basic card answer cannot be empty');
     }
     const own = blocks.filter((node) => node.type !== 'list');
+    const readonlyProjection = kind === 'opaque' ? structuredClone(own) : [];
+    const readonlyLinks: NonNullable<OutlineNode['readonlyLinks']> = [];
+    function collectLabels(node: RootContent | PhrasingContent): void {
+      if (node.type === 'wikiLink' && node.target) {
+        try {
+          const id = links.resolve(path, node.target).id;
+          if (node.alias !== null && !node.embed) readonlyLinks.push({ id, label: node.alias });
+          // A local file rename changes the route, not the sealed native reference or its label.
+          node.value = `${node.embed ? '!' : ''}[[remnote:${id}${node.alias === null ? '' : `|${node.alias}`}]]`;
+        } catch {
+          // Unresolved/malformed tokens cannot provide a label; the full projection check rejects edits.
+        }
+      } else if (
+        node.type === 'link' &&
+        node.url.startsWith('remnote:') &&
+        !node.title &&
+        idSchema.safeParse(node.url.slice('remnote:'.length)).success &&
+        node.children.every((child) => child.type === 'text')
+      ) {
+        readonlyLinks.push({
+          id: node.url.slice('remnote:'.length),
+          label: node.children.map((child) => (child.type === 'text' ? child.value : '')).join(''),
+        });
+      } else if ('children' in node) {
+        for (const child of node.children) collectLabels(child);
+      }
+    }
+    for (const block of readonlyProjection) collectLabels(block);
     const cardCluster = frontmatter.attributes?.rems?.[blockId]?.cardCluster;
     if (
       cardCluster &&
@@ -876,6 +911,14 @@ function parseOutline(
       ...(tags === undefined ? {} : { tags }),
       ...(cardCluster ? { cardCluster } : {}),
       children: [],
+      ...(readonlyLinks.length ? { readonlyLinks } : {}),
+      ...(kind === 'opaque'
+        ? {
+            readonlyHash: hash(
+              toMarkdown({ type: 'root', children: readonlyProjection }, MARKDOWN_OPTIONS)
+            ),
+          }
+        : {}),
       contentHash:
         kind === 'mount'
           ? hash({ mount: key })
@@ -908,6 +951,7 @@ function parseOutline(
           backText: [],
           children: [...entry.native.children!],
           contentHash: hash({ hiddenReference: hidden }),
+          readonlyHash: hash({ hiddenReference: hidden }),
         });
       }
       return node;

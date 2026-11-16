@@ -120,6 +120,7 @@ const stateSchema = z
           rawHash: digest,
           nativeHash: digest,
           editable: z.boolean(),
+          readonlyHash: digest.optional(),
           publicHash: digest.optional(),
           originalHash: digest.optional(),
         })
@@ -411,17 +412,8 @@ export async function prepareSnapshot(
       : {}),
   };
   const writes = new Map<string, string | null>(originals);
+  let priorNative: Map<string, WorkspaceRem> | undefined;
   for (const [id, path] of paths) {
-    if (selection && !selection.files.includes(path)) {
-      const prior = Object.entries(previous?.documents ?? {}).find(([, doc]) => doc.rootId === id);
-      if (!prior) throw new Error('Unselected document has no shared baseline');
-      const [priorPath, document] = prior;
-      if (state.documents[priorPath])
-        throw new Error('Select every document involved in a path swap');
-      state.documents[priorPath] = document;
-      for (const key of document.nodeIds) state.entries[key] = previous!.entries[key]!;
-      continue;
-    }
     const options = {
       blocks,
       display: displays.get(id),
@@ -429,11 +421,63 @@ export async function prepareSnapshot(
       originalIds,
       links,
       tagIds: state.tagIds,
+      source: sources.get(path),
     };
+    const current = sources.get(path);
+    if (previous && current) {
+      const opaque = current.nodes.filter((node) => node.kind === 'opaque');
+      let priorProjection: Map<string, string> | undefined;
+      if (opaque.some((node) => previous.entries[node.key]?.readonlyHash === undefined)) {
+        // A baseline without a saved display seal can only establish it from its sealed native records.
+        // Never trust the current source labels to establish their own authority.
+        if (!priorNative) {
+          const prior = await inspectNativeRecords(root, previous);
+          if (prior.diagnostics.length)
+            throw new Error('Invalid sealed native presentation baseline');
+          priorNative = prior.native;
+        }
+        priorProjection = new Map(
+          renderParsedDocument(id, path, priorNative, paths, {
+            ...options,
+            source: undefined,
+          })
+            .document.nodes.filter((node) => node.kind === 'opaque')
+            .map((node) => [node.key, node.readonlyHash!])
+        );
+      }
+      if (
+        opaque.some(
+          (node) =>
+            node.readonlyHash !==
+            (previous.entries[node.key]?.readonlyHash ?? priorProjection?.get(node.key))
+        )
+      )
+        throw new Error(
+          'Local-authoritative publication rejected an edited readonly source projection'
+        );
+    }
+    if (selection && !selection.files.includes(path)) {
+      const prior = Object.entries(previous?.documents ?? {}).find(([, doc]) => doc.rootId === id);
+      if (!prior) throw new Error('Unselected document has no shared baseline');
+      const [priorPath, document] = prior;
+      if (state.documents[priorPath])
+        throw new Error('Select every document involved in a path swap');
+      state.documents[priorPath] = document;
+      const currentNodes = new Map(current?.nodes.map((node) => [node.key, node]));
+      for (const key of document.nodeIds) {
+        const entry = previous!.entries[key]!;
+        if (!entry.editable && entry.readonlyHash === undefined) {
+          const node = currentNodes.get(key);
+          if (!node) throw new Error('Missing verified readonly source projection');
+          // This adds a local display proof only, never advances an unselected native baseline.
+          state.entries[key] = { ...entry, readonlyHash: node.readonlyHash! };
+        } else state.entries[key] = entry;
+      }
+      continue;
+    }
     const parsed = renderParsedDocument(id, path, byId, paths, options);
     if (parsed.diagnostics.length)
       throw new Error(`Generated outline failed its own lint: ${parsed.diagnostics[0]!.code}`);
-    const current = sources.get(path);
     if (previous && (!selection || selection.files.includes(path))) {
       if (!current) throw new Error('Local-authoritative publication requires the selected source');
       const desiredNodes = current.nodes.filter((node) => !removed.has(node.key));
@@ -490,6 +534,7 @@ export async function prepareSnapshot(
         .filter((node) => node.kind !== 'mount')
         .map((node) => node.key),
     };
+    const parsedNodes = new Map(parsed.document.nodes.map((node) => [node.key, node]));
     for (const key of state.documents[path]!.nodeIds) {
       const rem = byId.get(key)!;
       const rawPath = recordPath(key),
@@ -502,6 +547,9 @@ export async function prepareSnapshot(
         rawHash: hash(raw),
         nativeHash: hash(rem),
         editable: nodeKind(rem, byId) !== 'opaque',
+        ...(nodeKind(rem, byId) === 'opaque'
+          ? { readonlyHash: parsedNodes.get(key)!.readonlyHash! }
+          : {}),
       };
       if (rem.public) {
         const publicPath = originalPath('public', key);
@@ -763,6 +811,12 @@ export async function inspectLocal(
       links,
       attributes: frontmatter.attributes,
       tagIds: state.tagIds,
+      source: {
+        ...current.document,
+        nodes: current.document.nodes.filter(
+          (node) => state.entries[node.key]?.readonlyHash === node.readonlyHash
+        ),
+      },
     }).document;
     baseline.set(path, old);
     if (current.document.nodes[0]?.key !== doc.rootId)
@@ -830,7 +884,13 @@ export async function inspectLocal(
           );
         if (node.parent !== before.parent || node.kind !== before.kind)
           fail(path, node.line, 'IMMUTABLE_STRUCTURE', 'Existing parent/card kind is immutable');
-        if (['opaque', 'mount'].includes(before.kind) && node.contentHash !== before.contentHash)
+        if (
+          ['opaque', 'mount'].includes(before.kind) &&
+          (node.contentHash !== before.contentHash ||
+            (node.kind === 'opaque' &&
+              state.entries[node.key]?.readonlyHash !== undefined &&
+              node.readonlyHash !== state.entries[node.key]!.readonlyHash))
+        )
           fail(
             path,
             node.line,

@@ -22,6 +22,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Preserve exact-target readonly reference labels when a local referenced title
+  changes, including whole-document rendering, format, resume and publication
+  recovery. Keep full opaque projection hashes and native reference/Portal guards;
+  display labels never replace native identity or permit content backfill.
+  Seal Wiki references by exact ID so local file/path renames remain supported.
+
 - Reject native Portal/readonly projection drift before any batch writes. Runtime
   review/TODO facts refresh only sidecar evidence and preserve authored source
   bytes, including YAML comments and formatting.

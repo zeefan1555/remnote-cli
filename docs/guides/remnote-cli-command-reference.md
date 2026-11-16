@@ -418,6 +418,14 @@ duplicate identities fail lint instead of guessing a target. Renames must leave
 references resolvable. Display aliases do not change native identity. New embeds
 without a verified public-SDK mapping fail the whole sync before remote writes;
 existing native Portals retain their original value and are explicitly read-only.
+Readonly reference display labels are sealed alongside the local baseline, not
+regenerated from later target titles. Renaming a supported canonical target keeps
+its reference IDs and existing readonly labels through apply, resume, recover and
+format. Changing those labels still fails lint; the complete opaque projection
+and native Portal guards remain enforced. An older baseline without a display
+seal derives it only from verified sealed native records, never from proposed edits.
+The display seal normalizes resolvable Wiki paths to their exact native target ID,
+so supported file renames may update paths without changing labels or references.
 Auxiliary reference/Portal areas are distinct from actual multiline answer items;
 they are not flattened into diagnostic body text or presented as working
 Obsidian dynamic queries.
