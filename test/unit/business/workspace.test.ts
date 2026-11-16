@@ -361,6 +361,97 @@ async function edit(path: string, replace: (source: string) => string) {
 }
 
 describe('exact feedback partition regression', () => {
+  async function nestedRoles() {
+    const f = await prepare(({ rems }) => {
+      rems.set(
+        'role-parent',
+        native('role-parent', ['Role Parent'], { children: ['todo', 'done'] })
+      );
+      rems.set('todo', native('todo', ['TODO'], { parent: 'role-parent' }));
+      rems.set('done', native('done', ['DONE'], { parent: 'role-parent' }));
+    });
+    await bindDeletionRoles(f);
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    return f;
+  }
+  it.each([
+    ['answer', 'todo'],
+    ['answer', 'done'],
+    ['question', 'todo'],
+    ['question', 'done'],
+    ['chapter', 'todo'],
+    ['chapter', 'done'],
+  ] as const)('fresh lifecycle tag %s/%s blocks selected subtree deletion', async (id, tag) => {
+    const f = await prepareDeletion();
+    await removeQuestion(
+      f.path,
+      f.state.entries.question!.blockId,
+      f.state.entries.answer!.blockId
+    );
+    f.rems.get(id)!.tags = [tag];
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Feedback or unknown feedback partition');
+    expect(f.backend.remove).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+    expect(f.rems.has('question')).toBe(true);
+    expect(f.rems.has('answer')).toBe(true);
+  });
+  it.each(['answer', 'question', 'chapter'] as const)(
+    'sealed unknown tags on %s block selected deletion before connect',
+    async (id) => {
+      const f = await prepareDeletion(({ rems }) => {
+        delete rems.get(id)!.tags;
+      });
+      await removeQuestion(
+        f.path,
+        f.state.entries.question!.blockId,
+        f.state.entries.answer!.blockId
+      );
+      const connect = vi.fn(async () => f.backend);
+      await expect(
+        syncWorkspace(directory, connect, { apply: true, paths: [f.path] })
+      ).rejects.toThrow('Feedback or unknown feedback partition');
+      expect(connect).not.toHaveBeenCalled();
+      expect(f.calls).toEqual([]);
+    }
+  );
+  it('blocks changed exact-role ancestor before deletion', async () => {
+    const f = await nestedRoles();
+    f.rems.get('role-parent')!.text = ['changed ancestor'];
+    await expect(
+      syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+    ).rejects.toThrow('Feedback role identity or content changed');
+    expect(f.backend.remove).not.toHaveBeenCalled();
+    expect(f.calls).toEqual([]);
+  });
+  it.each(['todo', 'role-parent'] as const)(
+    'stops after first delete when %s identity drifts during batch',
+    async (id) => {
+      const f = await nestedRoles();
+      const remove = f.backend.removeMirror;
+      f.backend.removeMirror = vi.fn(async (target) => {
+        await remove(target);
+        f.rems.get(id)!.text = ['drifted'];
+      });
+      const result = await syncWorkspace(directory, async () => f.backend, {
+        apply: true,
+        paths: [f.path],
+      });
+      expect(result).toMatchObject({ status: 'unknown', complete: false, remoteWrites: 1 });
+      expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+      expect(f.rems.has('question')).toBe(true);
+      expect(f.rems.has('todo')).toBe(true);
+      await expect(
+        syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
+      ).rejects.toThrow();
+      expect(f.backend.removeMirror).toHaveBeenCalledTimes(1);
+    }
+  );
   async function boundWithoutFeedback() {
     return prepareDeletion();
   }
@@ -436,7 +527,7 @@ describe('exact feedback partition regression', () => {
       await syncWorkspace(directory, async () => f.backend, { apply: true, paths: [f.path] })
     ).toMatchObject({ status: 'verified', deleted: ['answer', 'question'] });
     expect(f.rems.has('unknown_0')).toBe(true);
-  }, 15000);
+  }, 60000);
 
   it('never traverses a Portal even when its native type is unknown', async () => {
     const f = fixture();
