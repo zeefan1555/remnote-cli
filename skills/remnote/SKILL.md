@@ -132,7 +132,11 @@ publisher. It recognizes only the exact recorded after-state and otherwise stops
 This path requires prior `sync feedback bind DIR --todo-tag-id ID --done-tag-id ID`:
 clean, already-aligned source and known sealed direct tags. Bind never edits
 Markdown or initializes missing native evidence; existing authored role tokens
-are a reported blocker. Capture also requires clean source, one separate direct
+are a reported blocker. Only with explicit baseline-initialization authorization,
+use `sync baseline-align DIR [--path PATH]` to preview missing observations, then
+the same selectors with `--apply --plan-hash HASH`; see the command reference.
+This separate local publication makes zero native writes and is never an implicit
+step of bind, capture or ordinary sync. Capture also requires clean source, one separate direct
 physical non-card TODO subtree, and a preexisting exact native reference plus
 reciprocal backlink to each canonical target in one file. Plain feedback without
 that native link, canonical TODO nodes, Portals/cards, and no-change confirmation

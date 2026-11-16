@@ -16,6 +16,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   publication, complete local handoff, native reference/backlink and known history;
   durable checkbox/tag atoms resume only proven after-states without republishing.
   Remove the old transaction-based TODO complete/reopen/update writer.
+- Add explicit `sync baseline-align DIR [--path PATH]` preview and
+  `--apply --plan-hash HASH` for missing tag observations, verified null Portal
+  query/filter fields and readonly display seals. It only reads bound native IDs,
+  rejects known drift and local edits, inserts exact YAML/bullet tag tokens without
+  rerendering authored Markdown, and uses recoverable local publication. It never
+  creates or changes native Rems, Cards or review history.
+
 - Workspace publishing is local-authoritative after explicit empty-vault import.
   Local edits publish against the verified baseline; identical content converges.
   Other native body/tag drift archives both versions and blocks every write; new

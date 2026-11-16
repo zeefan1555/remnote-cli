@@ -85,6 +85,7 @@ below is the authorized private vault's absolute path.
 | Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
 | Input-bound native audit | `remnote-cli sync apply DIR --path PATH --expected-file-hash HASH`; exactly one file, full native proof and output outline from this invocation |
 | Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
+| Missing baseline observations | `remnote-cli sync baseline-align DIR [--path PATH]`; read-only native preview, then `--apply --plan-hash HASH` for exact local publication |
 | Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
 | Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
 
@@ -460,6 +461,21 @@ add-tag or other writes; it never changes plugin settings. Ordinary tag addition
 require only the normal write gate.
 
 ### Explicit format conversion
+
+`sync baseline-align DIR` is an explicit one-time alignment for a complete, clean,
+bound vault whose original import did not collect direct tags or Portal
+query/filter fields, or did not seal readonly display. It reads only selected
+bound IDs and the bound ancestors of their direct tags; it does not discover or
+import roots. Missing tags must be observed as arrays; missing Portal fields must
+be observed as null. Known tag, body, structure and Card-identity drift aborts
+before publication. Unpublished local edits are refused rather than overwritten.
+Root tags are inserted into YAML `tags`, child tags into the exact bound bullet,
+without whole-file rendering. Ambiguous or hidden insertion sites fail closed.
+Review `planHash` from the preview, then run the same command and selectors with
+`--apply --plan-hash HASH`. Source/native observations must still match. This
+operation makes zero native writes and preserves sealed Card/history/original
+records; its history count reports only freshly known histories, never claims
+that unknown history is empty. Interrupted local publication uses `sync recover`.
 
 `sync format DIR` is an explicit offline conversion of a clean, sealed legacy
 publication to human Markdown, or canonical rendering of a clean already-human

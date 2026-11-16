@@ -13,6 +13,7 @@ import {
 import { fileByteLimit } from '../../business/workspace/files.js';
 import { formatWorkspace } from '../../business/workspace/format.js';
 import { relocateWorkspace } from '../../business/workspace/relocate.js';
+import { alignWorkspaceBaseline } from '../../business/workspace/baseline.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatError, formatResult } from '../output/formatter.js';
@@ -129,6 +130,7 @@ export function registerSyncCommands(program: Command): void {
       | 'read'
       | 'save'
       | 'relocate'
+      | 'baseline-align'
       | 'format',
     directory: string,
     options: SyncOptions,
@@ -141,6 +143,8 @@ export function registerSyncCommands(program: Command): void {
       if (name === 'read') result = await readWorkspace(directory, path!);
       else if (name === 'relocate') result = await relocateWorkspace(directory, path!);
       else if (name === 'format') result = await formatWorkspace(directory);
+      else if (name === 'baseline-align')
+        result = await alignWorkspaceBaseline(directory, () => client.workspaceBackend(), options);
       else if (name === 'save')
         result = await saveWorkspace(
           directory,
@@ -212,6 +216,25 @@ export function registerSyncCommands(program: Command): void {
       execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })
     );
   }
+  pathOptions(workspace.command('baseline-align <directory>'))
+    .description(
+      'Preview missing native tag/null-portal observations and readonly seals; never write RemNote'
+    )
+    .option('--apply', 'Publish the exact reviewed local baseline alignment')
+    .option('--plan-hash <sha256>', 'Exact preview hash required with --apply')
+    .action(
+      async (
+        directory: string,
+        { path, ...options }: SyncOptions & { path: string[] },
+        command: Command
+      ) => {
+        if (options.apply && !options.planHash)
+          command.error('sync baseline-align --apply requires --plan-hash', {
+            code: 'commander.missingMandatoryOptionValue',
+          });
+        await execute('baseline-align', directory, { ...options, paths: path });
+      }
+    );
   workspace
     .command('resume <directory>')
     .description(

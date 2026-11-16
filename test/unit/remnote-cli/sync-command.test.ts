@@ -7,6 +7,10 @@ import * as sync from '../../../src/business/workspace/workspace.js';
 import * as contentInput from '../../../src/remnote-cli/commands/content-input.js';
 import * as format from '../../../src/business/workspace/format.js';
 import * as relocate from '../../../src/business/workspace/relocate.js';
+import * as baseline from '../../../src/business/workspace/baseline.js';
+vi.mock('../../../src/business/workspace/baseline.js', () => ({
+  alignWorkspaceBaseline: vi.fn(async () => ({ ok: true, remoteWrites: 0 })),
+}));
 vi.mock('../../../src/business/workspace/relocate.js', () => ({
   relocateWorkspace: vi.fn(async () => ({ ok: true, nativeWrites: 0 })),
 }));
@@ -53,6 +57,37 @@ function testProgram() {
 }
 
 describe('sync command interface', () => {
+  it('routes explicit baseline alignment preview with exact selected paths', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await testProgram().program.parseAsync([
+      'node',
+      'remnote-cli',
+      'sync',
+      'baseline-align',
+      '/private/tmp/vault',
+      '--path',
+      'Day.md',
+    ]);
+    expect(baseline.alignWorkspaceBaseline).toHaveBeenCalledExactlyOnceWith(
+      '/private/tmp/vault',
+      expect.any(Function),
+      { paths: ['Day.md'] }
+    );
+    expect(sync.pushWorkspace).not.toHaveBeenCalled();
+  });
+  it('requires an explicit exact hash before baseline alignment applies', async () => {
+    await expect(
+      testProgram().program.parseAsync([
+        'node',
+        'remnote-cli',
+        'sync',
+        'baseline-align',
+        '/private/tmp/vault',
+        '--apply',
+      ])
+    ).rejects.toThrow('requires --plan-hash');
+    expect(baseline.alignWorkspaceBaseline).not.toHaveBeenCalled();
+  });
   it('routes explicit relocation offline with both exact paths', async () => {
     const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -292,6 +327,7 @@ describe('sync command interface', () => {
       'feedback',
       'plan',
       'apply',
+      'baseline-align',
       'resume',
       'delete',
       'relocate',
