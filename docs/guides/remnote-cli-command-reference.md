@@ -1000,6 +1000,9 @@ several items (a code span can also be bold and a cloze).
 include the tag itself. `cards[]` has `id`, `type`, `due`, `nextRepetition` (the same
 timestamp), `historyLength`, and `hash`. The hash covers card id, rem id, type, and
 repetition history, so a due-date-only change does not change it.
+Missing or null history yields `historyLength:null` and `hash:null`; only an explicitly
+empty array yields zero reviews and a history hash. `rawCards[].repetitionHistory` is
+likewise null when unknown. Malformed history produces a field error, not empty evidence.
 
 `portal` is present for a portal Rem or a Rem carrying powerup `sp`. `query` is slot `q`
 and `filter` is slot `f` (search-portal queries and table filters). A recognized
@@ -1088,6 +1091,7 @@ remnote-cli review-stats --tag-id <tag-rem-id>
 JSON output preserves the raw card type, creation timestamp, repetition history, last and next repetition timestamps,
 and consecutive wrong count. Text output provides a compact summary. The command does not calculate mastery or change
 the review schedule.
+In JSON, unknown review history is `null`; an explicit empty array means known zero reviews.
 
 ## outline
 

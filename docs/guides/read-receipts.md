@@ -34,6 +34,9 @@ Every object contains `remId`, `contentIncluded`, `textHash` (SHA-256 of JSON-se
 `powerups:{cc,u}`, and native `cards`. `parentRemId`, `updatedAt` (number), and `taggedRemIds` are optional.
 Cards contain `cardId`, `remId`, native `type`, `createdAt`, `repetitionHistory`, and optional `lastRepetitionTime`,
 `nextRepetitionTime`, `timesWrongInRow`.
+An absent or null SDK history is `repetitionHistory:null` (unknown), never `[]` (known zero reviews).
+Malformed history fails inspection; valid history retains its complete JSON data without normalization.
+Receipt completeness describes the requested reads, not proof that an unknown history is empty.
 
 Only IDs explicitly listed in `remIds` have `contentIncluded:true` and include `title`, raw `text`, `aliases`, and
 optional raw `backText`. Subtree-only and tag-only objects have `contentIncluded:false` and omit all four content

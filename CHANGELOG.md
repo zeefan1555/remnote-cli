@@ -9,6 +9,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Inspection receipts and review-stat JSON preserve unavailable Card history as
+  `null`, distinct from a known empty array. Inspect summaries omit history proof
+  (`historyLength:null`, `hash:null`) when history is unknown and reject malformed
+  history rather than reporting zero reviews or hashing lossy data.
+
 - Changed sync can freshly observe a verification-only dependency whose direct tags
   were never collected, without mistaking unknown membership for an empty baseline.
   Newly observed tag dependencies extend the proof to a fixed point; known tags,

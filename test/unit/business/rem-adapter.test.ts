@@ -567,6 +567,32 @@ describe('RemAdapter', () => {
   });
 
   describe('getReviewStats', () => {
+    it.each(
+      [undefined, null, [], [{ date: 10, score: 1, pluginData: { nested: [0, false] } }]].map(
+        (history) => ({ history })
+      )
+    )('preserves unknown versus known review history: %j', async ({ history }) => {
+      const rem = plugin.addTestRem('review', 'Review');
+      const card = new MockCard('c', 'review', 'forward', 1, history as never);
+      rem.setCardsMock([card]);
+      const result = await adapter.getReviewStats({ remIds: ['review'] });
+      expect(result.results[0].cards[0].repetitionHistory).toEqual(history ?? null);
+    });
+    it.each(
+      ['bad', [undefined], [{ pluginData: { value: undefined } }], [{ score: NaN }]].map(
+        (history) => ({ history })
+      )
+    )('rejects malformed review history: %j', async ({ history }) => {
+      const rem = plugin.addTestRem('review', 'Review');
+      const card = new MockCard('c', 'review', 'forward', 1, history as never);
+      rem.setCardsMock([card]);
+      await expect(adapter.getReviewStats({ remIds: ['review'] })).rejects.toThrow();
+    });
+    it('does not turn a card read failure into empty review facts', async () => {
+      const rem = plugin.addTestRem('review', 'Review');
+      vi.spyOn(rem, 'getCards').mockRejectedValueOnce(new Error('read failed'));
+      await expect(adapter.getReviewStats({ remIds: ['review'] })).rejects.toThrow('read failed');
+    });
     it('returns native review facts for every card generated from each Rem', async () => {
       const forwardRem = plugin.addTestRem('review-forward-rem', 'Forward card');
       forwardRem.setCardsMock([
@@ -627,7 +653,7 @@ describe('RemAdapter', () => {
                 remId: 'review-cloze-rem',
                 type: { clozeId: 'c1' },
                 createdAt: 1_700_000_200_000,
-                repetitionHistory: [],
+                repetitionHistory: null,
               },
             ],
           },

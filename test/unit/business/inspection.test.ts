@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { BuiltInPowerupCodes, RemType } from '../../../src/business/sdk-constants.generated.js';
 
 import {
+  inspectCardHistory,
   inspectMany,
   verifyScope,
   validateInspectParams,
@@ -63,6 +64,56 @@ function fixture() {
   return { make, plugin, nodes };
 }
 describe('bounded inspection receipts', () => {
+  it('rejects lossy nested values and cycles while retaining original JSON keys', () => {
+    const cyclic: unknown[] = [];
+    cyclic.push(cyclic);
+    for (const history of [
+      [new Date(0)],
+      [Infinity],
+      [BigInt(1)],
+      [Symbol('unknown')],
+      [() => null],
+      Array(1),
+      cyclic,
+      Object.assign([], { toJSON: () => [] }),
+      Object.assign([], { discarded: true }),
+      [Object.defineProperty({}, 'discarded', { value: true })],
+      [Object.defineProperty({}, 'changing', { enumerable: true, get: () => [] })],
+      [Object.fromEntries([['__proto__', undefined]])],
+    ])
+      expect(() => inspectCardHistory(history)).toThrow();
+    const history = JSON.parse('[{"date":10,"score":1,"pluginData":{"__proto__":{"kept":true}}}]');
+    expect(inspectCardHistory(history)).toBe(history);
+    expect(JSON.stringify(inspectCardHistory(history))).toBe(JSON.stringify(history));
+  });
+  it.each(
+    [undefined, null, [], [{ date: 10, score: 1, pluginData: { nested: [0, false] } }]].map(
+      (history) => ({ history })
+    )
+  )('preserves unknown versus known card history: %j', async ({ history }) => {
+    const { make, plugin } = fixture();
+    make('r').getCards.mockResolvedValue([
+      { _id: 'c', remId: 'r', type: 'forward', createdAt: 1, repetitionHistory: history },
+    ]);
+    const out = await inspectMany(plugin as never, { schemaVersion: 1, remIds: ['r'] });
+    expect(out.complete).toBe(true);
+    expect(out.objects[0].cards[0].repetitionHistory).toEqual(history ?? null);
+    expect(JSON.parse(JSON.stringify(out)).objects[0].cards[0].repetitionHistory).toEqual(
+      history ?? null
+    );
+  });
+  it.each(
+    ['bad', [undefined], [{ pluginData: { value: undefined } }], [{ score: NaN }]].map(
+      (history) => ({ history })
+    )
+  )('fails closed on malformed card history: %j', async ({ history }) => {
+    const { make, plugin } = fixture();
+    make('r').getCards.mockResolvedValue([{ _id: 'c', remId: 'r', repetitionHistory: history }]);
+    const out = await inspectMany(plugin as never, { schemaVersion: 1, remIds: ['r'] });
+    expect(out.complete).toBe(false);
+    expect(out.objects).toEqual([]);
+    expect(out.errors).toEqual([expect.objectContaining({ code: 'inspection_failed' })]);
+  });
   it('reads exact IDs in one initial batch and projects descendant metadata without content', async () => {
     const { make, plugin } = fixture();
     make('root');

@@ -9,6 +9,44 @@ import { contentHash } from './content-hash.js';
 import { hasCardStructure } from './card-structure.js';
 import { plainText } from './plain-text.js';
 import { mapReads } from './workspace/read-pool.js';
+
+/** Keep unknown history distinct from known-empty, and never hash lossy JSON. */
+export function inspectCardHistory<T>(history: T[] | null | undefined): T[] | null {
+  if (history == null) return null;
+  if (!Array.isArray(history)) throw new Error('SDK card history malformed');
+  const ancestors = new Set<object>();
+  const validate = (value: unknown): void => {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+    if (typeof value === 'number' && Number.isFinite(value)) return;
+    if (typeof value !== 'object' || value === null || ancestors.has(value))
+      throw new Error('SDK card history requires lossless JSON');
+    const prototype = Object.getPrototypeOf(value);
+    if (
+      (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) ||
+      Object.getOwnPropertySymbols(value).length > 0
+    )
+      throw new Error('SDK card history requires plain JSON');
+    const array = Array.isArray(value);
+    if (
+      array &&
+      (Object.keys(value).length !== value.length ||
+        Object.keys(value).some((key, index) => key !== String(index)))
+    )
+      throw new Error('SDK card history requires dense JSON arrays');
+    ancestors.add(value);
+    // Validate original keys, including __proto__, without a schema stripping them.
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (array && key === 'length') continue;
+      if (!descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))
+        throw new Error('SDK card history requires plain JSON properties');
+      validate(descriptor.value);
+    }
+    ancestors.delete(value);
+  };
+  validate(history);
+  return history;
+}
+
 export interface InspectManyParams {
   schemaVersion: 1;
   remIds?: string[];
@@ -50,7 +88,7 @@ export interface InspectionObject {
     remId: string;
     type: PluginCardType;
     createdAt: number;
-    repetitionHistory: RepetitionStatusInterface[];
+    repetitionHistory: RepetitionStatusInterface[] | null;
     lastRepetitionTime?: number;
     nextRepetitionTime?: number;
     timesWrongInRow?: number;
@@ -389,7 +427,7 @@ export async function inspectWithEvidence(
           remId: c.remId,
           type: c.type,
           createdAt: c.createdAt,
-          repetitionHistory: c.repetitionHistory ?? [],
+          repetitionHistory: inspectCardHistory(c.repetitionHistory),
           ...(c.lastRepetitionTime === undefined
             ? {}
             : { lastRepetitionTime: c.lastRepetitionTime }),

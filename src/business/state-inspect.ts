@@ -1,6 +1,7 @@
 import type { PluginCardType, ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
 import { hasCardStructure } from './card-structure.js';
 import { contentHash } from './content-hash.js';
+import { inspectCardHistory } from './inspection.js';
 import { plainText } from './plain-text.js';
 import { sdkSafeRichText } from './sdk-rich-text.js';
 import { builtinSlotName } from './powerup-read.js';
@@ -125,8 +126,8 @@ export interface InspectedCard {
   type: unknown;
   due: number | null;
   nextRepetition: number | null;
-  historyLength: number;
-  hash: string;
+  historyLength: number | null;
+  hash: string | null;
 }
 
 export interface InspectedRawCard {
@@ -302,8 +303,6 @@ function rawCard(card: LoadedCard, remId: string): InspectedRawCard {
     )
   )
     throw new Error('SDK raw card type malformed');
-  if (card.repetitionHistory != null && !Array.isArray(card.repetitionHistory))
-    throw new Error('SDK raw card history malformed');
   const number = (value: unknown): number | null => {
     if (value == null) return null;
     if (typeof value !== 'number' || !Number.isFinite(value))
@@ -315,7 +314,7 @@ function rawCard(card: LoadedCard, remId: string): InspectedRawCard {
     remId: card.remId,
     type: type as PluginCardType,
     createdAt: number(card.createdAt),
-    repetitionHistory: card.repetitionHistory ?? null,
+    repetitionHistory: inspectCardHistory(card.repetitionHistory),
     nextRepetitionTime: number(card.nextRepetitionTime),
     lastRepetitionTime: number(card.lastRepetitionTime),
     timesWrongInRow: number(card.timesWrongInRow),
@@ -662,9 +661,7 @@ export async function inspectState(
                 cards.map(async (card) => {
                   if (!card || typeof card._id !== 'string' || !card._id)
                     throw new Error('SDK card identity malformed');
-                  const history = Array.isArray(card.repetitionHistory)
-                    ? card.repetitionHistory
-                    : [];
+                  const history = inspectCardHistory(card.repetitionHistory);
                   const due =
                     typeof card.nextRepetitionTime === 'number' ? card.nextRepetitionTime : null;
                   return {
@@ -672,13 +669,16 @@ export async function inspectState(
                     type: card.type ?? null,
                     due,
                     nextRepetition: due,
-                    historyLength: history.length,
-                    hash: await contentHash({
-                      cardId: card._id,
-                      remId: card.remId ?? rem._id,
-                      type: card.type ?? null,
-                      history,
-                    }),
+                    historyLength: history === null ? null : history.length,
+                    hash:
+                      history === null
+                        ? null
+                        : await contentHash({
+                            cardId: card._id,
+                            remId: card.remId ?? rem._id,
+                            type: card.type ?? null,
+                            history,
+                          }),
                   };
                 })
               );

@@ -22,6 +22,7 @@ import {
 import { withScopedLogPrefix } from './logging.js';
 
 import {
+  inspectCardHistory,
   inspectMany,
   verifyScope,
   type InspectManyParams,
@@ -241,7 +242,7 @@ export interface CardReviewStats {
   remId: string;
   type: PluginCardType;
   createdAt: number;
-  repetitionHistory: RepetitionStatusInterface[];
+  repetitionHistory: RepetitionStatusInterface[] | null;
   lastRepetitionTime?: number;
   nextRepetitionTime?: number;
   timesWrongInRow?: number;
@@ -1046,7 +1047,7 @@ export class RemAdapter {
       remId: card.remId,
       type: card.type,
       createdAt: card.createdAt,
-      repetitionHistory: card.repetitionHistory ?? [],
+      repetitionHistory: inspectCardHistory(card.repetitionHistory),
       ...(card.lastRepetitionTime !== undefined
         ? { lastRepetitionTime: card.lastRepetitionTime }
         : {}),

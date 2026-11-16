@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { RemType } from '../../../src/business/sdk-constants.generated.js';
 import { contentHash } from '../../../src/business/content-hash.js';
 import {
@@ -83,6 +84,78 @@ function fixture() {
 }
 
 describe('generic inspect', () => {
+  it('hashes every original nested history field without normalizing known arrays', async () => {
+    const { make, plugin } = fixture();
+    const history = JSON.parse(
+      '[{"date":10,"score":1,"pluginData":{"__proto__":{"kept":true},"nested":[null,false,0,"value"]}},{"date":20,"score":2}]'
+    );
+    make('r').getCards.mockResolvedValue([
+      { _id: 'c', remId: 'r', type: 'forward', repetitionHistory: history },
+    ]);
+    const out = await inspectState(plugin as never, {
+      remIds: ['r'],
+      fields: ['cards', 'rawCards'],
+    });
+    expect(out.complete).toBe(true);
+    expect(JSON.stringify(out.rems[0].rawCards![0].repetitionHistory)).toBe(
+      JSON.stringify(history)
+    );
+    expect(out.rems[0].cards![0].hash).toBe(
+      createHash('sha256')
+        .update(JSON.stringify({ cardId: 'c', remId: 'r', type: 'forward', history }))
+        .digest('hex')
+    );
+  });
+  it('leaves both history views incomplete when the SDK read fails', async () => {
+    const { make, plugin } = fixture();
+    make('r').getCards.mockRejectedValue(new Error('read failed'));
+    const out = await inspectState(plugin as never, {
+      remIds: ['r'],
+      fields: ['cards', 'rawCards'],
+    });
+    expect(out.complete).toBe(false);
+    expect(out.rems[0]).toMatchObject({ cards: null, rawCards: null });
+    expect(out.errors.map((error) => error.field)).toEqual(['cards', 'rawCards']);
+  });
+  it.each(
+    [undefined, null, [], [{ date: 10, score: 1, pluginData: { nested: [0, false] } }]].map(
+      (history) => ({ history })
+    )
+  )('does not hash unknown history as an empty history: %j', async ({ history }) => {
+    const { make, plugin } = fixture();
+    make('r').getCards.mockResolvedValue([
+      { _id: 'c', remId: 'r', type: 'forward', createdAt: 1, repetitionHistory: history },
+    ]);
+    const out = await inspectState(plugin as never, {
+      remIds: ['r'],
+      fields: ['cards', 'rawCards'],
+    });
+    expect(out.complete).toBe(true);
+    expect(out.rems[0].rawCards![0].repetitionHistory).toEqual(history ?? null);
+    expect(out.rems[0].cards![0]).toMatchObject({
+      historyLength: history == null ? null : history.length,
+      hash:
+        history == null
+          ? null
+          : await contentHash({ cardId: 'c', remId: 'r', type: 'forward', history }),
+    });
+  });
+  it.each(
+    ['bad', [undefined], [{ pluginData: { value: undefined } }], [{ score: NaN }]].map(
+      (history) => ({ history })
+    )
+  )('fails closed on malformed summary and raw history: %j', async ({ history }) => {
+    const { make, plugin } = fixture();
+    make('r').getCards.mockResolvedValue([
+      { _id: 'c', remId: 'r', type: 'forward', repetitionHistory: history },
+    ]);
+    for (const fields of [['cards'], ['rawCards'], ['cards', 'rawCards']] as const) {
+      const out = await inspectState(plugin as never, { remIds: ['r'], fields: [...fields] });
+      expect(out.complete).toBe(false);
+      for (const field of fields) expect(out.rems[0][field]).toBeNull();
+      expect(out.errors.map((error) => error.field)).toEqual(fields);
+    }
+  });
   it('reads explicit native flags and complete raw card facts in one bounded batch', async () => {
     const { make, plugin } = fixture();
     const rem = make('card-rem');
