@@ -42,7 +42,7 @@ const help = {
     'dailyRemId must name an explicit existing dailyDocument when creating new cards; patch/reuse-only plans omit it. Native type validation cannot prove calendar freshness.',
     'No date scalar is supplied. The caller resolves/revalidates the intended date before a new batch and after midnight.',
     'Replay uses the original recorded diary; it never switches an existing batch to a newly resolved date.',
-    'Receipt budget: sum(1 + answer lines per newCard) + (newCards.length > 1 && !parentRemId ? 1 : 0) + 2 + reused IDs + 2*patches <=1000.',
+    'Receipt budget: sum(1 + answer lines per newCard) + (newCards.length > 1 && !parentRemId ? 1 : 0) + (newCards.length > 0 ? 2 : 0) + reused IDs + 2*patches <=1000.',
   ],
   wiki: [
     'Plan shape:',
