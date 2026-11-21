@@ -77,5 +77,10 @@ read-only SDK method results, preserve input order through a bounded scheduler, 
 discard the entire cache after any mutation. Values never survive the owning
 `DirectClient`, so batch commands can benefit without leaking state across commands.
 
+`OperationKernel` is the common mutation policy. Task and workspace journals both
+persist a `started` step before a native write, advance to `verified` only after
+their own readback, and use `unknown` plus exact-ID reconciliation after uncertain
+failure. Publication and business-specific proof remain in their owning modules.
+
 See [the approved decision](adr/0001-direct-cli.md),
 [read receipts](guides/read-receipts.md) and [task plans](guides/task-plans.md).

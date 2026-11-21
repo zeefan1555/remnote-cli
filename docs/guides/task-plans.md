@@ -35,6 +35,10 @@ Each variant declares the official SDK capabilities it needs. The live catalog i
 checked once before preview reads and before the first mutation; a missing capability
 returns `missing_capability` without writing.
 
+Flashcard and workspace mutations share `OperationKernel`. It persists `started`
+before the native call, records `verified` only after readback, and marks an
+failure as `unknown` so the same operation is not automatically replayed.
+
 ## Shared bounds and text
 
 - Both envelope and plan require literal `schemaVersion:1`; unknown fields are rejected

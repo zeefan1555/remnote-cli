@@ -18,6 +18,7 @@ import type {
   WikiPlan,
 } from '../schemas/task-schemas.js';
 import { requiredTaskCapabilities } from './operation-capabilities.js';
+import { OperationKernel } from './operation-kernel.js';
 export interface AnswerLineReceipt {
   key: string;
   remId: string;
@@ -147,6 +148,7 @@ const nativeIds = (v: PluginRem[]): string[] => {
 export class TaskOperations {
   private busy = false;
   private deadline = 0;
+  private operationKernel?: OperationKernel;
   constructor(private deps: Dependencies) {}
   async apply(
     kind: 'flashcards' | 'wiki',
@@ -239,6 +241,27 @@ export class TaskOperations {
         }
       const journal = j,
         save = () => this.mutate(() => this.deps.journal.setLocal(storageKey, journal));
+      this.operationKernel = new OperationKernel({
+        canWrite: this.deps.canWrite,
+        deadline: this.deadline,
+        persist: save,
+        getStep: (step) => {
+          const state = journal.steps[step]?.state;
+          return state && ['started', 'applied', 'verified', 'unknown'].includes(state)
+            ? (state as 'started' | 'applied' | 'verified' | 'unknown')
+            : undefined;
+        },
+        setStep: (step, state) => {
+          journal.steps[step] ??= { key: step, state: 'started', remIds: [] };
+          journal.steps[step].state = state as Step['state'];
+        },
+        listSteps: () =>
+          Object.entries(journal.steps).flatMap(([step, state]) =>
+            ['started', 'applied', 'verified', 'unknown'].includes(state.state)
+              ? [[step, state.state as 'started' | 'applied' | 'verified' | 'unknown']]
+              : []
+          ),
+      });
       const required = requiredTaskCapabilities(kind, input.plan),
         missing = required.filter((capability) => !this.deps.capabilities?.has(capability));
       if (this.deps.capabilities && missing.length)
@@ -278,11 +301,14 @@ export class TaskOperations {
         code,
         message: e instanceof Error ? e.message : String(e),
       });
-      receipt.status =
-        code === 'conflict'
+      receipt.status = this.operationKernel
+        ? this.operationKernel.failureStatus({
+            conflict: code === 'conflict',
+            mutated: Boolean(j?.created.length || j?.updated.length),
+          })
+        : code === 'conflict'
           ? 'conflict'
-          : code === 'unknown' ||
-              Object.values(j?.steps ?? {}).some((s) => ['started', 'unknown'].includes(s.state))
+          : code === 'unknown'
             ? 'unknown'
             : j?.created.length || j?.updated.length
               ? 'partial'
@@ -290,6 +316,7 @@ export class TaskOperations {
       receipt.complete = false;
     } finally {
       this.busy = false;
+      this.operationKernel = undefined;
       if (j) {
         receipt.ids = { ...j.ids };
         for (const field of ['created', 'updated', 'reused', 'skipped'] as const)
@@ -639,7 +666,8 @@ export class TaskOperations {
     }
     if (j.completed) throw new TaskError('conflict', 'Completed task cannot create missing object');
     j.steps[k] = { key: k, state: 'started', remIds: [] };
-    await save();
+    await this.operationKernel?.checkpoint(k, 'started');
+    if (!this.operationKernel) await save();
     try {
       const ids = await this.mutate(action, beforeWrite);
       if (!ids.length || new Set(ids).size !== ids.length) throw new Error('Ambiguous created IDs');
@@ -654,16 +682,19 @@ export class TaskOperations {
         this.add(j, 'created', k, id);
       }
       j.steps[k] = { key: k, state: 'applied', remIds: ids };
-      await save();
+      await this.operationKernel?.checkpoint(k, 'applied');
+      if (!this.operationKernel) await save();
       return ids;
     } catch (e) {
       j.steps[k].state = 'unknown';
       j.steps[k].error = e instanceof Error ? e.message : String(e);
-      try {
-        await save();
-      } catch {
-        /* Persisted started state also blocks retry. */
-      }
+      if (this.operationKernel) await this.operationKernel.markUnknown(k);
+      else
+        try {
+          await save();
+        } catch {
+          /* Persisted started state also blocks retry. */
+        }
       throw new TaskError('unknown', `Creation ${k} may have succeeded; reconcile exact IDs`);
     }
   }
@@ -706,7 +737,8 @@ export class TaskOperations {
     await this.assertReferences(readback.rem, desired);
     j.steps[k].state = 'verified';
     j.ids[k] = id;
-    await save();
+    await this.operationKernel?.checkpoint(k, 'verified');
+    if (!this.operationKernel) await save();
     return readback.rem;
   }
   private async patch(
@@ -749,7 +781,8 @@ export class TaskOperations {
       throw new TaskError('incomplete', 'Patch readback did not match', id);
     await this.assertReferences(after, desired);
     j.steps[k] = { key: k, state: 'verified', remIds: [id] };
-    await save();
+    await this.operationKernel?.checkpoint(k, 'verified');
+    if (!this.operationKernel) await save();
   }
   private async cardFacts(rem: PluginRem): Promise<unknown> {
     return {
