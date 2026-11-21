@@ -5,6 +5,7 @@ import {
   WikiApplySchema,
   WikiPlanSchema,
 } from '../../src/schemas/task-schemas.js';
+import { validateTaskPlan } from '../../src/business/task-operations.js';
 const hash = 'a'.repeat(64);
 const card = { key: 'c', question: 'Question?', answer: [['Answer', { remId: 'source' }]] };
 const flash = {
@@ -55,6 +56,37 @@ describe('task plan contract', () => {
         idempotencyKey: 'batch',
         deleteAll: true,
       }).success
+    ).toBe(false);
+  });
+  it('accepts patch-only and reuse-only cards without creation context', () => {
+    const patchOnly = { schemaVersion: 1 as const, answerPatches: [patch] };
+    const reuseOnly = { schemaVersion: 1 as const, reusedCardRemIds: ['card'] };
+    expect(FlashcardsPlanSchema.parse(patchOnly)).toEqual(patchOnly);
+    expect(FlashcardsPlanSchema.parse(reuseOnly)).toEqual(reuseOnly);
+    expect(() =>
+      validateTaskPlan('flashcards', {
+        schemaVersion: 1,
+        plan: patchOnly,
+        idempotencyKey: 'patch-only',
+        dryRun: false,
+      })
+    ).not.toThrow();
+    expect(() =>
+      validateTaskPlan('flashcards', {
+        schemaVersion: 1,
+        plan: reuseOnly,
+        idempotencyKey: 'reuse-only',
+        dryRun: false,
+      })
+    ).not.toThrow();
+  });
+  it('rejects creation context without new cards and daily creation without a daily ID', () => {
+    expect(
+      FlashcardsPlanSchema.safeParse({ ...flash, newCards: [], answerPatches: [patch] }).success
+    ).toBe(false);
+    expect(FlashcardsPlanSchema.safeParse({ ...flash, dailyRemId: undefined }).success).toBe(false);
+    expect(
+      FlashcardsPlanSchema.safeParse({ ...flash, dailyRemId: undefined, tags: {} }).success
     ).toBe(false);
   });
   it.each([
@@ -168,10 +200,10 @@ describe('task plan contract', () => {
   });
   it('supports guarded patches/reuse and exact existing nodes', () => {
     expect(
-      FlashcardsPlanSchema.safeParse({ ...flash, newCards: [], answerPatches: [patch] }).success
+      FlashcardsPlanSchema.safeParse({ schemaVersion: 1, answerPatches: [patch] }).success
     ).toBe(true);
     expect(
-      FlashcardsPlanSchema.safeParse({ ...flash, newCards: [], reusedCardRemIds: ['r'] }).success
+      FlashcardsPlanSchema.safeParse({ schemaVersion: 1, reusedCardRemIds: ['r'] }).success
     ).toBe(true);
     expect(WikiPlanSchema.safeParse({ ...wiki, pages: [], answerPatches: [patch] }).success).toBe(
       true

@@ -109,6 +109,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Flashcard patch-only and reuse-only plans no longer require a daily document,
+  HOME root, Term tag, or other new-card creation fields. Existing cards now
+  update through exact card/answer identities and text hashes without version or
+  daily-location coupling; new-card plans retain the creation-context checks.
 - Preserve a successfully returned undefined portal subtype as unclassified `null`,
   while still requiring complete direct membership. Missing or unencoded SDK
   response values fail closed; malformed portal errors expose only the target

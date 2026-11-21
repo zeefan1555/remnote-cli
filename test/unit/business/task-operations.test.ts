@@ -950,9 +950,7 @@ describe('live write gates after awaited reads', () => {
     const answer = f.plugin.addTestRem('answer', 'Old');
     await answer.setParent(card);
     const p: FlashcardsPlan = {
-      ...flashPlan(),
-      newCards: [],
-      title: undefined,
+      schemaVersion: 1,
       answerPatches: [
         {
           key: 'patch',
@@ -1275,9 +1273,6 @@ describe('code-block flashcard answers', () => {
     expect(await answer.isCardItem()).toBe(false);
     const plan: FlashcardsPlan = {
       schemaVersion: 1,
-      dailyRemId: 'daily',
-      homeRootId: 'home',
-      tagRemId: 'tag',
       answerPatches: [
         {
           key: 'snippet',
@@ -1322,9 +1317,6 @@ describe('code-block flashcard answers', () => {
       request(
         {
           schemaVersion: 1,
-          dailyRemId: 'daily',
-          homeRootId: 'home',
-          tagRemId: 'tag',
           answerPatches: [
             {
               key: 'snippet',
@@ -1438,9 +1430,6 @@ describe('code-block flashcard answers', () => {
       request(
         {
           schemaVersion: 1,
-          dailyRemId: 'daily',
-          homeRootId: 'home',
-          tagRemId: 'tag',
           answerPatches: [
             {
               key: 'plain',
