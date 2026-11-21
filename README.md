@@ -44,6 +44,7 @@ reports the live active knowledge base and SDK catalog identity.
 
 ```bash
 remnote-cli status --text
+remnote-cli contract --json
 ```
 
 Product versions do not need to match; protocol 2 and the live SDK catalog do.

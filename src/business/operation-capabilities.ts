@@ -1,6 +1,6 @@
 import type { FlashcardsPlan, WikiPlan } from '../schemas/task-schemas.js';
 
-const FLASHCARD_CREATE = [
+export const FLASHCARD_CREATE_CAPABILITIES = [
   'namespace:rem.createTreeWithMarkdown',
   'namespace:rem.findOne',
   'namespace:richText.rem',
@@ -19,7 +19,7 @@ const FLASHCARD_CREATE = [
   'rem:setText',
 ] as const;
 
-const FLASHCARD_PATCH = [
+export const FLASHCARD_PATCH_CAPABILITIES = [
   'namespace:rem.findOne',
   'namespace:richText.rem',
   'rem:getCards',
@@ -27,9 +27,9 @@ const FLASHCARD_PATCH = [
   'rem:setText',
 ] as const;
 
-const FLASHCARD_REUSE = ['namespace:rem.findOne', 'rem:getCards'] as const;
+export const FLASHCARD_REUSE_CAPABILITIES = ['namespace:rem.findOne', 'rem:getCards'] as const;
 
-const WIKI_CREATE = [
+export const WIKI_CREATE_CAPABILITIES = [
   'namespace:rem.createRem',
   'namespace:rem.findOne',
   'namespace:richText.rem',
@@ -47,7 +47,11 @@ const WIKI_CREATE = [
   'rem:setText',
 ] as const;
 
-const WIKI_PATCH = ['namespace:rem.findOne', 'namespace:richText.rem', 'rem:setText'] as const;
+export const WIKI_PATCH_CAPABILITIES = [
+  'namespace:rem.findOne',
+  'namespace:richText.rem',
+  'rem:setText',
+] as const;
 
 export function requiredTaskCapabilities(
   kind: 'flashcards' | 'wiki',
@@ -57,15 +61,17 @@ export function requiredTaskCapabilities(
   if (kind === 'flashcards') {
     const flashcards = plan as FlashcardsPlan;
     if (flashcards.newCards?.length)
-      FLASHCARD_CREATE.forEach((capability) => required.add(capability));
+      FLASHCARD_CREATE_CAPABILITIES.forEach((capability) => required.add(capability));
     if (flashcards.answerPatches?.length)
-      FLASHCARD_PATCH.forEach((capability) => required.add(capability));
+      FLASHCARD_PATCH_CAPABILITIES.forEach((capability) => required.add(capability));
     if (flashcards.reusedCardRemIds?.length)
-      FLASHCARD_REUSE.forEach((capability) => required.add(capability));
+      FLASHCARD_REUSE_CAPABILITIES.forEach((capability) => required.add(capability));
   } else {
     const wiki = plan as WikiPlan;
-    if (wiki.pages.length) WIKI_CREATE.forEach((capability) => required.add(capability));
-    if (wiki.answerPatches?.length) WIKI_PATCH.forEach((capability) => required.add(capability));
+    if (wiki.pages.length)
+      WIKI_CREATE_CAPABILITIES.forEach((capability) => required.add(capability));
+    if (wiki.answerPatches?.length)
+      WIKI_PATCH_CAPABILITIES.forEach((capability) => required.add(capability));
   }
   return [...required].sort();
 }

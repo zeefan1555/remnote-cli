@@ -38,6 +38,13 @@ else
   echo -e "${YELLOW}  Run 'npm run generate:sdk-constants' to update it${NC}"
   FAILURES=$((FAILURES + 1))
 fi
+if npm run check:cli-contract; then
+  echo -e "${GREEN}✓ CLI contract is current${NC}"
+else
+  echo -e "${RED}✗ CLI contract is stale${NC}"
+  echo -e "${YELLOW}  Run 'npm run generate:cli-contract' to update it${NC}"
+  FAILURES=$((FAILURES + 1))
+fi
 echo ""
 
 # 3. ESLint

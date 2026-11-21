@@ -44,6 +44,7 @@ describe('createProgram', () => {
     expect(commandNames).toContain('set-document-status');
     expect(commandNames).toContain('journal');
     expect(commandNames).toContain('status');
+    expect(commandNames).toContain('contract');
   });
 
   it('has global --text and --json options', () => {

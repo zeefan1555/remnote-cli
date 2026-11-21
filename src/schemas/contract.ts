@@ -1,0 +1,85 @@
+import { z } from 'zod';
+import {
+  FLASHCARD_CREATE_CAPABILITIES,
+  FLASHCARD_PATCH_CAPABILITIES,
+  FLASHCARD_REUSE_CAPABILITIES,
+  WIKI_CREATE_CAPABILITIES,
+  WIKI_PATCH_CAPABILITIES,
+} from '../business/operation-capabilities.js';
+import { PROTOCOL_VERSION } from '../remnote-cli/client/connection.js';
+import { REMOTE_ACTION_NAMES } from '../remnote-cli/client/remote-actions.js';
+import { FlashcardsApplySchema, WikiApplySchema } from './task-schemas.js';
+
+export const CONTRACT_SCHEMA_NAMES = ['flashcards', 'wiki', 'workspace'] as const;
+export type ContractSchemaName = (typeof CONTRACT_SCHEMA_NAMES)[number];
+
+export const WorkspaceContractSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    operation: z.enum(['plan', 'apply', 'delete', 'resume', 'recover', 'diff']),
+    directory: z.string().min(1),
+    scope: z.enum(['changed', 'all']).optional(),
+    paths: z.array(z.string().min(1)).max(100).optional(),
+    planHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    delete: z
+      .object({ id: z.string().min(1), scopeRoot: z.string().min(1) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const receipt = {
+  schemaVersion: 1,
+  statuses: ['preview', 'verified', 'partial', 'unknown', 'incomplete', 'conflict'],
+  complete: 'boolean',
+  errors: 'array<{code,message,remId?}>',
+};
+
+const planSchemas = {
+  flashcards: z.toJSONSchema(FlashcardsApplySchema, { io: 'input' }),
+  wiki: z.toJSONSchema(WikiApplySchema, { io: 'input' }),
+  workspace: z.toJSONSchema(WorkspaceContractSchema, { io: 'input' }),
+} as const;
+
+const requiredCapabilities = {
+  flashcards: {
+    create: FLASHCARD_CREATE_CAPABILITIES,
+    patch: FLASHCARD_PATCH_CAPABILITIES,
+    reuse: FLASHCARD_REUSE_CAPABILITIES,
+  },
+  wiki: {
+    pages: WIKI_CREATE_CAPABILITIES,
+    patch: WIKI_PATCH_CAPABILITIES,
+  },
+};
+
+export function buildCliContract() {
+  return {
+    schemaVersion: 1,
+    protocolVersion: PROTOCOL_VERSION,
+    bridgeActions: Object.values(REMOTE_ACTION_NAMES),
+    plans: planSchemas,
+    requiredCapabilities,
+    receipt,
+    exitCodes: { success: 0, validationConnectionOrIncomplete: 1 },
+    workspace: {
+      requiresBridge: {
+        plan: false,
+        apply: 'depends-on-local-changes',
+        delete: 'depends-on-apply',
+        resume: true,
+        recover: 'depends-on-remote-outcome',
+        diff: false,
+      },
+    },
+  } as const;
+}
+
+export function contractSchema(name: string) {
+  if (!CONTRACT_SCHEMA_NAMES.includes(name as ContractSchemaName))
+    throw new Error(`Unknown contract schema: ${name}`);
+  return planSchemas[name as ContractSchemaName];
+}

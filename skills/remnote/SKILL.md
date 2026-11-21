@@ -31,6 +31,10 @@ Apply the connection prerequisites below to commands that contact RemNote.
 See [installation](../../docs/guides/installation.md) and
 [configuration](../../docs/guides/configuration.md).
 
+For machine-readable schemas and capability requirements while RemNote is closed,
+run `remnote-cli contract --json` or select one schema with
+`remnote-cli contract --schema flashcards|wiki|workspace`.
+
 ## Safety
 
 Default to reads and previews. An explicit write request authorizes its specified
