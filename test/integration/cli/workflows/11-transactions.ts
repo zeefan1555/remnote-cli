@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ACCEPTED_PLUGIN_IDS, Connection } from '../../../../src/remnote-cli/client/connection.js';
-import { readConnectionConfig } from '../../../../src/remnote-cli/client/connection-config.js';
+import { Connection } from '../../../../src/remnote-cli/client/connection.js';
 import { remoteSdk } from '../../../../src/remnote-cli/client/remote-sdk.js';
 import { verifiedCatalog } from '../../../../src/remnote-cli/client/sdk-capabilities.js';
 import type { StepResult, WorkflowContext, WorkflowResult } from '../types.js';
@@ -19,6 +18,7 @@ export async function transactionsWorkflow(ctx: WorkflowContext): Promise<Workfl
   let label = 'Authenticate the independent desktop plugin';
   let started = Date.now();
   let connection: Connection | undefined;
+  let expectedKnowledgeBaseId: string | undefined;
   const record = async (name: string, value: unknown) => {
     await writeFile(join(directory, `${name}.json`), `${JSON.stringify(value, null, 2)}\n`, {
       mode: 0o600,
@@ -28,24 +28,20 @@ export async function transactionsWorkflow(ctx: WorkflowContext): Promise<Workfl
   const passed = () => steps.push({ label, passed: true, durationMs: Date.now() - started });
 
   try {
-    const config = await readConnectionConfig();
     const open = async (current: Connection) => {
       const identity = await current.open();
+      expectedKnowledgeBaseId ??= identity.knowledgeBaseId;
       const status = (await current.request('get_status', {})) as {
         pluginId: string;
         nativeTransactions?: boolean;
       };
-      assert.ok(
-        (ACCEPTED_PLUGIN_IDS as readonly string[]).includes(status.pluginId),
-        `plugin id must be remnote-cli-bridge (or zeefan-remnote-sdk-bridge during the rename), got ${status.pluginId}`
-      );
+      assert.equal(status.pluginId, 'remnote-cli-bridge');
       assert.equal(
         status.nativeTransactions,
         true,
         'Native transactions unavailable; no test writes started'
       );
-      assert.equal(identity.knowledgeBaseId, config.knowledgeBaseId);
-      assert.equal(identity.acceptWriteOperations, true);
+      assert.equal(identity.knowledgeBaseId, expectedKnowledgeBaseId);
       const catalog = verifiedCatalog(await current.request('get_sdk_capabilities', {}));
       assert.equal(catalog.sdkCatalogHash, identity.sdkCatalogHash);
       assert.equal(catalog.sdkVersion, identity.sdkVersion);
@@ -53,9 +49,9 @@ export async function transactionsWorkflow(ctx: WorkflowContext): Promise<Workfl
       assert.equal(await plugin.app.getPlatform(), 'app', 'Use RemNote desktop, not the browser');
       return plugin;
     };
-    connection = new Connection(config, 'transaction-acceptance');
+    connection = new Connection({}, 'transaction-acceptance');
     let plugin = await open(connection);
-    await record('intent', { title, committedTitle, knowledgeBaseId: config.knowledgeBaseId });
+    await record('intent', { title, committedTitle, knowledgeBaseId: expectedKnowledgeBaseId });
     passed();
 
     label = 'Create only the dedicated transaction test root';
@@ -101,7 +97,10 @@ export async function transactionsWorkflow(ctx: WorkflowContext): Promise<Workfl
 
     label = 'A fresh session sees the commit and no aborted child';
     started = Date.now();
-    connection = new Connection(config, 'transaction-acceptance');
+    connection = new Connection(
+      { knowledgeBaseId: expectedKnowledgeBaseId },
+      'transaction-acceptance'
+    );
     plugin = await open(connection);
     assert.deepEqual((await plugin.rem.findOne(ids.root))?.text, [committedTitle]);
     assert.ok(!(await plugin.rem.findOne(ids.abortedChild)));

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-11-22
+
+### Changed
+
+- Replace protocol 1 pairing with protocol 2 zero-configuration startup. The CLI sends `hello` and consumes the Bridge's live `ready` identity containing plugin/SDK versions, catalog hash and active knowledge-base identity.
+- Listen only on `127.0.0.1:3002`. Remove the `pair` command, `--port`, token schema, pairing file and persistent connection configuration.
+- Accept only the observed RemNote WebSocket Origin `null`; reject missing and unknown Origins with HTTP 403.
+- Use canonical increasing request IDs and the Bridge-returned active KB. `--kb-id` is optional explicit validation and never selects a different KB.
+- Store metadata-only journals and sync state under `$XDG_STATE_HOME/remnote-cli` or `~/.local/state/remnote-cli`; tests use `REMNOTE_CLI_STATE_HOME`.
+- Treat official RemNote scopes as the native permission boundary. CLI `--allow-destructive` remains explicit for destructive operations; Bridge write/destructive settings are gone.
+
+### Removed
+
+- Pairing imports, HMAC challenge code, old plugin-id compatibility, product-version matching, and connection-file settings.
+
 ## [Unreleased]
 
 ### Added

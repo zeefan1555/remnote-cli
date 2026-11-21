@@ -34,7 +34,7 @@ let temporary: string, directory: string;
 beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-blank-render-test-')));
   directory = await fileOps.workspaceDirectory(join(temporary, 'vault'), true);
-  vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+  vi.stubEnv('REMNOTE_CLI_STATE_HOME', join(temporary, 'state'));
 });
 afterEach(async () => {
   vi.restoreAllMocks();

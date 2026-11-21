@@ -76,11 +76,11 @@ session; there is no separate MCP/composite transport deadline or timeout input.
 
 ## SDK capability discovery
 
-Every command authenticates the exact KB and fetches a live generated SDK catalog.
+Every command binds the exact live KB from the protocol 2 handshake and fetches a live generated SDK catalog.
 The CLI verifies `SHA256(JSON.stringify({sdkVersion,capabilities}))`, then binds only
 supported methods. Each call carries `expectedCatalogHash`; drift fails before
 invocation. Product versions do not need to match.
 
 There is no persistent capability cache or offline fallback. Read receipts and SDK
 values are not cached. ID-only search paging snapshots are separate private CLI
-metadata, scoped to the paired KB; they do not contain copied KB text.
+metadata, scoped to the active KB; they do not contain copied KB text.

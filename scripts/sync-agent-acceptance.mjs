@@ -544,10 +544,10 @@ async function main(argv) {
     const status = await run('status', ['status']);
     assert.equal(status.connected, true);
     assert.equal(status.knowledgeBaseId, opts['--kb-id']);
-    assert.equal(status.protocolVersion, 1);
+    assert.equal(status.protocolVersion, 2);
     assert.equal(status.acceptWriteOperations, true);
     assert.equal(status.acceptReplaceOperation, true);
-    assert.ok(['remnote-cli-bridge', 'zeefan-remnote-sdk-bridge'].includes(status.pluginId));
+    assert.equal(status.pluginId, 'remnote-cli-bridge');
     receipt.plugin = {
       pluginId: status.pluginId,
       sdkVersion: status.sdkVersion,

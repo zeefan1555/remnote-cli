@@ -3,7 +3,6 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPairing } from '../../../src/remnote-cli/client/connection-config.js';
 import { parseBatchInput } from '../../../src/remnote-cli/commands/batch.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { MockRemNotePlugin } from '../../helpers/business-mocks.js';
@@ -118,7 +117,7 @@ describe('batch command', () => {
 
   it('rejects inner connection flags without opening a command', async () => {
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
-    const path = await batchFile('[{"argv":["--port","9","status"]}]');
+    const path = await batchFile('[{"argv":["--kb-id","kb","status"]}]');
     const output = await runBatch(['--file', path]);
     expect(output.ok).toBe(false);
     expect(JSON.stringify(output.results)).toMatch(/belongs on the batch command/);
@@ -128,14 +127,12 @@ describe('batch command', () => {
   it('reads and lists several ids over one bridge connection', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-cli-batch-conn-'));
     directories.push(directory);
-    vi.stubEnv('REMNOTE_CLI_CONFIG', join(directory, 'connection.json'));
-    await createPairing('kb');
+    vi.stubEnv('REMNOTE_CLI_STATE_HOME', directory);
     const data = { sdkVersion: '0.0.46', capabilities: [] };
     const sdkCatalogHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
     wire.open.mockResolvedValue({
+      pluginVersion: 'test',
       knowledgeBaseId: 'kb',
-      acceptWriteOperations: true,
-      acceptReplaceOperation: false,
       sdkCatalogHash,
       sdkVersion: '0.0.46',
     });

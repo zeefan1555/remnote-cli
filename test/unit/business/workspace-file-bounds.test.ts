@@ -41,7 +41,7 @@ beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-workspace-bounds-')));
   directory = join(temporary, 'workspace');
   await mkdir(directory, { mode: 0o700 });
-  vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+  vi.stubEnv('REMNOTE_CLI_STATE_HOME', join(temporary, 'state'));
 });
 afterEach(async () => {
   vi.restoreAllMocks();

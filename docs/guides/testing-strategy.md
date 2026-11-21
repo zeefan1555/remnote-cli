@@ -6,7 +6,7 @@
 lint, formatting, regression tests and coverage without live RemNote. Build both
 repositories after cross-boundary changes.
 
-Tests cover authenticated KB binding, live write/destructive gates, bounded JSON,
+Tests cover live KB binding, Origin checks, official SDK scopes, bounded JSON,
 timeouts, disconnects, transaction acknowledgement, metadata recovery and CLI
 business behavior. Mocks do not prove native RemNote persistence or rollback.
 
@@ -23,6 +23,6 @@ For business-only changes, record unchanged plugin asset hashes.
 ## Installed Setup
 
 Use `remnote-cli status`, capability discovery and a targeted read to verify
-pairing, permissions and the intended KB. A successful setup check is not
+protocol 2, permissions and the active KB. A successful setup check is not
 end-to-end write acceptance. Any live write by an agent still uses the guarded
 wrapper and explicit authorization.

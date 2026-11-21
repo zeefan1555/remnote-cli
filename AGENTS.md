@@ -5,7 +5,7 @@ This repository is `remnote-cli`. The companion plugin is
 (manifest id `remnote-cli-bridge`).
 
 ```text
-CLI commands <-> authenticated loopback WebSocket <-> RemNote CLI Bridge <-> SDK
+CLI commands <-> protocol 2 loopback WebSocket <-> RemNote CLI Bridge <-> SDK
 ```
 
 ## Design principle
@@ -27,14 +27,17 @@ needed SDK capability already exists. No MCP transport, proxy, daemon, remote
 endpoint, compatibility shim or product-version matching is maintained.
 Callbacks, private SDK methods and persistent SDK object handles are not supported.
 
-Handshake accepts plugin id `remnote-cli-bridge` and, during the rename, the
-previous id `zeefan-remnote-sdk-bridge`. The same transition applies to the
-display names `RemNote CLI Bridge` and `RemNote SDK Bridge` when the plugin
-sends them. Plugin version `0.25.0` is accepted. Compatibility is protocol 1
-plus the SDK catalog, not matching product versions.
+The CLI binds fixed `127.0.0.1:3002`, accepts only the observed WebSocket Origin
+`null`, sends protocol 2 `hello`, and consumes the Bridge's live `ready` identity.
+There is no pairing command, token file, endpoint setting, port setting, persistent
+connection config, or Bridge write gate. Compatibility is protocol 2 plus the SDK
+catalog, not matching product versions. `--kb-id` is validation only.
+
+The trust boundary is the current operating-system user. Origin checking rejects
+ordinary webpages but not native local processes that can forge headers.
 
 Task plans default to preview, require current hashes for patches and use durable
-metadata-only journals scoped to the paired KB. Unknown write outcomes must not
+metadata-only journals scoped to the active KB. Unknown write outcomes must not
 be replayed automatically. Task commands do not resolve dates or create daily
 documents; the caller owns calendar freshness. Replay keeps the recorded diary.
 Required proof scopes cannot be narrowed merely to pass.
@@ -64,7 +67,7 @@ Development integration suites require explicit authorization and use this wrapp
 ```
 
 Read [integration testing](docs/guides/integration-testing.md) before live actions.
-Preflight checks the paired loopback port before any build or mutation. The wrapper
+Preflight checks the fixed loopback port before any build or mutation. The wrapper
 never stops listeners or starts a daemon. Identify an occupied port before acting;
 under explicit full-operation authority, record, stop and later restore only a
 confirmed project-owned obsolete companion. Never stop unrelated services.

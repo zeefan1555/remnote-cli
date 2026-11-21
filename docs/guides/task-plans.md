@@ -13,7 +13,7 @@ The CLI reads the **inner plan** from a UTF-8 JSON file or stdin (`-`), then wra
 to apply. Apply only within the user's explicitly authorized operation, targets and scope;
 see the [CLI skill](../../skills/remnote/SKILL.md#safety) for authorization and safety rules.
 
-Neither preview nor apply ever looks up dates or creates daily documents. Task setters recheck the live write gate
+Neither preview nor apply ever looks up dates or creates daily documents. Task setters recheck the active KB and official authorization
 immediately before each SDK mutation after awaited reads. This is not a transaction or rollback guarantee.
 
 Both task commands need the Bridge's separate `KnowledgeBaseInfo: Read` permission for current-KB identity and
@@ -202,5 +202,5 @@ is output-only: it never changes execution, proof requirements or exit status.
 Each SDK call has a 15-second default deadline, with no task timeout input field. Interrupted applies
 may have changed data. Preserve the exact reviewed plan and stable key, inspect current receipts/IDs, and reconcile
 known outcomes before another authorized action. Unknown creation outcomes are never blindly replayed. Do not
-change a plan under its key or generate a new key to bypass partial/unknown/conflict. Private metadata-only idempotency journals live beside the CLI pairing file under
+change a plan under its key or generate a new key to bypass partial/unknown/conflict. Private metadata-only idempotency journals live under the standard CLI state directory at
 `state/<KB hash>/`; they are durable before writes and are not transactional rollback. Required whole-WIKI/full-card proof scopes stay intact; report incomplete if blocked.

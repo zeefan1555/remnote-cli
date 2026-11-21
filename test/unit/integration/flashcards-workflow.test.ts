@@ -22,7 +22,7 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
         json = {
           connected: true,
           pluginId: 'remnote-cli-bridge',
-          protocolVersion: 1,
+          protocolVersion: 2,
           knowledgeBaseId: 'test-kb',
           sdkCatalogHash: 'a'.repeat(64),
           acceptWriteOperations: true,

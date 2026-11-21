@@ -1,17 +1,17 @@
 # RemNote CLI
 
-Command-line access to a RemNote knowledge base. Each command opens a loopback
+Command-line access to a RemNote knowledge base. Each command opens a fixed loopback
 WebSocket, talks to the [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge)
 plugin, and closes the connection.
 
 ```text
-remnote-cli <-> authenticated loopback WebSocket <-> RemNote CLI Bridge <-> RemNote SDK
+remnote-cli <-> protocol 2 loopback WebSocket <-> RemNote CLI Bridge <-> RemNote SDK
 ```
 
 There is no MCP endpoint, stdio proxy, resident daemon, or cloud relay.
 `batch --file` keeps one listener open across a list of commands so back-to-back
-calls do not collide on the CLI port. Keep RemNote open with the paired plugin
-enabled. An idle plugin waiting for a CLI command is normal.
+calls do not collide on the CLI port. Keep RemNote open with the Bridge enabled.
+An idle plugin waiting for a CLI command is normal.
 
 [Native rollback acceptance remains blocked](docs/acceptance.md).
 
@@ -32,30 +32,27 @@ remnote-cli --version
 `npm run build` in this repository updates that command. `./unlink-cli.sh` removes
 the link.
 
-## Pairing
+## Setup
 
 Install **RemNote CLI Bridge** from the RemNote marketplace. Its manifest id is
 `remnote-cli-bridge`. Enable it in RemNote desktop and grant content access plus
 **KnowledgeBaseInfo: Read**.
 
-```bash
-remnote-cli pair --kb-id YOUR_KNOWLEDGE_BASE_ID
-```
-
-The knowledge-base id is in the RemNote knowledge-base URL. Pairing writes
-`~/.config/remnote-cli/connection.json` with mode 0600 and does not print the
-token. Paste that token once into the plugin setting **CLI pairing token**. Set
-**CLI loopback WebSocket URL** to `ws://127.0.0.1:3002`, or to the port you passed
-with `--port`. Enable **Accept write operations** only when writes are intended.
+There is no pairing, token, URL, port, knowledge-base, or Bridge write setting.
+The CLI always listens on `127.0.0.1:3002`; the Bridge connects automatically and
+reports the live active knowledge base and SDK catalog identity.
 
 ```bash
 remnote-cli status --text
 ```
 
-A plugin that still reports id `zeefan-remnote-sdk-bridge` or the name
-RemNote SDK Bridge remains accepted while that build is replaced. Plugin version
-0.25.0 is compatible. Product versions do not need to match; protocol 1 and the
-SDK catalog do.
+Product versions do not need to match; protocol 2 and the live SDK catalog do.
+`--kb-id ID` is optional and only requires the Bridge's active KB to match that id.
+
+The trust boundary is the current operating-system user. The CLI accepts only the
+`Origin: null` upgrade used by RemNote's sandboxed plugin and rejects missing or
+unknown Origins. Origin checks stop ordinary webpages, not malicious native
+programs running as the same user.
 
 See [installation](docs/guides/installation.md) and
 [configuration](docs/guides/configuration.md).

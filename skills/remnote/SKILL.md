@@ -20,13 +20,13 @@ IDs from an unconfigured template.
 Offline `sync read|save|status|lint|diff|format|relocate` needs only the bound private workspace.
 Apply the connection prerequisites below to commands that contact RemNote.
 
-- RemNote desktop is open with RemNote CLI Bridge (`remnote-cli-bridge`) enabled. A plugin that still reports `zeefan-remnote-sdk-bridge` is accepted during the rename.
-- CLI and plugin are paired with a private token for the exact intended KB.
+- RemNote desktop is open with protocol 2 RemNote CLI Bridge (`remnote-cli-bridge`) enabled.
+- No pairing token, endpoint, port, KB selection, or Bridge write setting is required. The CLI uses the live active KB.
 - Official content and `KnowledgeBaseInfo: Read` permissions are granted.
-- Run `remnote-cli status` and verify plugin ID, KB, protocol, SDK and live write flags.
+- Run `remnote-cli status` and verify plugin ID, active KB, protocol 2 and the live SDK catalog hash.
 - No MCP endpoint or business daemon is required. Local plugin loading uses a
   file-only static host; product versions need not match.
-- Never request the private token in chat or include it in evidence.
+- Treat the current operating-system user as the trust boundary. Origin checking rejects ordinary webpages, not native same-user programs.
 
 See [installation](../../docs/guides/installation.md) and
 [configuration](../../docs/guides/configuration.md).
@@ -41,8 +41,9 @@ overwriting unrecognized changes before writing. Stop on a user pause/revocation
 or a real workflow Human Gate.
 
 Check live status before writes and verify the exact resulting state by semantic
-readback. Destructive changes also require explicit replacement/deletion intent,
-both plugin write gates and `--allow-destructive`.
+readback. Destructive changes also require explicit replacement/deletion intent
+and `--allow-destructive`; official RemNote scopes remain the native permission
+boundary.
 
 Prefer one `remnote-cli` process per turn. Do not shell-chain separate processes:
 each process owns the loopback port, and the next process can fail with
@@ -280,7 +281,7 @@ key and local journal. Inspect known IDs and reconcile the outcome before anothe
 authorized operation. Never blind-retry, change a plan under its key or remove a
 journal/create a new key to bypass uncertainty.
 
-For connection failures, check the exact KB, pairing, permissions and occupied
+For connection failures, check protocol 2, official permissions and occupied
 port. The plugin normally waits between commands. Bring RemNote to the foreground
 for a read-only status retry if background timer throttling is suspected. Do not
 stop arbitrary listeners, weaken KB binding or disable browser security.

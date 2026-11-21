@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPairing } from '../../../src/remnote-cli/client/connection-config.js';
 import { MockRemNotePlugin } from '../../helpers/business-mocks.js';
 const wire = vi.hoisted(() => ({
   open: vi.fn(),
@@ -30,14 +29,12 @@ let directory: string, client: DirectClient;
 beforeEach(async () => {
   vi.clearAllMocks();
   directory = await mkdtemp(join(tmpdir(), 'direct-client-'));
-  vi.stubEnv('REMNOTE_CLI_CONFIG', join(directory, 'connection.json'));
-  await createPairing('kb');
+  vi.stubEnv('REMNOTE_CLI_STATE_HOME', directory);
   const data = { sdkVersion: '0.0.46', capabilities: [] };
   const sdkCatalogHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
   wire.open.mockResolvedValue({
+    pluginVersion: 'different',
     knowledgeBaseId: 'kb',
-    acceptWriteOperations: true,
-    acceptReplaceOperation: false,
     sdkCatalogHash,
     sdkVersion: '0.0.46',
   });
@@ -48,7 +45,6 @@ beforeEach(async () => {
           connected: true,
           pluginVersion: 'different',
           knowledgeBaseId: 'kb',
-          acceptWriteOperations: true,
         }
   );
   wire.plugin = new MockRemNotePlugin();
@@ -87,12 +83,9 @@ describe('local business dispatch', () => {
     expect(wire.open).not.toHaveBeenCalled();
   });
 
-  it('rejects catalog drift and invalid port settings', async () => {
+  it('rejects catalog drift', async () => {
     wire.open.mockResolvedValue({ sdkVersion: 'different', sdkCatalogHash: 'f'.repeat(64) });
     await expect(client.execute('get_status', {})).rejects.toThrow('catalog changed');
-    await client.close();
-    client = new DirectClient({ port: '0' });
-    await expect(client.execute('get_status', {})).rejects.toThrow('Invalid loopback port');
   });
 
   it('does not close a retained connection until the batch releases it', async () => {
@@ -105,11 +98,11 @@ describe('local business dispatch', () => {
     expect(wire.close).toHaveBeenCalledOnce();
   });
 
-  it('honors explicit KB and port requirements without product version matching', async () => {
-    client = new DirectClient({ kbId: 'requested', port: '4002', verbose: true });
+  it('passes an explicit KB requirement without product version matching', async () => {
+    client = new DirectClient({ kbId: 'requested', verbose: true });
     await client.execute('get_status', {});
     expect(wire.constructed).toHaveBeenCalledWith(
-      expect.objectContaining({ knowledgeBaseId: 'requested', port: 4002 })
+      expect.objectContaining({ knowledgeBaseId: 'requested' })
     );
   });
 });

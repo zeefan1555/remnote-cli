@@ -2,36 +2,29 @@ import { once } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ACCEPTED_PLUGIN_IDS,
-  ACCEPTED_PLUGIN_NAMES,
+  ALLOWED_ORIGIN,
   Connection,
-  proof,
+  MAX_PENDING_REQUESTS,
+  PROTOCOL_VERSION,
   type BridgeIdentity,
 } from '../../../src/remnote-cli/client/connection.js';
 
-const token = 'a'.repeat(64);
 const identity: BridgeIdentity = {
-  protocolVersion: 1,
   pluginVersion: 'independent-plugin',
   sdkVersion: '0.0.46',
   sdkCatalogHash: 'b'.repeat(64),
   knowledgeBaseId: 'kb',
   knowledgeBaseName: 'Test',
-  acceptWriteOperations: true,
-  acceptReplaceOperation: false,
 };
 const connections: Connection[] = [];
 const sockets: WebSocket[] = [];
 afterEach(async () => {
-  sockets.splice(0).forEach((s) => s.terminate());
-  await Promise.all(connections.splice(0).map((c) => c.close()));
+  sockets.splice(0).forEach((socket) => socket.terminate());
+  await Promise.all(connections.splice(0).map((connection) => connection.close()));
 });
-async function listen(timeout = 2000, port = 0) {
-  const connection = new Connection(
-    { protocolVersion: 1, token, knowledgeBaseId: 'kb', port },
-    'arbitrary-cli',
-    timeout
-  );
+
+async function listen(timeout = 2000, port = 0, knowledgeBaseId?: string) {
+  const connection = new Connection({ port, knowledgeBaseId }, 'arbitrary-cli', timeout);
   connections.push(connection);
   const opened = connection.open();
   void opened.catch(() => {});
@@ -41,24 +34,48 @@ async function listen(timeout = 2000, port = 0) {
   expect(address.address).toBe('127.0.0.1');
   return { connection, opened, port: address.port };
 }
-async function plugin(port: number, overrides: Partial<BridgeIdentity> = {}, secret = token) {
-  const ws = new WebSocket('ws://127.0.0.1:' + port);
+
+async function plugin(port: number, overrides: Partial<BridgeIdentity> = {}) {
+  const ws = new WebSocket('ws://127.0.0.1:' + port, { origin: ALLOWED_ORIGIN });
   sockets.push(ws);
   ws.on('error', () => {});
-  const challenge = JSON.parse(String((await once(ws, 'message'))[0]));
-  expect(challenge.proof).toBe(proof(token, 'cli:' + challenge.nonce));
-  const peer = { ...identity, ...overrides };
-  ws.send(
-    JSON.stringify({
-      type: 'hello',
-      identity: peer,
-      proof: proof(secret, 'plugin:' + challenge.nonce + ':' + JSON.stringify(peer)),
-    })
-  );
+  const message = once(ws, 'message');
+  await once(ws, 'open');
+  const hello = JSON.parse(String((await message)[0]));
+  expect(hello).toEqual({
+    type: 'hello',
+    protocolVersion: PROTOCOL_VERSION,
+    version: 'arbitrary-cli',
+  });
+  const ready = { ...identity, ...overrides };
+  ws.send(JSON.stringify({ type: 'ready', protocolVersion: PROTOCOL_VERSION, identity: ready }));
   return ws;
 }
-describe('command-owned loopback session', () => {
-  it('authenticates once, correlates multiple requests and releases its port', async () => {
+
+async function expectOriginRejected(port: number, origin?: string) {
+  const ws = new WebSocket('ws://127.0.0.1:' + port, origin === undefined ? undefined : { origin });
+  sockets.push(ws);
+  ws.on('error', () => {});
+  await new Promise<void>((resolve, reject) => {
+    ws.on('unexpected-response', (_request, response) => {
+      expect(response.statusCode).toBe(403);
+      response.resume();
+      resolve();
+    });
+    ws.on('open', () => reject(new Error('Unexpected WebSocket acceptance')));
+  });
+}
+
+describe('zero-configuration command-owned loopback session', () => {
+  it('accepts only the observed RemNote Origin and sends protocol 2 hello', async () => {
+    const { opened, port } = await listen();
+    await expectOriginRejected(port);
+    await expectOriginRejected(port, 'https://example.com');
+    await plugin(port);
+    await expect(opened).resolves.toEqual(identity);
+  });
+
+  it('uses monotonic IDs, correlates concurrent requests and releases its port', async () => {
     const { connection, opened, port } = await listen();
     const ws = await plugin(port);
     expect(await opened).toEqual(identity);
@@ -73,93 +90,51 @@ describe('command-owned loopback session', () => {
     });
     expect(await connection.request('first', { n: 1 })).toEqual({ n: 1 });
     expect(await connection.request('second', { n: 2 })).toEqual({ n: 2 });
-    expect(seen).toHaveLength(2);
-    expect(seen[0]).toMatchObject({ knowledgeBaseId: 'kb' });
-    expect(Number(seen[0].deadline)).toBeGreaterThan(Date.now() - 1000);
+    expect(seen.map(({ id }) => id)).toEqual(['1', '2']);
+    for (const frame of seen) {
+      expect(frame).toMatchObject({ knowledgeBaseId: 'kb' });
+      expect(Number(frame.deadline)).toBeGreaterThan(Date.now() - 1000);
+    }
+    expect(connection.timings.listeningMs).toBeGreaterThanOrEqual(0);
     expect(connection.timings.sdkCalls).toBe(2);
     await connection.close();
     const next = await listen(2000, port);
     expect(next.port).toBe(port);
   });
 
-  it.each(['token', 'kb', 'protocol', 'schema'])(
-    'rejects invalid %s before an operation can start',
-    async (kind) => {
-      const { connection, opened, port } = await listen();
-      const expected = expect(opened).rejects.toThrow();
-      await plugin(
-        port,
-        kind === 'kb'
-          ? { knowledgeBaseId: 'other' }
-          : kind === 'protocol'
-            ? { protocolVersion: 2 as never }
-            : kind === 'schema'
-              ? { acceptWriteOperations: 'true' as never }
-              : {},
-        kind === 'token' ? 'c'.repeat(64) : token
-      );
-      await expected;
-      await expect(connection.request('sdk_call', {})).rejects.toThrow();
-    }
-  );
-
-  it('accepts RemNote CLI Bridge 0.25.0 and the previous plugin id', async () => {
+  it('does not product-version match a complete live SDK identity', async () => {
     const { opened, port } = await listen();
-    await plugin(port, {
-      pluginVersion: '0.25.0',
-      pluginId: ACCEPTED_PLUGIN_IDS[0],
-      pluginName: ACCEPTED_PLUGIN_NAMES[0],
-    });
-    await expect(opened).resolves.toMatchObject({
-      pluginVersion: '0.25.0',
-      pluginId: 'remnote-cli-bridge',
-      pluginName: 'RemNote CLI Bridge',
-    });
+    await plugin(port, { pluginVersion: '99.0.0' });
+    await expect(opened).resolves.toMatchObject({ pluginVersion: '99.0.0' });
   });
 
-  it('keeps accepting the previous plugin id and name during the rename', async () => {
-    const { opened, port } = await listen();
-    await plugin(port, {
-      pluginVersion: '0.24.1',
-      pluginId: ACCEPTED_PLUGIN_IDS[1],
-      pluginName: ACCEPTED_PLUGIN_NAMES[1],
-    });
-    await expect(opened).resolves.toMatchObject({
-      pluginId: 'zeefan-remnote-sdk-bridge',
-      pluginName: 'RemNote SDK Bridge',
-    });
+  it('rejects a mismatched explicit KB before a request', async () => {
+    const { connection, opened, port } = await listen(2000, 0, 'expected-kb');
+    const expected = expect(opened).rejects.toThrow('Knowledge base mismatch');
+    await plugin(port);
+    await expected;
+    await expect(connection.request('sdk_call', {})).rejects.toThrow('Knowledge base mismatch');
   });
 
-  it('rejects an unknown plugin id before an operation can start', async () => {
+  it.each([
+    { type: 'challenge', protocolVersion: 2 },
+    { type: 'ready', protocolVersion: 1, identity },
+    { type: 'ready', protocolVersion: 2, identity: { ...identity, sdkVersion: '' } },
+  ])('rejects an unsupported handshake before SDK work', async (message) => {
     const { connection, opened, port } = await listen();
-    const rejected = expect(opened).rejects.toThrow('Unsupported plugin handshake');
-    await plugin(port, { pluginId: 'other-plugin' as never });
-    await rejected;
-    await expect(connection.request('sdk_call', {})).rejects.toThrow(
-      'Unsupported plugin handshake'
-    );
-  });
-
-  it('identifies unsupported plugin handshakes without accepting a legacy session', async () => {
-    const { connection, opened, port } = await listen();
-    const rejected = expect(opened).rejects.toThrow('Unsupported plugin handshake');
-    const ws = new WebSocket('ws://127.0.0.1:' + port);
+    const ws = new WebSocket('ws://127.0.0.1:' + port, { origin: ALLOWED_ORIGIN });
     sockets.push(ws);
+    const hello = once(ws, 'message');
     await once(ws, 'open');
-    ws.send(JSON.stringify({ type: 'hello', version: '0.23.0' }));
-    await rejected;
+    await hello;
+    ws.send(JSON.stringify(message));
+    await expect(opened).rejects.toThrow('Unsupported plugin handshake');
     expect(connection.timings.sdkCalls).toBe(0);
-    await expect(connection.request('sdk_call', {})).rejects.toThrow(
-      'Unsupported plugin handshake'
-    );
   });
 
   it('fails closed on an occupied port without stopping the existing listener', async () => {
     const first = await listen();
-    const second = new Connection(
-      { protocolVersion: 1, token, knowledgeBaseId: 'kb', port: first.port },
-      'v'
-    );
+    const second = new Connection({ port: first.port }, 'v');
     connections.push(second);
     await expect(second.open()).rejects.toThrow('port occupied');
     const ws = await plugin(first.port);
@@ -210,7 +185,7 @@ describe('command-owned loopback session', () => {
     await failed;
   });
 
-  it('validates request bounds before sending', async () => {
+  it('bounds request sizes, timeouts and pending work before sending', async () => {
     const { connection, opened, port } = await listen();
     await plugin(port);
     await opened;
@@ -218,5 +193,12 @@ describe('command-owned loopback session', () => {
     await expect(
       connection.request('sdk_call', { huge: 'x'.repeat(8 * 1024 * 1024) })
     ).rejects.toThrow('too large');
+    const pending = Array.from({ length: MAX_PENDING_REQUESTS }, () =>
+      connection.request('sdk_call', {}).catch(() => undefined)
+    );
+    await vi.waitFor(() => expect(connection.timings.sdkCalls).toBe(MAX_PENDING_REQUESTS));
+    await expect(connection.request('sdk_call', {})).rejects.toThrow('Too many pending');
+    await connection.close();
+    await Promise.all(pending);
   });
 });

@@ -3,7 +3,7 @@
 ```text
 CLI business commands -> remote SDK bindings -> loopback WebSocket
                                                 |
-                         RemNote SDK <- authenticated plugin gateway
+                         RemNote SDK <- zero-configuration plugin gateway
 ```
 
 The browser plugin cannot listen on a local TCP port. Therefore the CLI owns the
@@ -15,7 +15,7 @@ inside the CLI command, not a separate server product.
 - `src/remnote-cli/commands/`: arguments, previews, output and exit status.
 - `src/business/`: notes, cards, wiki, todos, inspection and verification.
 - `src/schemas/`: CLI input/output contracts.
-- `src/remnote-cli/client/`: paired connection, SDK snapshots and private local state.
+- `src/remnote-cli/client/`: protocol 2 connection, SDK snapshots and private local state.
 - Companion plugin: official SDK, generated method allowlist, serialization,
   permission checks and KB binding.
 
@@ -26,9 +26,11 @@ There is no HTTP MCP endpoint, OAuth provider, MCPB proxy, daemon or semver matc
 
 ## Connection And Safety
 
-1. The CLI reads its private pairing file and binds `127.0.0.1`.
-2. Fresh HMAC challenges authenticate both peers without transmitting the secret.
-3. The CLI requires the exact KB and protocol version. It verifies the live SDK
+1. The CLI binds fixed endpoint `127.0.0.1:3002` and accepts only the observed
+   RemNote WebSocket Origin `null`; missing/unknown Origins receive HTTP 403.
+2. The CLI sends protocol 2 `hello`. The Bridge answers `ready` with plugin and SDK
+   versions, catalog hash, and the live active knowledge-base identity.
+3. An optional `--kb-id` is explicit validation only. The CLI verifies the live SDK
    catalog hash before generating remote method bindings.
 4. Every request carries an ID, KB binding and deadline. The plugin validates
    live permissions immediately before invoking an allowlisted SDK method.
@@ -50,10 +52,14 @@ additive-write and rejected atomic-command boundary. Timeout or disconnect does
 not prove cancellation or rollback. No running command reconnects or replays writes
 automatically. New plugin sessions wait only for prior individual SDK calls to settle.
 
+The trust boundary is the current operating-system user. Origin validation blocks
+ordinary webpages, not native local processes that can forge headers.
+
 ## Local State
 
-The pairing file and state files are private to the local user. Journals and paging
-snapshots live beside the pairing file, under `state/<KB hash>/`. Journals are
+State files are private to the local user under `$XDG_STATE_HOME/remnote-cli`, or
+`~/.local/state/remnote-cli`. Journals and paging snapshots live under
+`state/<KB hash>/`. Journals are
 metadata-only and durably written before mutations. Task journals use a stable
 idempotency key; additive command journals use a per-attempt recovery key and retain
 known IDs on partial failure. Corrupt or uncertain journal state fails closed. Search snapshots contain IDs

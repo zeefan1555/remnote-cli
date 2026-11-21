@@ -1,8 +1,9 @@
 import { createServer } from 'node:net';
-import { readConnectionConfig } from '../../src/remnote-cli/client/connection-config.js';
 
 try {
-  const { port, knowledgeBaseId } = await readConnectionConfig();
+  const port = Number(process.env.REMNOTE_CLI_TEST_PORT ?? 3002);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535)
+    throw new Error('Invalid integration-test port');
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -10,11 +11,11 @@ try {
       server.close((error) => (error ? reject(error) : resolve()))
     );
   });
-  console.log(JSON.stringify({ preflight: 'passed', host: '127.0.0.1', port, knowledgeBaseId }));
+  console.log(JSON.stringify({ preflight: 'passed', host: '127.0.0.1', port }));
 } catch (error) {
   console.error(
     (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
-      ? 'Refusing live tests: the paired loopback port is already in use. Identify its owner; no process was stopped.'
+      ? 'Refusing live tests: the loopback port is already in use. Identify its owner; no process was stopped.'
       : error instanceof Error
         ? error.message
         : String(error)

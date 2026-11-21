@@ -1,13 +1,11 @@
 import { readFile, rm } from 'node:fs/promises';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Connection } from '../../../src/remnote-cli/client/connection.js';
-import { readConnectionConfig } from '../../../src/remnote-cli/client/connection-config.js';
 import { remoteSdk } from '../../../src/remnote-cli/client/remote-sdk.js';
 import { verifiedCatalog } from '../../../src/remnote-cli/client/sdk-capabilities.js';
 import { CliTestClient } from '../../integration/cli/cli-test-client.js';
 import { transactionsWorkflow } from '../../integration/cli/workflows/11-transactions.js';
 
-vi.mock('../../../src/remnote-cli/client/connection-config.js');
 vi.mock('../../../src/remnote-cli/client/remote-sdk.js');
 vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js');
 afterEach(() => vi.restoreAllMocks());
@@ -21,21 +19,12 @@ it.each([false, true, 'unavailable'])(
         directory = value.split(': ')[1];
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.mocked(readConnectionConfig).mockResolvedValue({
-      protocolVersion: 1,
-      token: 'a'.repeat(64),
-      port: 3002,
-      knowledgeBaseId: 'kb',
-    });
     vi.spyOn(Connection.prototype, 'open').mockResolvedValue({
-      protocolVersion: 1,
       pluginVersion: 'test',
       sdkVersion: '0.0.46',
       sdkCatalogHash: 'b'.repeat(64),
       knowledgeBaseId: 'kb',
       knowledgeBaseName: 'Test',
-      acceptWriteOperations: true,
-      acceptReplaceOperation: false,
     });
     vi.spyOn(Connection.prototype, 'request').mockResolvedValue({
       pluginId: 'remnote-cli-bridge',

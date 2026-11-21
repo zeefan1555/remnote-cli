@@ -8,11 +8,11 @@
 remnote-cli [global-options] <command> [command-options]
 ```
 
-Live commands require RemNote open with the authenticated RemNote CLI Bridge enabled.
+Live commands require RemNote open with the protocol 2 RemNote CLI Bridge enabled.
 `sync read`, `sync save`, `sync status`, `sync lint`, `sync diff`, `sync format` and `sync relocate` operate offline. A live command owns a
 short-lived loopback connection; no daemon or MCP endpoint is used.
-Run `remnote-cli pair --kb-id ID` once and enter its private token in the plugin.
-See [configuration](configuration.md) for permissions and private pairing-file handling.
+No pairing or initialization command is required. The CLI uses the Bridge's active
+knowledge base. See [configuration](configuration.md) for permissions and state paths.
 
 ### Native Transaction Restriction
 
@@ -29,9 +29,8 @@ commands for stable-key replay. See [ADR 0003](../adr/0003-disable-unsafe-native
 | ----------------- | ------------------------------- | ----------------------------------- |
 | `--json`          | enabled                         | JSON output mode                    |
 | `--text`          | off                             | Human-readable output mode          |
-| `--port <number>` | paired port (3002 by default) | Loopback WebSocket listener port |
-| `--kb-id <id>` | paired KB | Require this exact knowledge base |
-| `--allow-destructive` | off | Explicitly authorize destructive SDK calls in addition to plugin gates |
+| `--kb-id <id>` | active Bridge KB | Require this exact active knowledge base |
+| `--allow-destructive` | off | Explicitly authorize destructive SDK calls |
 | `--verbose` | off | Emit connection and SDK timings to stderr |
 | `--version`       | n/a                             | Show CLI version                    |
 | `--help`          | n/a                             | Show help                           |
@@ -524,7 +523,7 @@ Delete previews by default; unlike `sync apply`, its execution requires both
 `--apply` and `--plan-hash`. It accepts no scope/path selectors.
 The target must be a strict descendant of the exact scope root. Review the
 bounded exact descendant IDs. Native Document/Folder deletion is unsupported;
-both live plugin write gates and global `--allow-destructive` are required.
+global `--allow-destructive` is required; official RemNote scopes remain the native permission boundary.
 Deleting a Rem does not promise to purge all historical Card records. Never
 delete review history to make an acceptance test pass.
 
@@ -1246,7 +1245,7 @@ cat commands.jsonl | remnote-cli batch --file -
 Input is a JSON array of `{"argv":["read","REM_ID"]}`, a `{"commands":[...]}` object, one such object, or JSONL with
 one object per line. `argv` is the command and its arguments, not the `remnote-cli` program name. The file is at most
 1 MB and 100 commands. Commands run in order on one listener; later commands see earlier writes. Do not pass `-` for
-an inner stdin payload, and do not put `--port`, `--kb-id`, `--allow-destructive`, or `--verbose` on an inner command.
+an inner stdin payload, and do not put `--kb-id`, `--allow-destructive`, or `--verbose` on an inner command.
 Those flags belong on `batch`. `batch --allow-destructive` is the approval for inner `sdk` calls; repeating the flag
 inside `argv` is still rejected.
 
@@ -1275,15 +1274,14 @@ remnote-cli status
 
 Behavior rules:
 
-- Authenticates the plugin and checks the exact KB and live SDK catalog.
+- Uses the protocol 2 Bridge handshake and checks the active KB plus live SDK catalog.
 - JSON output includes KB ID/name, protocol, SDK version/catalog hash, plugin/CLI versions,
-  live write-policy flags and connection timing metadata.
+  effective CLI write policy and connection timing metadata.
 - Product versions are informational; there is no `version_warning` or minor-version coupling.
 - Text output shows connection, plugin/CLI versions, KB and protocol. Failures exit 1.
 
 ```bash
 remnote-cli status --text
-remnote-cli --port 3005 status --text
 ```
 
 ## Task Composites (schemaVersion=1)
@@ -1323,7 +1321,7 @@ still requires explicit whole-Wiki `verify scope` zero-card/card-structure proof
 
 Preview/apply never look up dates or create daily documents. Native dailyDocument type does not prove calendar
 freshness without a date scalar. Caller revalidates intended dates before new batches/after midnight; replay keeps
-the original diary. Live write gates are rechecked immediately before each SDK mutation after awaits; known-created
+the original diary. Active KB and official authorization are rechecked immediately before each SDK mutation after awaits; known-created
 Wiki objects must remain plain/ordinary/untagged non-card. Existing grouped-index entries use the full bounded tree;
 missing/new grouped entries fail before writes and require reviewed exact-section fallback. Do not flatten/guess.
 

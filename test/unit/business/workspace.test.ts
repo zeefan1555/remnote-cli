@@ -72,7 +72,7 @@ let temporary: string, directory: string;
 beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-workspace-test-')));
   directory = join(temporary, 'remnote-obsidian');
-  vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+  vi.stubEnv('REMNOTE_CLI_STATE_HOME', join(temporary, 'state'));
 });
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -1015,7 +1015,7 @@ describe('human Markdown workspace', () => {
       ...Object.values(f.state.entries).map((entry) => entry.rawPath),
     ];
     for (const path of paths) await writePrivate(clone, path, await readPrivate(directory, path));
-    vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'fresh-machine', 'connection.json'));
+    vi.stubEnv('REMNOTE_CLI_STATE_HOME', join(temporary, 'fresh-machine', 'state'));
     const identity = identitySchema.parse(JSON.parse(await readPrivate(clone, IDENTITY)));
     const restored = new Map<string, { documentKey: string; rootId: string; blockId: string }>();
     for (const path of paths.filter((path) => path.endsWith('.md'))) {

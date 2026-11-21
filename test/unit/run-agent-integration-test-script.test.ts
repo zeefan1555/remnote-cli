@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createPairing } from '../../src/remnote-cli/client/connection-config.js';
 
 let directory: string;
 afterEach(async () => {
@@ -17,8 +16,7 @@ describe('guarded direct CLI integration entrypoint', () => {
     const occupied = createServer();
     await new Promise<void>((resolve) => occupied.listen(0, '127.0.0.1', resolve));
     const port = (occupied.address() as { port: number }).port;
-    const config = join(directory, 'connection.json');
-    await createPairing('test-kb', port, config);
+    const stateHome = join(directory, 'state');
     const log = join(directory, 'npm-calls');
     await writeFile(join(directory, 'npm'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$NPM_CALLS"\n', {
       mode: 0o700,
@@ -31,7 +29,8 @@ describe('guarded direct CLI integration entrypoint', () => {
         env: {
           ...process.env,
           PATH: `${directory}:${process.env.PATH}`,
-          REMNOTE_CLI_CONFIG: config,
+          REMNOTE_CLI_STATE_HOME: stateHome,
+          REMNOTE_CLI_TEST_PORT: String(port),
           NPM_CALLS: log,
         },
       });
