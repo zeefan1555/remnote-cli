@@ -73,6 +73,10 @@ echo ""
 
 # 6. Coverage Check
 echo -e "${YELLOW}[6/6] Running coverage check...${NC}"
+# Vitest creates worker files under coverage/.tmp. Start every coverage run from
+# an empty generated directory so a preceding non-coverage test run cannot race
+# its cleanup with the V8 provider.
+node -e "require('node:fs').rmSync('coverage', { recursive: true, force: true })"
 if npm run test:coverage; then
   echo -e "${GREEN}✓ Coverage check passed${NC}"
 else

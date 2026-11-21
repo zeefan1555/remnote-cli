@@ -33,6 +33,7 @@ import { TaskOperations, type TaskApplyParams } from './task-operations.js';
 import type { FlashcardsPlan, WikiPlan } from '../schemas/task-schemas.js';
 import { cardDelimiterIndex } from './card-structure.js';
 import { contentHash } from './content-hash.js';
+import type { ReadSession } from '../remnote-cli/client/session.js';
 
 export type ContentMode = 'none' | 'markdown' | 'structured';
 export type SearchByTagResultMode = 'context' | 'tagged';
@@ -619,7 +620,8 @@ export class RemAdapter {
       ReactRNPlugin['storage'],
       'getLocal' | 'setLocal'
     > = plugin.storage,
-    private readonly capabilities?: ReadonlySet<string>
+    private readonly capabilities?: ReadonlySet<string>,
+    private readonly readSession?: ReadSession
   ) {
     // Default settings
     this.settings = {
@@ -650,13 +652,13 @@ export class RemAdapter {
   }
 
   inspectMany(params: InspectManyParams) {
-    return inspectMany(this.plugin, params);
+    return inspectMany(this.plugin, params, this.readSession);
   }
   verifyScope(params: VerifyScopeParams) {
-    return verifyScope(this.plugin, params);
+    return verifyScope(this.plugin, params, this.readSession);
   }
   inspectState(params: InspectStateParams) {
-    return inspectState(this.plugin, params);
+    return inspectState(this.plugin, params, this.readSession);
   }
   getPowerupSlot(params: PowerupGetParams) {
     return getPowerupSlot(this.plugin, params);

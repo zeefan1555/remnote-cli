@@ -8,6 +8,8 @@ import { BuiltInPowerupCodes, RemType } from './sdk-constants.generated.js';
 import { contentHash } from './content-hash.js';
 import { hasCardStructure } from './card-structure.js';
 import { plainText } from './plain-text.js';
+import type { ReadSession } from '../remnote-cli/client/session.js';
+import { allReads, readRem, wrapReadRem } from './read-session.js';
 export interface InspectManyParams {
   schemaVersion: 1;
   remIds?: string[];
@@ -179,7 +181,8 @@ function flag(value: unknown): boolean {
 /** Internal request-local evidence, never cached or serialized as public context. */
 export async function inspectWithEvidence(
   plugin: ReactRNPlugin,
-  p: InspectManyParams
+  p: InspectManyParams,
+  session?: ReadSession
 ): Promise<{ result: InspectionResult; ancestorTails: Map<string, string> }> {
   validateInspectParams(p);
   const startedAt = new Date().toISOString();
@@ -224,12 +227,18 @@ export async function inspectWithEvidence(
   };
   const get = async (id: string): Promise<PluginRem | undefined> => {
     if (cache.has(id)) return cache.get(id);
+    const cached = session?.getRem<PluginRem>(id);
+    if (cached) {
+      cache.set(id, cached);
+      return cached;
+    }
     if (failed.has(id) || !charge(id)) return;
     try {
-      const rem = await plugin.rem.findOne(id);
+      const rem = await readRem(session, id, () => plugin.rem.findOne(id));
       if (!rem || rem._id !== id) throw new Error('Rem missing or inaccessible');
-      cache.set(id, rem);
-      return rem;
+      const wrapped = wrapReadRem(session, rem);
+      cache.set(id, wrapped);
+      return wrapped;
     } catch (e) {
       failed.add(id);
       error(id, 'read_failed', String(e));
@@ -242,10 +251,12 @@ export async function inspectWithEvidence(
   const batched = initial.filter(charge);
   if (batched.length)
     try {
-      const found = await plugin.rem.findMany(batched);
+      const found = session
+        ? await session.findMany<PluginRem>(batched, (missing) => plugin.rem.findMany(missing))
+        : await plugin.rem.findMany(batched);
       remIds(found);
       for (const rem of found ?? [])
-        if (batched.includes(rem._id)) cache.set(rem._id, rem as PluginRem);
+        if (batched.includes(rem._id)) cache.set(rem._id, wrapReadRem(session, rem as PluginRem));
       for (const id of batched)
         if (!cache.has(id)) {
           failed.add(id);
@@ -327,20 +338,22 @@ export async function inspectWithEvidence(
     const rem = await get(id);
     if (!rem) continue;
     try {
-      const [folder, doc, cardItem, daily, tags, refs, cards, cc, u, parent, list] =
-        await Promise.all([
-          rem.isFolder(),
-          rem.isDocument(),
-          rem.isCardItem(),
-          rem.hasPowerup(BuiltInPowerupCodes.DailyDocument),
-          rem.getTagRems(),
-          rem.remsBeingReferenced(),
-          rem.getCards(),
-          rem.hasPowerup('cc'),
-          rem.hasPowerup('u'),
-          rem.getParentRem(),
-          childIds(rem),
-        ]);
+      const [folder, doc, cardItem, daily, tags, refs, cards, cc, u, parent, list] = await allReads(
+        session,
+        [
+          () => rem.isFolder(),
+          () => rem.isDocument(),
+          () => rem.isCardItem(),
+          () => rem.hasPowerup(BuiltInPowerupCodes.DailyDocument),
+          () => rem.getTagRems(),
+          () => rem.remsBeingReferenced(),
+          () => rem.getCards(),
+          () => rem.hasPowerup('cc'),
+          () => rem.hasPowerup('u'),
+          () => rem.getParentRem(),
+          () => childIds(rem),
+        ]
+      );
       if (!list) continue;
       [folder, doc, cardItem, daily, cc, u].forEach(flag);
       if (!Array.isArray(cards)) throw new Error('SDK cards malformed');
@@ -425,9 +438,10 @@ export async function inspectWithEvidence(
 }
 export async function inspectMany(
   plugin: ReactRNPlugin,
-  p: InspectManyParams
+  p: InspectManyParams,
+  session?: ReadSession
 ): Promise<InspectionResult> {
-  return (await inspectWithEvidence(plugin, p)).result;
+  return (await inspectWithEvidence(plugin, p, session)).result;
 }
 const equalSet = (a: string[], b: string[]) =>
   new Set(a).size === new Set(b).size && b.every((id) => a.includes(id));
@@ -557,9 +571,10 @@ export function verifyInspection(
 }
 export async function verifyScope(
   plugin: ReactRNPlugin,
-  p: VerifyScopeParams
+  p: VerifyScopeParams,
+  session?: ReadSession
 ): Promise<InspectionResult & { status: 'passed' | 'failed' | 'incomplete' }> {
   validateVerifyParams(p);
-  const { result, ancestorTails } = await inspectWithEvidence(plugin, p.inspect);
+  const { result, ancestorTails } = await inspectWithEvidence(plugin, p.inspect, session);
   return verifyInspection(result, p, ancestorTails);
 }

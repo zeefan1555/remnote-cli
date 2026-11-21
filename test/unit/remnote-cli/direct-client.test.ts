@@ -24,6 +24,7 @@ vi.mock('../../../src/remnote-cli/client/connection.js', () => ({
 }));
 vi.mock('../../../src/remnote-cli/client/remote-sdk.js', () => ({ remoteSdk: () => wire.plugin }));
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
+import { ReadSession } from '../../../src/remnote-cli/client/session.js';
 
 let directory: string, client: DirectClient;
 beforeEach(async () => {
@@ -52,6 +53,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await client.close();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
 });
@@ -81,6 +83,14 @@ describe('local business dispatch', () => {
     await expect(client.execute('eval', {})).rejects.toThrow('Unknown CLI action');
     await expect(client.execute('flashcards_apply', {})).rejects.toThrow();
     expect(wire.open).not.toHaveBeenCalled();
+  });
+
+  it('invalidates command reads after a mutation but not after status', async () => {
+    const invalidate = vi.spyOn(ReadSession.prototype, 'invalidateAll');
+    await client.execute('get_status', {});
+    expect(invalidate).not.toHaveBeenCalled();
+    await client.execute('create_note', { title: 'Invalidate' });
+    expect(invalidate).toHaveBeenCalledOnce();
   });
 
   it('rejects catalog drift', async () => {

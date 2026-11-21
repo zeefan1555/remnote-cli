@@ -7,6 +7,7 @@ import {
   requestedFields,
 } from '../../../src/business/state-inspect.js';
 import { builtinSlotName, getPowerupSlot } from '../../../src/business/powerup-read.js';
+import { ReadSession } from '../../../src/remnote-cli/client/session.js';
 
 function textOf(value: unknown): string {
   if (!Array.isArray(value)) return '';
@@ -81,6 +82,38 @@ function fixture() {
   };
   return { make, plugin, nodes };
 }
+describe('command read session', () => {
+  it('reuses Rem batches and fields across repeated inspect commands', async () => {
+    const { make, plugin } = fixture();
+    const root = make('root', ['Root']);
+    make('child', ['Child'], 'root');
+    const session = new ReadSession();
+    const params = { remIds: ['root'], fields: ['children', 'cards', 'isFolder'] as const };
+    const first = await inspectState(
+      plugin as never,
+      { ...params, fields: [...params.fields] },
+      session
+    );
+    const calls = {
+      findMany: plugin.rem.findMany.mock.calls.length,
+      children: root.getChildrenRem.mock.calls.length,
+      cards: root.getCards.mock.calls.length,
+      folder: root.isFolder.mock.calls.length,
+    };
+    const second = await inspectState(
+      plugin as never,
+      { ...params, fields: [...params.fields] },
+      session
+    );
+    expect(second).toEqual(first);
+    expect({
+      findMany: plugin.rem.findMany.mock.calls.length,
+      children: root.getChildrenRem.mock.calls.length,
+      cards: root.getCards.mock.calls.length,
+      folder: root.isFolder.mock.calls.length,
+    }).toEqual(calls);
+  });
+});
 
 describe('generic inspect', () => {
   it('reads explicit native flags and complete raw card facts in one bounded batch', async () => {

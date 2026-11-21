@@ -6,6 +6,8 @@ import { sdkSafeRichText } from './sdk-rich-text.js';
 import { builtinSlotName } from './powerup-read.js';
 import { summarizeRichText, type RichTextElementSummary } from './rich-text-elements.js';
 import { BuiltInPowerupCodes, RemType } from './sdk-constants.generated.js';
+import type { ReadSession } from '../remnote-cli/client/session.js';
+import { wrapReadRem } from './read-session.js';
 
 const DEFAULT_INSPECT_FIELDS = [
   'type',
@@ -329,12 +331,18 @@ function rawCard(card: LoadedCard, remId: string): InspectedRawCard {
  */
 export async function inspectState(
   plugin: ReactRNPlugin,
-  params: InspectStateParams
+  params: InspectStateParams,
+  session?: ReadSession
 ): Promise<InspectStateResult> {
   const { descendants, maxRems } = assertParams(params);
   const fields = requestedFields(params);
   const source = plugin as unknown as LoadedPlugin;
   const cache = new Map<string, LoadedRem>();
+  const remember = (rem: LoadedRem): LoadedRem => {
+    const wrapped = wrapReadRem(session, rem);
+    cache.set(wrapped._id, wrapped);
+    return wrapped;
+  };
   const failed = new Set<string>();
   const childIds = new Map<string, string[]>();
   const childErrors = new Map<string, string>();
@@ -366,12 +374,13 @@ export async function inspectState(
     for (let offset = 0; offset < missing.length; offset += 100) {
       const slice = missing.slice(offset, offset + 100);
       try {
-        const found = await gate(() => source.rem.findMany(slice));
+        const found = session
+          ? await session.findMany<LoadedRem>(slice, (missing) => source.rem.findMany(missing))
+          : await gate(() => source.rem.findMany(slice));
         if (found !== undefined && !Array.isArray(found))
           throw new Error('SDK did not return a Rem array');
         for (const rem of found ?? [])
-          if (rem && typeof rem._id === 'string' && slice.includes(rem._id))
-            cache.set(rem._id, rem);
+          if (rem && typeof rem._id === 'string' && slice.includes(rem._id)) remember(rem);
         for (const id of slice) if (!cache.has(id)) failed.add(id);
       } catch (error) {
         for (const id of slice) failed.add(id);
@@ -394,7 +403,7 @@ export async function inspectState(
       if (failedChildren) throw new Error(failedChildren);
       const list = requireRemArray(await gate(() => rem.getChildrenRem()), 'children');
       const ids = list.map((child) => {
-        cache.set(child._id, child);
+        remember(child);
         return child._id;
       });
       childIds.set(rem._id, ids);
@@ -447,7 +456,7 @@ export async function inspectState(
         try {
           const tags = requireRemArray(await gate(() => cache.get(id)!.getTagRems()), 'tags');
           tagCache.set(id, tags);
-          for (const tag of tags) cache.set(tag._id, tag);
+          for (const tag of tags) remember(tag);
         } catch (error) {
           tagErrors.set(id, messageOf(error));
           result.complete = false;
@@ -763,7 +772,7 @@ export async function inspectState(
         (async () => {
           try {
             const sources = requireRemArray(await gate(() => rem.getSources()), 'sources');
-            for (const sourceRem of sources) cache.set(sourceRem._id, sourceRem);
+            for (const sourceRem of sources) remember(sourceRem);
             out.sources = await Promise.all(
               sources.map(async (sourceRem) => ({
                 id: sourceRem._id,
