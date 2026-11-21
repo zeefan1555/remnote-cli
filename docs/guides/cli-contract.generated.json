@@ -1,0 +1,796 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 2,
+  "bridgeActions": [
+    "get_status",
+    "get_sdk_capabilities",
+    "sdk_call"
+  ],
+  "plans": {
+    "flashcards": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "dryRun": {
+          "default": true,
+          "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "dailyRemId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "homeRootId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "tagRemId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "parentRemId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "tags": {
+              "description": "Explicit tag Rem IDs by semantic key: root or card:<key>",
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "\\S"
+                }
+              }
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000,
+              "pattern": "\\S"
+            },
+            "cardCluster": {
+              "type": "boolean"
+            },
+            "newCards": {
+              "minItems": 1,
+              "maxItems": 7,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9._-]+$"
+                  },
+                  "question": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                        "pattern": "\\S"
+                      },
+                      {
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 10000
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "remId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "pattern": "\\S"
+                                }
+                              },
+                              "required": [
+                                "remId"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "answer": {
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 10000
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "remId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256,
+                                    "pattern": "\\S"
+                                  }
+                                },
+                                "required": [
+                                  "remId"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 10000
+                              },
+                              "language": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9_+#.-]{1,64}$"
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "question",
+                  "answer"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "answerPatches": {
+              "minItems": 1,
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9._-]+$"
+                  },
+                  "cardRemId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "\\S"
+                  },
+                  "remId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "\\S"
+                  },
+                  "expectedTextHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "text": {
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 10000
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "remId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "pattern": "\\S"
+                                }
+                              },
+                              "required": [
+                                "remId"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 10000
+                            },
+                            "language": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9_+#.-]{1,64}$"
+                            }
+                          },
+                          "required": [
+                            "code"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "cardRemId",
+                  "remId",
+                  "expectedTextHash",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "reusedCardRemIds": {
+              "minItems": 1,
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "\\S"
+              }
+            }
+          },
+          "required": [
+            "schemaVersion"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "idempotencyKey",
+        "plan"
+      ],
+      "additionalProperties": false
+    },
+    "wiki": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "dryRun": {
+          "default": true,
+          "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "wikiRootId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "partitionRemId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "indexRemId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "logRemId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "pages": {
+              "maxItems": 10,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9._-]+$"
+                  },
+                  "remId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "\\S"
+                  },
+                  "indexParentRemId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "\\S"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "pattern": "\\S"
+                  },
+                  "aliases": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "nodes": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[A-Za-z0-9._-]+$"
+                        },
+                        "remId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "\\S"
+                        },
+                        "text": {
+                          "minItems": 1,
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "maxLength": 10000
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "remId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 256,
+                                        "pattern": "\\S"
+                                      }
+                                    },
+                                    "required": [
+                                      "remId"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "pageKey": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[A-Za-z0-9._-]+$"
+                                  }
+                                },
+                                "required": [
+                                  "pageKey"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "expectedTextHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "summary": {
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 10000
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "remId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "pattern": "\\S"
+                                }
+                              },
+                              "required": [
+                                "remId"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "pageKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[A-Za-z0-9._-]+$"
+                            }
+                          },
+                          "required": [
+                            "pageKey"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "title",
+                  "nodes",
+                  "summary"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "answerPatches": {
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9._-]+$"
+                  },
+                  "cardRemId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "\\S"
+                  },
+                  "remId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "\\S"
+                  },
+                  "expectedTextHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "text": {
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 10000
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "remId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "pattern": "\\S"
+                                }
+                              },
+                              "required": [
+                                "remId"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "pageKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[A-Za-z0-9._-]+$"
+                            }
+                          },
+                          "required": [
+                            "pageKey"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "cardRemId",
+                  "remId",
+                  "expectedTextHash",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "wikiRootId",
+            "partitionRemId",
+            "indexRemId",
+            "logRemId",
+            "pages"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "idempotencyKey",
+        "plan"
+      ],
+      "additionalProperties": false
+    },
+    "workspace": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "apply",
+            "delete",
+            "resume",
+            "recover",
+            "diff"
+          ]
+        },
+        "directory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "changed",
+            "all"
+          ]
+        },
+        "paths": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "planHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "delete": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "scopeRoot": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id",
+            "scopeRoot"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "operation",
+        "directory"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "requiredCapabilities": {
+    "flashcards": {
+      "create": [
+        "namespace:rem.createTreeWithMarkdown",
+        "namespace:rem.findOne",
+        "namespace:richText.rem",
+        "rem:addPowerup",
+        "rem:addTag",
+        "rem:getAliases",
+        "rem:getCards",
+        "rem:getChildrenRem",
+        "rem:getParentRem",
+        "rem:getTagRems",
+        "rem:hasPowerup",
+        "rem:isDocument",
+        "rem:isFolder",
+        "rem:setIsCardItem",
+        "rem:setIsCollapsed",
+        "rem:setText"
+      ],
+      "patch": [
+        "namespace:rem.findOne",
+        "namespace:richText.rem",
+        "rem:getCards",
+        "rem:setIsCardItem",
+        "rem:setText"
+      ],
+      "reuse": [
+        "namespace:rem.findOne",
+        "rem:getCards"
+      ]
+    },
+    "wiki": {
+      "pages": [
+        "namespace:rem.createRem",
+        "namespace:rem.findOne",
+        "namespace:richText.rem",
+        "rem:getAliases",
+        "rem:getCards",
+        "rem:getChildrenRem",
+        "rem:getOrCreateAliasWithText",
+        "rem:getParentRem",
+        "rem:getTagRems",
+        "rem:hasPowerup",
+        "rem:isDocument",
+        "rem:isFolder",
+        "rem:setIsCollapsed",
+        "rem:setParent",
+        "rem:setText"
+      ],
+      "patch": [
+        "namespace:rem.findOne",
+        "namespace:richText.rem",
+        "rem:setText"
+      ]
+    }
+  },
+  "receipt": {
+    "schemaVersion": 1,
+    "statuses": [
+      "preview",
+      "verified",
+      "partial",
+      "unknown",
+      "incomplete",
+      "conflict"
+    ],
+    "complete": "boolean",
+    "errors": "array<{code,message,remId?}>"
+  },
+  "exitCodes": {
+    "success": 0,
+    "validationConnectionOrIncomplete": 1
+  },
+  "workspace": {
+    "requiresBridge": {
+      "plan": false,
+      "apply": "depends-on-local-changes",
+      "delete": "depends-on-apply",
+      "resume": true,
+      "recover": "depends-on-remote-outcome",
+      "diff": false
+    }
+  }
+}

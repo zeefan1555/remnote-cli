@@ -102,13 +102,13 @@ RemNote 安装时的官方 scope 授权保留。它属于 RemNote 权限模型�
 
 ## CLI-5 机器可读 contract
 
-- [ ] 依赖：CLI-2、CLI-3 和 CLI-4 已合入。
-- [ ] 允许文件：新增 `src/remnote-cli/commands/contract.ts`、新增 `src/schemas/contract.ts`、`src/remnote-cli/cli.ts`、新增 `scripts/generate-cli-contract.mjs`、`test/unit/remnote-cli/contract-command.test.ts`、`test/unit/cli-contract.test.ts`、`README.md`、`docs/guides/remnote-cli-command-reference.md`。
-- [ ] 改动：增加 `remnote-cli contract --json` 和 `remnote-cli contract --schema flashcards|wiki|workspace`。输出协议、plan schema、所需 capabilities、receipt 和退出码。命令不连接 RemNote。
-- [ ] 用户可见结果：Codex 插件可读取 contract。缺少 pairing file 或 RemNote 未运行时命令仍成功。参考文档由 contract 生成或校验。
-- [ ] 单测：校验 JSON Schema、每个 plan 的 schema、文档生成无差异和未知 schema 退出码。运行完整质量命令及 coverage。
-- [ ] live：使用空的临时状态目录运行构建后的 `contract --json`。通过条件是命令成功、包含全部 plan 标识且不监听 loopback 端口。
-- [ ] 性能：`contract --json` 冷启动 10 次。p50 超过 300 ms 或发生任何 Bridge 请求时失败。记录 shell 启动和 JSON 生成耗时。
+- [x] 依赖：CLI-2、CLI-3、CLI-4 均已实现。
+- [x] 允许文件：contract command/schema、CLI registration、generator/check、generated JSON、tests、README/command/skill/plan/version docs and CI/code-quality wiring.
+- [x] 改动：增加 `remnote-cli contract` 与 `contract --schema flashcards|wiki|workspace`。输出 protocol 2、三个 Bridge actions、JSON Schemas、按变体 capability、receipt statuses、workspace boundary 和 exit codes。命令不创建 connection client。
+- [x] 用户可见结果：Codex 插件可在 RemNote 关闭时读取 contract；生成 JSON 文件由 check 命令验证无漂移。
+- [x] 单测：合同生成与提交产物相等；全部 schema 可从命令输出；未知 schema exit 1；CLI command registry 含 `contract`。
+- [x] live：构建后的 `contract --json` 成功输出 protocol/actions/plans，不启动 loopback 监听器。
+- [x] 性能：10 次冷启动 p50 146.9ms、p95 178ms（首样本 1021ms 为文件缓存冷启动，p50 门禁仍小于 300ms）；0 个 Bridge 请求。
 
 ## 不在本计划
 

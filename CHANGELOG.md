@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.5] - 2026-11-22
+
+### Added
+
+- Add the offline `contract` command and generated JSON contract for protocol 2, the three Bridge actions, flashcard/Wiki/workspace schemas, required capabilities, receipt statuses, and exit codes. Codex plugins can inspect this contract without RemNote running.
+
 ## [0.26.4] - 2026-11-22
 
 ### Changed

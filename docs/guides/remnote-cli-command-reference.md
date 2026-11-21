@@ -1284,6 +1284,22 @@ Behavior rules:
 remnote-cli status --text
 ```
 
+## contract
+
+Print the offline machine-readable protocol, plan schemas, required SDK capabilities,
+receipt statuses, workspace operation boundaries, and exit codes. This command never
+opens a Bridge session and succeeds while RemNote is closed.
+
+```bash
+remnote-cli contract
+remnote-cli contract --schema flashcards
+remnote-cli contract --schema wiki
+remnote-cli contract --schema workspace
+```
+
+The committed generated artifact is
+[`cli-contract.generated.json`](cli-contract.generated.json).
+
 ## Task Composites (schemaVersion=1)
 
 | CLI | Local business action |
