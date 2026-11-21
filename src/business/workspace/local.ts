@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import { connectionConfigPath } from '../../remnote-cli/client/connection-config.js';
+import { remnoteCliStateHome } from '../../remnote-cli/client/state-home.js';
 import { LocalState } from '../../remnote-cli/client/local-state.js';
 import {
   allFiles,
@@ -149,22 +149,16 @@ const stateSchema = z
 
 export function localStore(kbId: string): LocalState {
   return new LocalState(
-    join(dirname(connectionConfigPath()), 'state', createHash('sha256').update(kbId).digest('hex'))
+    join(remnoteCliStateHome(), 'state', createHash('sha256').update(kbId).digest('hex'))
   );
 }
 
 export function publicationStore(): LocalState {
-  return new LocalState(
-    join(dirname(connectionConfigPath()), 'sync-publications'),
-    MAX_METADATA_BYTES
-  );
+  return new LocalState(join(remnoteCliStateHome(), 'sync-publications'), MAX_METADATA_BYTES);
 }
 
 export function manifestStore(): LocalState {
-  return new LocalState(
-    join(dirname(connectionConfigPath()), 'sync-manifests'),
-    MAX_METADATA_BYTES
-  );
+  return new LocalState(join(remnoteCliStateHome(), 'sync-manifests'), MAX_METADATA_BYTES);
 }
 export async function authoritativeState(root: string): Promise<WorkspaceState> {
   const value = await manifestStore().getLocal<WorkspaceState>(`manifest:${hash(root)}`);

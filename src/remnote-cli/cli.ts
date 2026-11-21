@@ -3,7 +3,6 @@ import { registerCompositeCommands } from './commands/composite.js';
 import { registerTaskCommands } from './commands/task.js';
 import { Command } from 'commander';
 import { createRequire } from 'node:module';
-import { createPairing } from './client/connection-config.js';
 import { registerCreateCommand } from './commands/create.js';
 import {
   registerListChildrenCommand,
@@ -44,33 +43,10 @@ export function createProgram(version: string): Command {
     .version(version)
     .option('--json', 'JSON output (default)')
     .option('--text', 'Human-readable output')
-    .option('--port <number>', 'Loopback WebSocket port (default: paired port)')
-    .option('--kb-id <id>', 'Require this exact knowledge base')
+    .option('--kb-id <id>', 'Require this exact active knowledge base')
     .option('--allow-destructive', 'Explicitly allow destructive SDK operations')
     .option('--verbose', 'Enable verbose stderr logging');
 
-  program
-    .command('pair')
-    .description('Create a private pairing file using --kb-id; enter its token once in the plugin')
-    .action(async () => {
-      try {
-        const opts = program.opts();
-        if (!opts.kbId) throw new Error('pair requires --kb-id <id>');
-        const path = await createPairing(opts.kbId, Number(opts.port ?? 3002));
-        console.log(
-          JSON.stringify({
-            configPath: path,
-            paired: false,
-            next: 'Enter the private token in the plugin, then run status.',
-          })
-        );
-      } catch (error) {
-        console.error(
-          JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
-        );
-        process.exitCode = 1;
-      }
-    });
   registerCreateCommand(program);
   registerSearchCommand(program);
   registerSearchByTagCommand(program);

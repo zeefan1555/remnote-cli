@@ -3,7 +3,7 @@
 ## Connection Fails
 
 Run `remnote-cli status --text`. Check that RemNote is open with RemNote CLI Bridge
-enabled, the private tokens match and the URL uses the paired loopback port.
+enabled and that the Bridge uses protocol 2.
 An idle plugin is normally disconnected because no command owns a listener.
 
 The connection deadline is 15 seconds. Browser background timer throttling can
@@ -12,20 +12,20 @@ check. Collect the plugin panel's error if this still fails.
 
 ## Port Occupied
 
-Only one command can own the paired port. Identify the listener with
+Only one command can own the fixed port. Identify the listener with
 `lsof -nP -iTCP:3002 -sTCP:LISTEN`. Wait for a legitimate command or explicitly
 stop a confirmed obsolete companion. Never kill an unknown listener.
 
 ## Permission Or KB Mismatch
 
 `All` content permission and `KnowledgeBaseInfo: Read` are separate grants.
-The latter is required for authenticated KB binding even on read-only commands.
+The latter is required for live KB binding even on read-only commands.
 Grant the requested scope in RemNote. Never use a different KB ID merely to
 silence a mismatch.
 
-Writes need **Accept write operations**. Destructive SDK methods additionally
-need **Accept destructive operations** and CLI `--allow-destructive`.
-Remote SDK calls cannot change or disclose pairing/security settings.
+Official RemNote scopes decide native access. A destructive CLI operation also
+requires explicit `--allow-destructive`. There are no Bridge write or destructive
+settings, pairing tokens, endpoint settings, or connection files.
 
 ## SDK Capability Mismatch
 
@@ -53,5 +53,5 @@ See [the exact boundary](../adr/0003-disable-unsafe-native-transactions.md).
 failure. JSON errors go to stderr. Task commands emit available receipts before
 returning nonzero.
 
-Use `--verbose` for timing metadata. Never share pairing tokens or raw KB content
+Use `--verbose` for timing metadata. Never share raw KB content
 in diagnostic logs.

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { RemAdapter } from '../../business/rem-adapter.js';
 import * as schemas from '../../schemas/remnote-schemas.js';
@@ -8,7 +8,7 @@ import { InspectStateSchema, PowerupGetSchema } from '../../schemas/state-schema
 import { FlashcardsApplySchema, WikiApplySchema } from '../../schemas/task-schemas.js';
 import { resolveManagedImage } from '../../media.js';
 import { Connection } from './connection.js';
-import { connectionConfigPath, readConnectionConfig } from './connection-config.js';
+import { remnoteCliStateHome } from './state-home.js';
 import { verifiedCatalog, type CapabilityResult } from './sdk-capabilities.js';
 import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
@@ -43,7 +43,6 @@ const operations = {
   wiki_apply: ['applyWiki', WikiApplySchema],
 } as const;
 export interface ClientOptions {
-  port?: string;
   kbId?: string;
   allowDestructive?: boolean;
   verbose?: boolean;
@@ -55,7 +54,6 @@ export class DirectClient {
   private state?: LocalState;
   private workspace?: SdkWorkspaceBackend;
   private startedAt = performance.now();
-  private readonly configPath = connectionConfigPath();
   private holds = 0;
   constructor(private readonly options: ClientOptions = {}) {}
 
@@ -73,15 +71,7 @@ export class DirectClient {
 
   private async connect(): Promise<void> {
     if (this.adapter) return;
-    const config = await readConnectionConfig(this.configPath);
-    if (this.options.port !== undefined) {
-      const port = Number(this.options.port);
-      if (!Number.isInteger(port) || port < 1024 || port > 65535)
-        throw new Error('Invalid loopback port');
-      config.port = port;
-    }
-    if (this.options.kbId) config.knowledgeBaseId = this.options.kbId;
-    this.connection = new Connection(config, version);
+    this.connection = new Connection({ knowledgeBaseId: this.options.kbId }, version);
     const identity = await this.connection.open();
     const catalog = verifiedCatalog(await this.connection.request('get_sdk_capabilities', {}));
     if (
@@ -90,30 +80,24 @@ export class DirectClient {
     )
       throw new Error('SDK catalog changed during handshake');
     this.catalog = catalog;
-    const kbKey = createHash('sha256').update(config.knowledgeBaseId).digest('hex');
-    this.state = new LocalState(join(dirname(this.configPath), 'state', kbKey));
+    const kbKey = createHash('sha256').update(identity.knowledgeBaseId).digest('hex');
+    this.state = new LocalState(join(remnoteCliStateHome(), 'state', kbKey));
     const plugin = remoteSdk(this.connection, catalog, this.options.allowDestructive === true);
     this.workspace = new SdkWorkspaceBackend(plugin, this.state, async () => {
       const status = (await this.connection!.request('get_status', {})) as Record<string, unknown>;
-      if (
-        typeof status.knowledgeBaseId !== 'string' ||
-        typeof status.acceptWriteOperations !== 'boolean'
-      )
+      if (typeof status.knowledgeBaseId !== 'string')
         throw new Error('Incomplete live workspace status');
       return {
         kbId: status.knowledgeBaseId,
-        writable: status.acceptWriteOperations,
-        destructive:
-          status.acceptReplaceOperation === true && this.options.allowDestructive === true,
+        writable: true,
+        destructive: this.options.allowDestructive === true,
       };
     });
     this.adapter = new RemAdapter(
       plugin,
       {
-        ...config.settings,
-        acceptWriteOperations: identity.acceptWriteOperations,
-        acceptReplaceOperation:
-          identity.acceptReplaceOperation && this.options.allowDestructive === true,
+        acceptWriteOperations: true,
+        acceptReplaceOperation: this.options.allowDestructive === true,
       },
       this.state
     );
@@ -138,6 +122,8 @@ export class DirectClient {
     if (action === 'get_status')
       return {
         ...((await this.connection!.request('get_status', {})) as object),
+        acceptWriteOperations: true,
+        acceptReplaceOperation: this.options.allowDestructive === true,
         cliVersion: version,
         sdkVersion: this.catalog!.sdkVersion,
         sdkCatalogHash: this.catalog!.sdkCatalogHash,

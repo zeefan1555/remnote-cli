@@ -20,7 +20,7 @@ const commonHelp = [
   'Other TextSegment strings: <=10000 chars each (empty allowed).',
   'Default is read-only preview. --apply explicitly applies; preserve the same key for a reviewed plan.',
   'Preview and apply never look up dates or create daily documents.',
-  'Every SDK mutation rechecks the live write gate immediately before its call, after awaited reads.',
+  'Every SDK mutation rechecks the active knowledge base and official authorization immediately before its call, after awaited reads.',
   'Receipts contain metadata only, including ids mapping semantic keys to exact Rem IDs (max1000).',
   'Use ids such as card:<key>, answer:<key>:<zero-index>, page:<key>, node:<key>, index:<pageKey>, log:batch; never infer IDs from creation order.',
   'facts contains up to 1000 selected {remId,textHash,cardIds,reviewHash} entries, without text/history bodies.',

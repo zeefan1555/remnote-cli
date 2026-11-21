@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
         '       ./run-agent-integration-test.sh --yes [--flashcards-only <HOME concept>]' \
         '       ./run-agent-integration-test.sh --yes --transactions-only' \
         '       ./run-agent-integration-test.sh --yes --command <CLI arguments...>' \
-        'Uses the private pairing file. Refuses occupied ports; never starts or stops a daemon.'
+        'Uses the fixed zero-configuration Bridge endpoint. Refuses an occupied port; never starts or stops a daemon.'
       exit 0 ;;
     --suite|--suite=*) printf '%s\n' 'Only direct CLI tests exist; remove --suite.' >&2; exit 1 ;;
     *) printf 'Unknown wrapper argument: %s\n' "$1" >&2; exit 1 ;;

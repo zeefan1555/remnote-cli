@@ -868,9 +868,7 @@ async function synchronizeWorkspace(
     const writesRemote = plan.changes.length > 0 || Boolean(plan.deletion);
     if (writesRemote && !identity.writable) throw new Error('Live write gate is disabled');
     if (plan.deletion && !identity.destructive)
-      throw new Error(
-        'Explicit deletion requires --allow-destructive and both live plugin write gates'
-      );
+      throw new Error('Explicit deletion requires --allow-destructive');
     journal.state = 'applying';
     await store.setLocal(key, journal);
     let active: string | undefined;

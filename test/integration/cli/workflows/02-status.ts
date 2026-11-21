@@ -4,7 +4,7 @@
  * Verifies the CLI can communicate with RemNote via the bridge.
  * If this fails, remaining workflows are skipped.
  *
- * Prerequisites: the paired RemNote plugin is active.
+ * Prerequisites: the protocol 2 RemNote Bridge is active.
  */
 
 import { assertHasField, assertTruthy } from '../assertions.js';
@@ -67,11 +67,11 @@ export async function statusWorkflow(
       assertHasField(r, 'cliVersion', 'status result cliVersion');
       assertTruthy(typeof r.cliVersion === 'string', 'cliVersion should be a string');
       assertTruthy(
-        r.protocolVersion === 1 &&
+        r.protocolVersion === 2 &&
           typeof r.knowledgeBaseId === 'string' &&
           typeof r.sdkCatalogHash === 'string' &&
           /^[a-f0-9]{64}$/.test(r.sdkCatalogHash),
-        'authenticated protocol, KB and SDK catalog identity must be present'
+        'protocol 2, KB and SDK catalog identity must be present'
       );
       steps.push({
         label: 'Protocol and SDK identity verified',
@@ -88,7 +88,7 @@ export async function statusWorkflow(
     }
   }
 
-  // Step 4: Capture write/replace policy flags
+  // Step 4: Capture effective CLI write/replace policy
   {
     const start = Date.now();
     try {
@@ -107,13 +107,13 @@ export async function statusWorkflow(
       state.acceptWriteOperations = r.acceptWriteOperations as boolean;
       state.acceptReplaceOperation = r.acceptReplaceOperation as boolean;
       steps.push({
-        label: 'Bridge write/replace policy flags reported',
+        label: 'Effective CLI write/replace policy reported',
         passed: true,
         durationMs: Date.now() - start,
       });
     } catch (e) {
       steps.push({
-        label: 'Bridge write/replace policy flags reported',
+        label: 'Effective CLI write/replace policy reported',
         passed: false,
         durationMs: Date.now() - start,
         error: (e as Error).message,

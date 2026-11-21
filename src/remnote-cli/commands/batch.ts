@@ -7,7 +7,7 @@ import { formatError, formatResult, type OutputFormat } from '../output/formatte
 
 const MAX_BATCH_BYTES = 1024 * 1024;
 const MAX_BATCH_COMMANDS = 100;
-const CONNECTION_FLAGS = ['--port', '--kb-id', '--allow-destructive', '--verbose'];
+const CONNECTION_FLAGS = ['--kb-id', '--allow-destructive', '--verbose'];
 
 export interface BatchCommandResult {
   index: number;
@@ -212,7 +212,7 @@ export function registerBatchCommand(program: Command, version: string): void {
         '',
         'Each command is {"argv":["read","REM_ID"]}. argv is the command and its arguments, not the remnote-cli program name.',
         'A JSON array, a {commands:[...]} object, one JSON object, or JSONL (one object per line) are accepted.',
-        'Connection flags (--port, --kb-id, --allow-destructive, --verbose) belong on batch. Inner commands must not read stdin.',
+        'Connection flags (--kb-id, --allow-destructive, --verbose) belong on batch. Inner commands must not read stdin.',
         'batch --allow-destructive authorizes inner sdk calls. An inner argv that repeats the flag is rejected.',
         'Help, --version, and usage errors are per-command results. Exit code 0 is success and its text stays inside result.',
         'A failing command does not abort the rest of the batch unless --stop-on-error is set. The bridge closes afterwards.',

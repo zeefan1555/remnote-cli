@@ -1,37 +1,29 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
-import type { ConnectionConfig } from './connection-config.js';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
-/** Current RemNote CLI Bridge manifest id. The previous id stays valid during the rename. */
-export const ACCEPTED_PLUGIN_IDS = ['remnote-cli-bridge', 'zeefan-remnote-sdk-bridge'] as const;
-export const ACCEPTED_PLUGIN_NAMES = ['RemNote CLI Bridge', 'RemNote SDK Bridge'] as const;
+export const FIXED_PORT = 3002;
+/** RemNote's sandboxed plugin WebSocket sends this exact observed Origin. */
+export const ALLOWED_ORIGIN = 'null';
+export const MAX_PENDING_REQUESTS = 32;
+
 export const IdentitySchema = z
   .object({
-    protocolVersion: z.literal(PROTOCOL_VERSION),
     pluginVersion: z.string().min(1),
     sdkVersion: z.string().min(1),
     sdkCatalogHash: z.string().regex(/^[a-f0-9]{64}$/),
     knowledgeBaseId: z.string().min(1).max(256),
     knowledgeBaseName: z.string(),
-    acceptWriteOperations: z.boolean(),
-    acceptReplaceOperation: z.boolean(),
-    pluginId: z.enum(ACCEPTED_PLUGIN_IDS).optional(),
-    pluginName: z.enum(ACCEPTED_PLUGIN_NAMES).optional(),
   })
   .strict();
 export type BridgeIdentity = z.infer<typeof IdentitySchema>;
-export function proof(token: string, value: string): string {
-  return createHmac('sha256', token).update(value).digest('hex');
-}
-function matchesProof(token: string, value: string, actual: unknown): boolean {
-  return (
-    typeof actual === 'string' &&
-    /^[a-f0-9]{64}$/.test(actual) &&
-    timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(proof(token, value), 'hex'))
-  );
+
+export interface ConnectionOptions {
+  /** Explicit validation only; the Bridge always reports the active knowledge base. */
+  knowledgeBaseId?: string;
+  /** Test seam only. Production callers use the fixed port. */
+  port?: number;
 }
 
 /** A command owns this listener. It never reconnects or replays an in-flight operation. */
@@ -42,6 +34,7 @@ export class Connection {
   private opening?: Promise<BridgeIdentity>;
   private failure?: Error;
   private identity?: BridgeIdentity;
+  private nextRequestId = 1;
   private readonly pending = new Map<
     string,
     {
@@ -52,10 +45,10 @@ export class Connection {
   >();
   private connectionTimer?: NodeJS.Timeout;
   private rejectOpening?: (error: Error) => void;
-  readonly timings = { connectionMs: 0, sdkCalls: 0, sdkMs: 0 };
+  readonly timings = { listeningMs: 0, connectionMs: 0, sdkCalls: 0, sdkMs: 0 };
 
   constructor(
-    private readonly config: ConnectionConfig,
+    private readonly options: ConnectionOptions,
     private readonly cliVersion: string,
     private readonly connectTimeoutMs = 15_000
   ) {}
@@ -67,10 +60,18 @@ export class Connection {
       this.rejectOpening = reject;
       const server = new WebSocketServer({
         host: '127.0.0.1',
-        port: this.config.port,
+        port: this.options.port ?? FIXED_PORT,
         maxPayload: MAX_MESSAGE_BYTES,
+        verifyClient: ({ req }, done) => {
+          const origin = req.headers.origin;
+          const allowed = origin === ALLOWED_ORIGIN;
+          done(allowed, allowed ? undefined : 403, allowed ? undefined : 'Forbidden Origin');
+        },
       });
       this.server = server;
+      server.once('listening', () => {
+        this.timings.listeningMs = Math.round(performance.now() - started);
+      });
       const fail = (error: Error) => {
         this.failure = error;
         clearTimeout(this.connectionTimer);
@@ -90,7 +91,7 @@ export class Connection {
         () =>
           fail(
             new Error(
-              'Plugin connection timed out. Open RemNote and check pairing and permissions.'
+              'Plugin connection timed out. Open RemNote, load protocol 2, and check its official permissions.'
             )
           ),
         this.connectTimeoutMs
@@ -101,14 +102,12 @@ export class Connection {
           return;
         }
         this.sockets.add(ws);
-        const nonce = randomBytes(32).toString('hex');
-        const timer = setTimeout(() => ws.close(1008, 'Authentication timeout'), 5000);
+        const timer = setTimeout(() => ws.close(1008, 'Handshake timeout'), 5000);
         ws.send(
           JSON.stringify({
-            type: 'challenge',
+            type: 'hello',
             protocolVersion: PROTOCOL_VERSION,
-            nonce,
-            proof: proof(this.config.token, 'cli:' + nonce),
+            version: this.cliVersion,
           })
         );
         ws.on('error', () => {});
@@ -126,25 +125,23 @@ export class Connection {
           try {
             const message = JSON.parse(data.toString());
             if (this.client !== ws) {
-              if (message.type !== 'hello') throw new Error('Authentication required');
+              if (message.type !== 'ready' || message.protocolVersion !== PROTOCOL_VERSION)
+                throw new Error(
+                  'Unsupported plugin handshake. Load the zero-configuration RemNote CLI Bridge using protocol 2.'
+                );
               const parsed = IdentitySchema.safeParse(message.identity);
               if (!parsed.success)
                 throw new Error(
-                  'Unsupported plugin handshake. Load the paired RemNote CLI Bridge using direct protocol 1.'
+                  'Unsupported plugin handshake. The Bridge did not report a complete live SDK and knowledge-base identity.'
                 );
               const identity = parsed.data;
               if (
-                !matchesProof(
-                  this.config.token,
-                  'plugin:' + nonce + ':' + JSON.stringify(message.identity),
-                  message.proof
-                )
+                this.options.knowledgeBaseId &&
+                identity.knowledgeBaseId !== this.options.knowledgeBaseId
               )
-                throw new Error('Plugin authentication failed');
-              if (identity.knowledgeBaseId !== this.config.knowledgeBaseId)
                 throw new Error(
                   'Knowledge base mismatch: expected ' +
-                    this.config.knowledgeBaseId +
+                    this.options.knowledgeBaseId +
                     ', received ' +
                     identity.knowledgeBaseId
                 );
@@ -155,13 +152,6 @@ export class Connection {
               this.client = ws;
               this.identity = identity;
               this.timings.connectionMs = Math.round(performance.now() - started);
-              ws.send(
-                JSON.stringify({
-                  type: 'ready',
-                  protocolVersion: PROTOCOL_VERSION,
-                  version: this.cliVersion,
-                })
-              );
               for (const other of this.sockets)
                 if (other !== ws) other.close(1008, 'Session selected');
               resolve(identity);
@@ -178,7 +168,7 @@ export class Connection {
             else pending.reject(new Error('Malformed response; verify write outcome'));
           } catch (error) {
             const failure = error instanceof Error ? error : new Error(String(error));
-            ws.close(1008, 'Protocol, authentication or KB mismatch');
+            ws.close(1008, 'Protocol, handshake or KB mismatch');
             fail(failure);
             this.failPending(failure);
           }
@@ -187,6 +177,7 @@ export class Connection {
     });
     return this.opening;
   }
+
   async request(
     action: string,
     payload: Record<string, unknown>,
@@ -198,8 +189,10 @@ export class Connection {
       throw new Error('Session closed; do not replay writes');
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
       throw new Error('Invalid SDK timeout');
+    if (this.pending.size >= MAX_PENDING_REQUESTS)
+      throw new Error(`Too many pending SDK requests (maximum ${MAX_PENDING_REQUESTS})`);
     const ws = this.client,
-      id = randomUUID(),
+      id = String(this.nextRequestId++),
       started = performance.now();
     const frame = JSON.stringify({
       id,
@@ -234,6 +227,7 @@ export class Connection {
       this.timings.sdkMs += Math.round(performance.now() - started);
     }
   }
+
   private failPending(error: Error): void {
     this.failure = error;
     for (const pending of this.pending.values()) {
@@ -242,6 +236,7 @@ export class Connection {
     }
     this.pending.clear();
   }
+
   async close(): Promise<void> {
     clearTimeout(this.connectionTimer);
     const error = new Error('Command session closed');

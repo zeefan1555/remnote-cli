@@ -24,7 +24,7 @@ import type {
 let temporary: string;
 beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-official-test-')));
-  vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+  vi.stubEnv('REMNOTE_CLI_STATE_HOME', join(temporary, 'state'));
 });
 afterEach(async () => {
   vi.unstubAllEnvs();

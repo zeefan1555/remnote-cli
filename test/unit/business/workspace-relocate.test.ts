@@ -34,7 +34,7 @@ beforeEach(async () => {
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'remnote-relocate-')));
   source = join(temporary, 'source');
   destination = join(temporary, 'destination');
-  vi.stubEnv('REMNOTE_CLI_CONFIG', join(temporary, 'config', 'connection.json'));
+  vi.stubEnv('REMNOTE_CLI_STATE_HOME', join(temporary, 'state'));
   await mkdir(source, { mode: 0o700 });
   state = {
     version: 1,

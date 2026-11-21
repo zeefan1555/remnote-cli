@@ -1,7 +1,7 @@
 /**
  * Integration test runner for RemNote CLI.
  *
- * Runs real CLI commands directly against the paired RemNote SDK plugin.
+ * Runs real CLI commands directly against the protocol 2 RemNote SDK Bridge.
  * Creates real content in RemNote — all prefixed with [CLI-TEST] for easy cleanup.
  *
  * Usage:
@@ -9,7 +9,7 @@
  *   npm run test:integration:cli -- --yes # Skip confirmation prompt
  *
  * Environment variables:
- *   REMNOTE_CLI_CONFIG - Private pairing file
+ *   REMNOTE_CLI_STATE_HOME - Temporary CLI metadata root
  *   CLI_TEST_DELAY   — Delay in ms after create before search (default: 2000)
  */
 
@@ -322,7 +322,7 @@ async function main(): Promise<void> {
   // The status command owns and closes its own authenticated session.
   const statusResult = await cli.run(['status']);
   if (statusResult.exitCode !== 0) {
-    console.error(`${RED}The paired RemNote plugin is unavailable.${RESET}`);
+    console.error(`${RED}The protocol 2 RemNote Bridge is unavailable.${RESET}`);
     console.error(statusResult.stderr || statusResult.stdout);
     process.exit(1);
   }

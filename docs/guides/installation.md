@@ -12,12 +12,11 @@ Use Node.js 22.13.0 or newer (Node.js 24 recommended).
 npm ci
 npm run build
 node dist/remnote-cli/index.js --help
-node dist/remnote-cli/index.js pair --kb-id YOUR_KNOWLEDGE_BASE_ID
+node dist/remnote-cli/index.js status --text
 ```
 
-The KB ID is available in the RemNote knowledge-base URL. Pairing creates
-`~/.config/remnote-cli/connection.json` with mode 0600. It refuses to overwrite an
-existing file. Keep the token private and never paste it into logs or issue reports.
+No initialization step or private connection file is created. Local metadata lives
+under `~/.local/state/remnote-cli` (or `$XDG_STATE_HOME/remnote-cli`).
 
 For an explicitly requested local installation, `./link-cli.sh` links the single
 `remnote-cli` executable using the existing npm prefix and lockfile. A build alone
@@ -45,18 +44,19 @@ update the same installed command without relinking the plugin.
 
 Install **RemNote CLI Bridge** from the RemNote marketplace. The manifest id and
 npm name are `remnote-cli-bridge`; the display name is RemNote CLI Bridge.
-Plugin version 0.25.0 is compatible with this CLI. A build that still reports
-`zeefan-remnote-sdk-bridge` or RemNote SDK Bridge is accepted during the rename.
-Confirm `status.pluginVersion`, `status.pluginId`, `status.sdkCatalogHash` and
-`status.nativeTransactions === false`; the installed manifest panel alone does
-not prove which JavaScript is running. Atomic update/replacement/property/TODO
-commands are unavailable until native abort is safe. Additive writes and
-journaled tasks remain available with exact readback and recovery records.
+Protocol 2 and the live SDK catalog determine compatibility. Confirm
+`status.pluginVersion`, `status.pluginId`, `status.protocolVersion`,
+`status.sdkCatalogHash` and `status.nativeTransactions === false`; the installed
+manifest panel alone does not prove which JavaScript is running. Atomic
+update/replacement/property/TODO commands are unavailable until native abort is
+safe. Other official SDK operations are available subject to RemNote scopes and
+the CLI's explicit destructive-operation flag.
 
 Source builds of the plugin come from
 [remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge).
 For a local installer, enter `http://localhost:8090/`, not the numeric IP, and
-verify that it appears under **Build** with that local URL and SDK settings.
+verify that it appears under **Build** with that local URL. The Bridge has no
+custom settings.
 Do not reuse the old MCP plugin installation: a JavaScript reload cannot refresh
 its stored manifest permissions. A local static asset host at `127.0.0.1:8090`
 can run through a user LaunchAgent. It does not execute business calls or hold
@@ -64,26 +64,19 @@ credentials. That deployment stores plugin `dist/` and `serve-dist.js` under
 `~/.local/share/remnote-cli-bridge/`; its LaunchAgent label is
 `com.zeefan.remnote-cli-bridge`.
 
-In RemNote plugin settings:
+Grant content access and the separate `KnowledgeBaseInfo: Read` permission. Do not
+look for token, URL, write, or destructive settings; they no longer exist.
 
-1. Grant content access and the separate `KnowledgeBaseInfo: Read` permission.
-2. Paste **CLI pairing token** from the private pairing file's `token` and leave
-   the input to save it. Verify live status; a populated field is not enough.
-3. Set **CLI loopback WebSocket URL** to `ws://127.0.0.1:3002` (or the paired port).
-4. Enable **Accept write operations** only when authorized. Destructive operations
-   also require the separate plugin gate and explicit CLI `--allow-destructive`.
-
-Reload the plugin after changing its WebSocket URL or source build.
+Reload the plugin after changing its source build or protocol.
 Keep RemNote open; the sidebar does not need to remain open.
 
 ```bash
 remnote-cli status --text
 ```
 
-Successful status must show the intended KB and protocol. Product version numbers
-are informational; they do not need to match. Confirm the new plugin ID and SDK
-version as well. Reuse an existing private pairing file instead of creating or
-printing another token; enter it only in the new plugin's settings.
+Successful status must show the active KB and protocol 2. Product version numbers
+are informational; they do not need to match. Confirm the plugin ID and SDK
+version as well.
 
 The maintainer separately authorized local registration after the normal two-card
 write/readback/replay test passed. Native transaction abort remains failed; local

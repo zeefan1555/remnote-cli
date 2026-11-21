@@ -455,7 +455,7 @@ describe('public SDK sync adapter', () => {
     await expect(f.backend.writeField('r1', 'text', ['x'])).rejects.toThrow('KB');
     expect(f.flags.get('r1')!.setText).not.toHaveBeenCalled();
     f.status.mockResolvedValue({ kbId: 'kb', writable: true, destructive: false });
-    await expect(f.backend.remove('r1')).rejects.toThrow('gates');
+    await expect(f.backend.remove('r1')).rejects.toThrow('--allow-destructive');
     expect(f.flags.get('r1')!.remove).not.toHaveBeenCalled();
   });
   it('guards immutable flags, tags and Card identities without treating review history as content', async () => {

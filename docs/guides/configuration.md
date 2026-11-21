@@ -1,55 +1,55 @@
 # Configuration
 
-## Private Pairing
+## Zero-Configuration Connection
 
-`remnote-cli pair --kb-id ID [--port PORT]` creates a private file with:
+The CLI has no pairing command, token file, endpoint option, port option, or
+persisted connection configuration. Every live command binds the fixed endpoint
+`127.0.0.1:3002`, sends protocol 2 `hello`, and uses the active knowledge base and
+SDK catalog identity returned by RemNote CLI Bridge.
 
-- `protocolVersion: 1`
-- a random 256-bit `token`
-- exact `knowledgeBaseId`
-- loopback `port` (default 3002)
+The listener accepts only the WebSocket upgrade `Origin: null` emitted by
+RemNote's sandboxed plugin. Missing and unknown Origins receive HTTP 403. The
+trust boundary is the current operating-system user: Origin validation blocks an
+ordinary webpage but does not isolate a malicious native local process, which can
+forge request headers.
 
-The default path is `$XDG_CONFIG_HOME/remnote-cli/connection.json`, or
-`~/.config/remnote-cli/connection.json`. `REMNOTE_CLI_CONFIG` selects another
-file. It must be a regular, non-symlink file, at most 8 KiB, with no group/other
-permission bits. Pairing refuses to overwrite it.
+## CLI Options
 
-Enter the token only in the trusted RemNote CLI Bridge plugin. The plugin never returns
-the token through SDK calls and cannot change its own security settings over RPC.
-
-## CLI Overrides
-
-- `--port PORT`: loopback listener port; must match the plugin URL.
-- `--kb-id ID`: require this exact KB for this invocation.
-- `--allow-destructive`: authorize a destructive operation in addition to both
-  live plugin write gates.
+- `--kb-id ID`: require this exact active knowledge base for the invocation.
+- `--allow-destructive`: authorize a destructive SDK operation; official RemNote
+  scopes remain the native permission boundary.
 - `--verbose`: emit connection, SDK-call and command durations to stderr.
 - `--text`: human-readable output; JSON is the default.
 
-No remote URL, HTTP port, MCP URL, OAuth or daemon configuration exists.
+No remote URL, HTTP port, MCP URL, OAuth, pairing secret, or daemon configuration
+exists.
 
 ## Business Defaults
 
-The optional `settings` object in the pairing file accepts `defaultParentId`,
-`autoTagEnabled`, `autoTagRemId`, `journalPrefix` and `journalTimestamp`.
-These are CLI business defaults, not plugin features or permissions.
+The CLI uses its built-in defaults for journals, auto-tagging and parent selection.
+There is no persisted settings object. Official SDK scopes decide whether an
+operation can read or write the active knowledge base.
 
-Journals and ID-only search snapshots are stored beside the pairing file under
-`state/<KB hash>/`. Do not remove uncertain journals to force a fresh write.
+Local metadata is stored in the standard per-user state directory:
+
+```text
+$REMNOTE_CLI_STATE_HOME
+$XDG_STATE_HOME/remnote-cli
+~/.local/state/remnote-cli
+```
+
+Journals and ID-only search snapshots live under `state/<KB hash>/`. Tests and
+isolated runs may set `REMNOTE_CLI_STATE_HOME`; this is not a runtime configuration
+requirement. Do not remove uncertain journals to force a fresh write.
 
 `REMNOTE_MEDIA_ROOTS` explicitly lists authorized RemNote-managed media directories,
 separated by the platform path delimiter. No media root is discovered automatically.
 Managed-image reads validate exact media tokens and containment; this is not access
 to the RemNote database.
 
-## Plugin Settings
+## RemNote Permissions
 
-- **CLI pairing token**: the matching private token.
-- **CLI loopback WebSocket URL**: only `ws://127.0.0.1:PORT` is accepted.
-- **Accept write operations**: disabled by default.
-- **Accept destructive operations**: disabled by default; CLI consent is also required.
-
-The plugin needs the official content permissions and separate
-`KnowledgeBaseInfo: Read` scope. An old installation's content grant does not
-automatically grant KB identity access. Apply new permissions in RemNote; do not
-weaken KB verification to work around a denied scope.
+The Bridge needs official content permission and the separate
+`KnowledgeBaseInfo: Read` scope. An existing content grant does not automatically
+grant KB identity access. Apply new permissions in RemNote; do not weaken KB
+verification to work around a denied scope.

@@ -291,7 +291,7 @@ describe('four composite commands', () => {
       'indexParentRemId',
       'never moves existing entries',
       'Foreign or conflicting parents fail before writes',
-      'live write gate',
+      'active knowledge base',
       'never narrow away required',
     ])
       expect(text).toContain(phrase);

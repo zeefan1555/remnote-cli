@@ -21,7 +21,7 @@ describe('status command', () => {
       connected: true,
       pluginVersion: '0.25.0',
       pluginId: 'remnote-cli-bridge',
-      protocolVersion: 1,
+      protocolVersion: 2,
       sdkVersion: '0.0.46',
       knowledgeBaseId: 'kb',
       knowledgeBaseName: 'Test',

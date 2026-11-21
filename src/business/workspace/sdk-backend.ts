@@ -368,8 +368,7 @@ export class SdkWorkspaceBackend implements WorkspaceBackend {
   }
   async remove(id: string): Promise<void> {
     const live = await this.identity();
-    if (!live.writable || !live.destructive)
-      throw new Error('Both write gates and --allow-destructive are required');
+    if (!live.destructive) throw new Error('--allow-destructive is required');
     await (await this.rem(id)).remove();
   }
   async existingIds(ids: string[]): Promise<string[]> {

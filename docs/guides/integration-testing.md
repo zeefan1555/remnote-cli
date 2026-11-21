@@ -6,10 +6,10 @@ There are no MCP or stdio suites.
 ## Prerequisites
 
 - Explicit user authorization for real test writes.
-- RemNote open with the candidate plugin loaded and paired to the exact KB.
+- RemNote open with the candidate protocol 2 plugin loaded.
 - Official content and `KnowledgeBaseInfo: Read` permissions.
-- Plugin writes enabled for write tests.
-- The configured loopback port free. Preflight never stops another process.
+- Official write scopes approved for write tests.
+- The fixed loopback port free. Preflight never stops another process.
 
 If a confirmed old project daemon was running, record its state before an
 authorized stop. Ordinary temporary tests restore it afterward. For the approved
@@ -34,7 +34,7 @@ Wrapper entrypoints:
 ```
 
 The wrapper builds the candidate CLI. Every spawned CLI command owns and closes
-its authenticated WebSocket session. `--suite` is removed; unknown wrapper flags
+its protocol 2 WebSocket session. `--suite` is removed; unknown wrapper flags
 fail before live work. Do not invoke the TypeScript live runner directly.
 
 ## Two-Card Acceptance
@@ -54,8 +54,7 @@ fail before live work. Do not invoke the TypeScript live runner directly.
    same native card IDs. Keep the plugin asset hash unchanged throughout this
    CLI-only composition; compare status identity/catalog before and after.
 
-The workflow requires plugin ID `remnote-cli-bridge` (or `zeefan-remnote-sdk-bridge`
-during the rename) and
+The workflow requires plugin ID `remnote-cli-bridge` and
 native `app.getPlatform() === 'app'`; web sessions are not desktop acceptance.
 
 The runner creates a private temporary evidence directory and prints its path.
@@ -105,4 +104,4 @@ SDK timing metadata. Record plugin asset hashes when verifying CLI-only evolutio
 Use mock tests for exhaustive malformed/auth/timeout/lifecycle boundaries; record
 which boundaries were also tested live. Mocks, CI and old installed packages never
 substitute for real card creation/readback. Never claim native rollback without
-observing it in the actual RemNote session. Never include pairing secrets in logs.
+observing it in the actual RemNote session. Never include raw KB content in logs.
