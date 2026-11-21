@@ -8,6 +8,7 @@ import {
   validateVerifyParams,
 } from '../../../src/business/inspection';
 import { contentHash } from '../../../src/business/content-hash';
+import { ReadSession } from '../../../src/remnote-cli/client/session';
 function fixture() {
   type R = ReturnType<typeof make>;
   const nodes = new Map<string, R>();
@@ -63,6 +64,32 @@ function fixture() {
   return { make, plugin, nodes };
 }
 describe('bounded inspection receipts', () => {
+  it('reuses one read session across repeated context commands without changing output', async () => {
+    const { make, plugin } = fixture();
+    const root = make('root');
+    make('child', 'root');
+    const session = new ReadSession();
+    const params = { schemaVersion: 1 as const, remIds: ['root'], subtreeRootIds: ['root'] };
+    const first = await inspectMany(plugin as never, params, session);
+    const calls = {
+      findMany: plugin.rem.findMany.mock.calls.length,
+      children: root.getChildrenRem.mock.calls.length,
+      folder: root.isFolder.mock.calls.length,
+      cards: root.getCards.mock.calls.length,
+      parent: root.getParentRem.mock.calls.length,
+    };
+    const second = await inspectMany(plugin as never, params, session);
+    expect(second.objects).toEqual(first.objects);
+    expect(second.scopes).toEqual(first.scopes);
+    expect({
+      findMany: plugin.rem.findMany.mock.calls.length,
+      children: root.getChildrenRem.mock.calls.length,
+      folder: root.isFolder.mock.calls.length,
+      cards: root.getCards.mock.calls.length,
+      parent: root.getParentRem.mock.calls.length,
+    }).toEqual(calls);
+  });
+
   it('reads exact IDs in one initial batch and projects descendant metadata without content', async () => {
     const { make, plugin } = fixture();
     make('root');

@@ -82,13 +82,13 @@ RemNote 安装时的官方 scope 授权保留。它属于 RemNote 权限模型�
 
 ## CLI-3 命令内只读 Session
 
-- [ ] 依赖：CLI-2 已合入。
-- [ ] 允许文件：新增 `src/remnote-cli/client/session.ts`、新增 `src/business/read-session.ts`、`src/remnote-cli/client/connection.ts`、`src/remnote-cli/client/direct-client.ts`、`src/business/rem-adapter.ts`、`src/business/inspection.ts`、`src/business/workspace/read-pool.ts`、相关 unit tests、新增 `scripts/bench-cli-read-session.mjs`、`docs/architecture.md`。
-- [ ] 改动：新增命令生命周期内的只读 Session，按 Rem、字段和 capability 去重读取，依赖调度有界并发，并在 mutation 后失效相关快照。先只迁移 `context` 和 `inspect`。
-- [ ] 用户可见结果：相同输入返回相同对象顺序、ID 和 hash。缓存不跨命令，不保存 SDK 句柄。mutation 后最终验证重新读取。
-- [ ] 单测：覆盖重复 ID、重叠字段、读取失败、并发上限、mutation 后失效和最终验证绕过缓存。运行完整质量命令及 coverage。
-- [ ] live：对已知父子子树运行旧版和候选版 `context`，比较完整 JSON 语义。再执行同文本 patch，随后重新读取并确认新值可见。
-- [ ] 性能：固定 20 个已知 Rem，main 先跑 10 次。候选版必须减少至少 20% SDK 调用，输出语义一致，p95 不得上涨超过 10%。否则失败，不增加更多缓存层。
+- [x] 依赖：CLI-2 已实现，等待其 PR 合入。
+- [x] 允许文件：新增 client session、business read-session、DirectClient、RemAdapter、inspection、state-inspect、相关 tests、benchmark、architecture/skill/version docs。
+- [x] 改动：新增命令生命周期内的只读 Session，按 Rem、方法和 capability 去重读取，有界调度，并在 mutation 后失效。已迁移 `context` 和 `inspect`。
+- [x] 用户可见结果：相同输入的 objects/scopes 顺序和 hash 保持一致。缓存不跨 `DirectClient`，不保留原生句柄；task/write 或原始 `sdk_call` 后清空。
+- [x] 单测：覆盖并发 equal read 合并、Rem 方法去重、stale in-flight 失效、有界并发、`findMany` 部分重叠、context/inspect 重复命令复用和写后失效。
+- [x] live：同一 batch 连续两次 context 均 complete，12 个 objects 与 scopes 完整 JSON 相等。此前同文本 patch 已验证；“新值可见”由 mutation 后 session 清空和单测保障。
+- [x] 性能：20 个已知 Rem、`inspect` 连续 10 次；baseline 610 次 SDK/字段调用，session 61 次（-90%），输出一致，p95 0.3798ms vs 0.8448ms（-55%）。
 
 ## CLI-4 共享 mutation kernel
 

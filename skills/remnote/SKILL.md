@@ -163,6 +163,11 @@ the last Wiki mutation, explicitly verify the complete Wiki root with `zeroCards
 and `noCardStructure:true`; later Wiki changes invalidate that proof. Answer-only
 patches do not cause a Wiki scan. Reuse already-reviewed content only if unchanged.
 
+Within one `batch` process, `context` and `inspect` share a command-local read
+session. Repeated exact Rem and field reads are de-duplicated with bounded concurrency;
+any mutation clears it before later commands read again. The session never survives
+the batch process.
+
 Task commands do not look up dates or create daily documents. The caller validates
 the intended date before new batches/after midnight; same-key replay retains its
 original diary. Wiki plain-node/duplicate/grouped-index guards remain mandatory.

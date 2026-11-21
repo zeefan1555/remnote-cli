@@ -13,6 +13,7 @@ import { verifiedCatalog, type CapabilityResult } from './sdk-capabilities.js';
 import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
 import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
+import { ReadSession } from './session.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
@@ -42,6 +43,20 @@ const operations = {
   flashcards_apply: ['applyFlashcards', FlashcardsApplySchema],
   wiki_apply: ['applyWiki', WikiApplySchema],
 } as const;
+const READ_ONLY_ACTIONS = new Set([
+  'get_status',
+  'get_sdk_capabilities',
+  'search',
+  'search_by_tag',
+  'read_note',
+  'list_children',
+  'get_review_stats',
+  'inspect_many',
+  'verify_scope',
+  'inspect_state',
+  'powerup_get',
+  'get_media',
+]);
 export interface ClientOptions {
   kbId?: string;
   allowDestructive?: boolean;
@@ -55,6 +70,7 @@ export class DirectClient {
   private workspace?: SdkWorkspaceBackend;
   private startedAt = performance.now();
   private holds = 0;
+  private readonly readSession = new ReadSession();
   constructor(private readonly options: ClientOptions = {}) {}
 
   /** Keep the bridge open while an outer batch runs inner commands. */
@@ -105,11 +121,22 @@ export class DirectClient {
         acceptReplaceOperation: this.options.allowDestructive === true,
       },
       this.state,
-      supportedCapabilities
+      supportedCapabilities,
+      this.readSession
     );
     this.adapter.importSearchSnapshots(await this.state.getLocal('search-snapshots'));
   }
   async execute(action: string, payload: Record<string, unknown>): Promise<unknown> {
+    const taskPreview =
+      (action === 'flashcards_apply' || action === 'wiki_apply') && payload.dryRun !== false;
+    try {
+      return await this.executeAction(action, payload);
+    } finally {
+      if (!READ_ONLY_ACTIONS.has(action) && !taskPreview) this.readSession.invalidateAll();
+    }
+  }
+
+  private async executeAction(action: string, payload: Record<string, unknown>): Promise<unknown> {
     const operation = operations[action as keyof typeof operations];
     if (
       !operation &&

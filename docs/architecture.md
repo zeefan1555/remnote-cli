@@ -72,5 +72,10 @@ The CLI fetches a live capability catalog for each command; there is no persiste
 capability cache or offline identity fallback. Official SDK constants used by local
 business logic are generated without importing the browser SDK runtime into Node.
 
+`ReadSession` is command-local. `context` and `inspect` share exact Rem loads and
+read-only SDK method results, preserve input order through a bounded scheduler, and
+discard the entire cache after any mutation. Values never survive the owning
+`DirectClient`, so batch commands can benefit without leaking state across commands.
+
 See [the approved decision](adr/0001-direct-cli.md),
 [read receipts](guides/read-receipts.md) and [task plans](guides/task-plans.md).
