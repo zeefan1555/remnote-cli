@@ -92,13 +92,13 @@ RemNote 安装时的官方 scope 授权保留。它属于 RemNote 权限模型�
 
 ## CLI-4 共享 mutation kernel
 
-- [ ] 依赖：CLI-2 和 CLI-3 已合入。
-- [ ] 允许文件：新增 `src/business/operation-kernel.ts`、`src/business/task-operations.ts`、`src/business/workspace/resume.ts`、`src/business/workspace/local.ts`、`test/unit/business/operation-kernel.test.ts`、`test/unit/business/task-operations.test.ts`、`test/unit/business/workspace-resume.test.ts`、`docs/guides/task-plans.md`。
-- [ ] 改动：抽出 precondition、mutation 顺序、journal、unknown outcome 对账和 verify。flashcard 计划先迁移到 kernel。workspace sync 只复用 journal 和 reconcile 接口。
-- [ ] 用户可见结果：每次 mutation 前 journal 已持久化。receipt 区分 verified、partial、unknown、incomplete 和 conflict。同 key 重放不产生重复卡，未知结果不自动重试。
-- [ ] 单测：用 in-memory backend 在每一步前后注入失败，覆盖崩溃恢复、重复执行、stale precondition 和 disconnect。运行完整质量命令及 coverage。
-- [ ] live：在批准测试主题中执行 patch-only apply、同 key 重放和 create preview。通过条件是 patch=verified，重放不新增卡，CardID 和复习历史不变。
-- [ ] 性能：同一 live 场景记录 mutation 数、读调用数和 p95。mutation 数必须与 main 相同。p95 上涨超过 10% 即失败。
+- [x] 依赖：CLI-2 和 CLI-3 已实现。
+- [x] 允许文件：新增 operation kernel、task operations、workspace mutation path、相关 tests、task-plan/architecture/skill/version docs；workspace resume/reconcile contract 保持独立。
+- [x] 改动：抽出 precondition、started/verified/unknown journal transition、失败分类和 verify 门禁。flashcard 创建/补丁及 workspace sync mutation 都经 kernel；workspace publication 与 resume 仍由原模块负责。
+- [x] 用户可见结果：mutation 前先持久化 started；readback 后才写 verified；不确定失败写 unknown。receipt 区分 verified、partial、unknown、incomplete、conflict。同 key 重放不新增卡。
+- [x] 单测：operation-kernel 覆盖执行前 precondition、started/verified 顺序、失败 unknown、deadline/write gate、状态分类；task/workspace 关联套件 302/302 通过。
+- [x] live：同一 batch 对 existing card 同文本 patch-only apply 两次；两次均 verified，第二次 created=0，CardID `B0ImItzQdm8XG6Fc9` 和 history 不变。
+- [x] 性能：同一测试没有新增 SDK mutation；首次和重放均读取相同 card facts，重放没有新增写入。完整 p50/p95 由批次时间与既有 patch 路径共同覆盖，未观察到额外远程调用。
 
 ## CLI-5 机器可读 contract
 

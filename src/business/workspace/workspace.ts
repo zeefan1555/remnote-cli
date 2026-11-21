@@ -30,6 +30,7 @@ import {
   type ContentVersion,
   type SyncSelection,
 } from './types.js';
+import { OperationKernel } from '../operation-kernel.js';
 import { selectPlan, type SelectionOptions } from './selection.js';
 import { readRemote, reconcile, checkPublicRevision } from './reconcile.js';
 import {
@@ -917,22 +918,31 @@ async function synchronizeWorkspace(
       // Refresh remote-owned review metadata only after the semantic revision and identities pass.
       for (const [id, rem] of fresh) expected.set(id, rem);
     }
+    const operationKernel = new OperationKernel({
+      canWrite: () => true,
+      persist: () => store.setLocal(key, journal),
+      getStep: (step) => journal.steps[step],
+      setStep: (step, state) => {
+        journal.steps[step] = state === 'applied' ? 'started' : state;
+      },
+      listSteps: () => Object.entries(journal.steps),
+      beforeMutation: preflight,
+    });
     async function mutate<T>(
       step: string,
       fn: () => Promise<T>,
       after: (value: T) => Promise<void>
     ): Promise<void> {
       if (resuming && journal!.steps[step] === 'verified') return;
-      await preflight();
-      active = step;
-      journal!.steps[step] = 'started';
-      await store.setLocal(key, journal);
-      remoteWrites++;
-      const value = await fn();
-      await after(value);
-      await preflight();
-      journal!.steps[step] = 'verified';
-      await store.setLocal(key, journal);
+      await operationKernel.runStep(
+        step,
+        async () => {
+          active = step;
+          remoteWrites++;
+          return await fn();
+        },
+        after
+      );
       active = undefined;
     }
     try {

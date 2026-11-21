@@ -168,6 +168,10 @@ session. Repeated exact Rem and field reads are de-duplicated with bounded concu
 any mutation clears it before later commands read again. The session never survives
 the batch process.
 
+Flashcard and workspace writes use the same mutation kernel: `started` is durable
+before the native call, only readback sets `verified`, and uncertain failure becomes
+`unknown`. Preserve the exact plan/journal and reconcile IDs instead of replaying.
+
 Task commands do not look up dates or create daily documents. The caller validates
 the intended date before new batches/after midnight; same-key replay retains its
 original diary. Wiki plain-node/duplicate/grouped-index guards remain mandatory.
