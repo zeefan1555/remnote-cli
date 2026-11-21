@@ -21,9 +21,6 @@ const receipt = {
 const plans = {
   flashcards: {
     schemaVersion: 1,
-    dailyRemId: 'day',
-    homeRootId: 'home',
-    tagRemId: 'tag',
     reusedCardRemIds: ['card'],
   },
   wiki: {
@@ -281,6 +278,7 @@ describe('four composite commands', () => {
       'cardRemIds',
       'zeroCards',
       'dailyRemId',
+      'Patch/reuse-only',
       'answerPatches',
       'expectedTextHash',
       'pageKey',

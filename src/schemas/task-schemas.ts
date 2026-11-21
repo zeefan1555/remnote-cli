@@ -69,7 +69,7 @@ function keys(entries: Array<{ key: string }>, ctx: z.RefinementCtx): void {
 export const FlashcardsPlanSchema = z
   .object({
     schemaVersion: z.literal(1),
-    dailyRemId: RemId,
+    dailyRemId: RemId.optional(),
     homeRootId: RemId.optional(),
     tagRemId: RemId.optional(),
     parentRemId: RemId.optional(),
@@ -94,10 +94,33 @@ export const FlashcardsPlanSchema = z
   .superRefine((plan, ctx) => {
     size(plan, ctx);
     keys([...(plan.newCards ?? []), ...(plan.answerPatches ?? [])], ctx);
+    if (!plan.newCards?.length) {
+      for (const field of [
+        'dailyRemId',
+        'homeRootId',
+        'tagRemId',
+        'parentRemId',
+        'title',
+        'cardCluster',
+        'tags',
+      ] as const)
+        if (plan[field] !== undefined)
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} requires at least one new card`,
+          });
+    } else if (plan.dailyRemId === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dailyRemId'],
+        message: 'dailyRemId is required when creating new cards',
+      });
+    }
     const count =
       (plan.newCards ?? []).reduce((n, c) => n + 1 + c.answer.length, 0) +
       ((plan.newCards?.length ?? 0) > 1 ? 1 : 0) +
-      2 +
+      ((plan.newCards?.length ?? 0) > 0 ? 2 : 0) +
       (plan.reusedCardRemIds?.length ?? 0) +
       2 * (plan.answerPatches?.length ?? 0);
     if (count > 1000)
@@ -143,6 +166,7 @@ function tagRules(
   },
   ctx: z.RefinementCtx
 ): void {
+  if (!plan.newCards?.length) return;
   if (!plan.tags) {
     for (const field of ['homeRootId', 'tagRemId'] as const)
       if (plan[field] === undefined)

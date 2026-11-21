@@ -31,7 +31,8 @@ export interface AnswerPatch {
 }
 export interface FlashcardsPlan {
   schemaVersion: 1;
-  dailyRemId: string;
+  /** Required when creating new cards; patch/reuse-only plans are independent of a daily note. */
+  dailyRemId?: string;
   /** Implicit HOME tagging (legacy). Required without `tags`, forbidden with it. */
   homeRootId?: string;
   tagRemId?: string;
@@ -255,7 +256,7 @@ function declaredTags(p: FlashcardsPlan, ids: Record<string, string>): Map<strin
 }
 /** Parent of the created card scaffold: the existing topic Rem or the daily document. */
 function scaffoldParent(p: FlashcardsPlan): string {
-  return p.parentRemId ?? p.dailyRemId;
+  return p.parentRemId ?? p.dailyRemId!;
 }
 export function validateTaskPlan(
   kind: 'flashcards' | 'wiki',
@@ -294,12 +295,26 @@ export function validateTaskPlan(
       'reusedCardRemIds',
       'tags',
     ]);
-    const plan = p as FlashcardsPlan;
-    string(plan.dailyRemId);
-    if (plan.tags !== undefined) {
-      if (plan.homeRootId !== undefined || plan.tagRemId !== undefined)
-        throw new Error('tags replaces homeRootId and tagRemId; omit both');
-    } else [plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
+    const plan = p as FlashcardsPlan,
+      creating = Boolean(plan.newCards?.length);
+    if (!creating) {
+      for (const field of [
+        'dailyRemId',
+        'homeRootId',
+        'tagRemId',
+        'parentRemId',
+        'title',
+        'cardCluster',
+        'tags',
+      ] as const)
+        if (plan[field] !== undefined) throw new Error(`${field} requires at least one new card`);
+    } else {
+      string(plan.dailyRemId);
+      if (plan.tags !== undefined) {
+        if (plan.homeRootId !== undefined || plan.tagRemId !== undefined)
+          throw new Error('tags replaces homeRootId and tagRemId; omit both');
+      } else [plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
+    }
     if (plan.parentRemId !== undefined) {
       string(plan.parentRemId);
       if (!plan.newCards?.length) throw new Error('parentRemId requires at least one new card');
@@ -325,14 +340,14 @@ export function validateTaskPlan(
     }
     if (plan.cardCluster === true && ((plan.newCards?.length ?? 0) < 2 || !plan.title))
       throw new Error('cardCluster requires a title and two or more new cards');
-    if (plan.tags !== undefined) validateTags(plan);
+    if (creating && plan.tags !== undefined) validateTags(plan);
     if (plan.reusedCardRemIds !== undefined) {
       array(plan.reusedCardRemIds, 100);
       plan.reusedCardRemIds.forEach((v) => string(v));
     }
     if (!(plan.newCards?.length || plan.answerPatches?.length || plan.reusedCardRemIds?.length))
       throw new Error('Empty task');
-    count += 2 + (clustered(plan) ? 1 : 0) + (plan.reusedCardRemIds?.length ?? 0);
+    count += (creating ? 2 : 0) + (clustered(plan) ? 1 : 0) + (plan.reusedCardRemIds?.length ?? 0);
   } else {
     keys(p, [
       'schemaVersion',
@@ -512,7 +527,9 @@ export class TaskOperations {
         remId:
           kind === 'wiki'
             ? (input.plan as WikiPlan).wikiRootId
-            : (input.plan as FlashcardsPlan).dailyRemId,
+            : ((input.plan as FlashcardsPlan).dailyRemId ??
+                (input.plan as FlashcardsPlan).answerPatches?.[0]?.cardRemId ??
+                (input.plan as FlashcardsPlan).reusedCardRemIds?.[0])!,
         status: 'passed',
         expected: { planHash },
         actual: { validated: true },
@@ -711,21 +728,22 @@ export class TaskOperations {
   ): Promise<void> {
     if (kind === 'flashcards') {
       const p = input as FlashcardsPlan,
-        explicit = explicitTags(p);
-      if (explicit) {
+        explicit = explicitTags(p),
+        dailyRemId = p.dailyRemId!;
+      if (p.newCards?.length && explicit) {
         const context = (
-          await inspectWithEvidence(this.deps.plugin, { schemaVersion: 1, remIds: [p.dailyRemId] })
+          await inspectWithEvidence(this.deps.plugin, { schemaVersion: 1, remIds: [dailyRemId] })
         ).result;
         if (!context.complete) throw new TaskError('incomplete', 'Cannot read daily context');
         if (context.objects[0]?.remType !== 'dailyDocument')
-          throw new TaskError('conflict', 'Expected existing daily document', p.dailyRemId);
+          throw new TaskError('conflict', 'Expected existing daily document', dailyRemId);
         for (const id of new Set(Object.values(p.tags!).flat())) await this.rem(id);
-      } else {
+      } else if (p.newCards?.length) {
         const homeRootId = p.homeRootId!,
           tagRemId = p.tagRemId!,
           evidence = await inspectWithEvidence(this.deps.plugin, {
             schemaVersion: 1,
-            remIds: [p.dailyRemId, homeRootId, tagRemId],
+            remIds: [dailyRemId, homeRootId, tagRemId],
           });
         const context = evidence.result;
         if (!context.complete)
@@ -734,7 +752,7 @@ export class TaskOperations {
           context,
           {
             schemaVersion: 1,
-            inspect: { schemaVersion: 1, remIds: [p.dailyRemId, homeRootId, tagRemId] },
+            inspect: { schemaVersion: 1, remIds: [dailyRemId, homeRootId, tagRemId] },
             expectations: [{ kind: 'ancestor', remId: tagRemId, value: homeRootId }],
           },
           evidence.ancestorTails
@@ -745,7 +763,7 @@ export class TaskOperations {
             'HOME ancestry requires the unread ancestor tail',
             tagRemId
           );
-        const daily = context.objects.find((o) => o.remId === p.dailyRemId),
+        const daily = context.objects.find((o) => o.remId === dailyRemId),
           home = context.objects.find((o) => o.remId === homeRootId),
           tag = context.objects.find((o) => o.remId === tagRemId);
         if (
@@ -766,7 +784,7 @@ export class TaskOperations {
       if (p.parentRemId) {
         const topic = await this.rem(p.parentRemId);
         if (
-          (await topic.getParentRem())?._id !== p.dailyRemId ||
+          (await topic.getParentRem())?._id !== dailyRemId ||
           topic.type !== RemType.DEFAULT_TYPE ||
           (await topic.isFolder()) ||
           (await topic.isDocument()) ||
@@ -1248,7 +1266,7 @@ export class TaskOperations {
     if (root && clustered(p))
       baseline(
         root._id,
-        p.dailyRemId,
+        p.dailyRemId!,
         remCards.map((r) => r._id)
       );
     else if (root && root._id !== remCards[0]._id)
@@ -1295,8 +1313,8 @@ export class TaskOperations {
     receipt: TaskReceipt
   ): Promise<void> {
     const explicit = explicitTags(p);
-    j.ids.daily = p.dailyRemId;
-    if (!explicit) j.ids.tag = p.tagRemId!;
+    if (p.dailyRemId) j.ids.daily = p.dailyRemId;
+    if (p.newCards?.length && !explicit) j.ids.tag = p.tagRemId!;
     if (p.parentRemId) j.ids.parent = p.parentRemId;
     const cards = p.newCards ?? [];
     const cardCluster = p.cardCluster === true && cards.length > 1 && Boolean(p.title);
@@ -1324,7 +1342,7 @@ export class TaskOperations {
         for (const rem of rems ?? []) {
           if ((await rem.getChildrenRem()).length) {
             this.assertCanMutate();
-            await rem.setIsCollapsed(true, p.dailyRemId);
+            await rem.setIsCollapsed(true, p.dailyRemId!);
           }
         }
         // Tags are written inside the creation action so createdTagIds records the final set.
@@ -1417,7 +1435,7 @@ export class TaskOperations {
       let scopeRemIds: string[];
       if (bound.root) {
         expectations.push(
-          { kind: 'parent', remId: bound.root._id, value: p.dailyRemId },
+          { kind: 'parent', remId: bound.root._id, value: p.dailyRemId! },
           { kind: 'cardRemIds', remId: bound.root._id, value: bound.cards.map((r) => r._id) }
         );
         if (!explicit)
@@ -1429,7 +1447,7 @@ export class TaskOperations {
         scopeRemIds = [bound.root._id];
       } else {
         const topic = p.parentRemId!;
-        expectations.push({ kind: 'parent', remId: topic, value: p.dailyRemId });
+        expectations.push({ kind: 'parent', remId: topic, value: p.dailyRemId! });
         if (!explicit) expectations.push({ kind: 'tag', remId: topic, value: p.tagRemId! });
         expectations.push({
           kind: 'children',
