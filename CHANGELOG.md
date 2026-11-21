@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.2] - 2026-11-22
+
+### Changed
+
+- Normalize flashcard plans at the schema boundary into unambiguous `create`, `patch`, `reuse`, or explicit `mixed` variants. Irrelevant fields are removed instead of being revalidated in the executor.
+- Declare the required official SDK capabilities per plan variant and reject a missing capability before preview reads or the first mutation.
+
 ## [0.26.1] - 2026-11-22
 
 ### Changed

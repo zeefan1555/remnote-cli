@@ -20,6 +20,21 @@ Both task commands need the Bridge's separate `KnowledgeBaseInfo: Read` permissi
 journal isolation; `All` content access does not include it. Existing installations require explicit permission
 approval. A denied identity lookup stops preview/apply before any content write; do not bypass KB isolation.
 
+## Flashcard Plan Variants
+
+The flashcard boundary parser returns one explicit normalized variant:
+
+- `create`: creation fields plus at least one new card.
+- `patch`: answer patches only.
+- `reuse`: existing card Rem IDs only.
+- `mixed`: two or more of creation, patch, and reuse operations, with only the fields for those operations.
+
+Patch-only and reuse-only plans do not carry daily, HOME, term, title, or creation fields.
+The executor consumes the parsed variant and does not repeat field-shape validation.
+Each variant declares the official SDK capabilities it needs. The live catalog is
+checked once before preview reads and before the first mutation; a missing capability
+returns `missing_capability` without writing.
+
 ## Shared bounds and text
 
 - Both envelope and plan require literal `schemaVersion:1`; unknown fields are rejected

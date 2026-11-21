@@ -29,12 +29,8 @@ import {
 } from './inspection.js';
 import { inspectState, type InspectStateParams } from './state-inspect.js';
 import { getPowerupSlot, type PowerupGetParams } from './powerup-read.js';
-import {
-  TaskOperations,
-  type TaskApplyParams,
-  type FlashcardsPlan,
-  type WikiPlan,
-} from './task-operations.js';
+import { TaskOperations, type TaskApplyParams } from './task-operations.js';
+import type { FlashcardsPlan, WikiPlan } from '../schemas/task-schemas.js';
 import { cardDelimiterIndex } from './card-structure.js';
 import { contentHash } from './content-hash.js';
 
@@ -622,7 +618,8 @@ export class RemAdapter {
     private readonly journal: Pick<
       ReactRNPlugin['storage'],
       'getLocal' | 'setLocal'
-    > = plugin.storage
+    > = plugin.storage,
+    private readonly capabilities?: ReadonlySet<string>
   ) {
     // Default settings
     this.settings = {
@@ -669,6 +666,7 @@ export class RemAdapter {
       plugin: this.plugin,
       journal: this.journal,
       canWrite: () => this.settings.acceptWriteOperations,
+      capabilities: this.capabilities,
     }));
   }
   applyFlashcards(params: TaskApplyParams<FlashcardsPlan>) {

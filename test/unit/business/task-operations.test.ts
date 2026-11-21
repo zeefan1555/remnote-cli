@@ -4,13 +4,24 @@ import type { RichTextInterface } from '@remnote/plugin-sdk';
 import { RemAdapter } from '../../../src/business/rem-adapter';
 import { contentHash } from '../../../src/business/content-hash';
 import { verifyScope } from '../../../src/business/inspection';
-import type { FlashcardsPlan, WikiPlan, TaskReceipt } from '../../../src/business/task-operations';
-import { FlashcardsPlanSchema } from '../../../src/schemas/task-schemas';
+import type { TaskReceipt } from '../../../src/business/task-operations';
+import {
+  FlashcardsApplySchema,
+  FlashcardsPlanSchema,
+  WikiApplySchema,
+  type FlashcardsPlanInput,
+  type WikiPlan,
+} from '../../../src/schemas/task-schemas';
 import { summarizeReceipt } from '../../../src/remnote-cli/output/receipt-summary';
 import { MockRem, MockCard, MockRemNotePlugin } from '../../helpers/business-mocks';
 
-function adapter(plugin: MockRemNotePlugin): RemAdapter {
-  return new RemAdapter(plugin as never, { acceptWriteOperations: true, autoTagEnabled: false });
+function adapter(plugin: MockRemNotePlugin, capabilities?: ReadonlySet<string>): RemAdapter {
+  return new RemAdapter(
+    plugin as never,
+    { acceptWriteOperations: true, autoTagEnabled: false },
+    plugin.storage as never,
+    capabilities
+  );
 }
 async function fixture() {
   const plugin = new MockRemNotePlugin();
@@ -68,7 +79,7 @@ function wikiPlan(): WikiPlan {
     ],
   };
 }
-function flashPlan(): FlashcardsPlan {
+function flashPlan(): FlashcardsPlanInput {
   return {
     schemaVersion: 1,
     dailyRemId: 'daily',
@@ -82,12 +93,19 @@ function flashPlan(): FlashcardsPlan {
   };
 }
 const ref = (id: string) => ({ i: 'q', _id: id }) as RichTextInterface[number];
-const request = <T>(plan: T, idempotencyKey = 'batch', dryRun = false) => ({
-  schemaVersion: 1 as const,
-  plan,
-  idempotencyKey,
-  dryRun,
-});
+function request(plan: FlashcardsPlanInput | WikiPlan, idempotencyKey = 'batch', dryRun = false) {
+  const envelope = { schemaVersion: 1 as const, plan, idempotencyKey, dryRun };
+  return 'wikiRootId' in plan
+    ? WikiApplySchema.parse(envelope)
+    : FlashcardsApplySchema.parse(envelope);
+}
+function expectBadRequest(
+  plan: FlashcardsPlanInput | WikiPlan,
+  message?: string | RegExp,
+  idempotencyKey = 'bad'
+): void {
+  expect(() => request(plan, idempotencyKey)).toThrow(message);
+}
 async function rem(f: Fixture, id: string): Promise<MockRem> {
   const result = await f.plugin.rem.findOne(id);
   expect(result).not.toBeNull();
@@ -130,6 +148,17 @@ async function groupedPage(f: Fixture) {
 }
 
 describe('public task operation controls', () => {
+  it('fails before preview or mutation when a declared SDK capability is missing', async () => {
+    const f = await fixture();
+    const limited = adapter(f.plugin, new Set(['namespace:rem.findOne']));
+    const out = await limited.applyFlashcards(request(flashPlan()));
+    expect(out.status).toBe('incomplete');
+    expect(out.errors[0]).toMatchObject({ code: 'missing_capability' });
+    expect(out.errors[0]?.message).toContain('namespace:rem.createTreeWithMarkdown');
+    expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
+    expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
+  });
+
   it.each(['new', 'reuse', 'answer-only'] as const)(
     'bounds %s verification independently of unrelated Wiki size',
     async (mode) => {
@@ -369,9 +398,7 @@ describe('public task operation controls', () => {
       const f = await fixture();
       const plan = flashPlan();
       plan.newCards![0].question = q;
-      await expect(f.adapter.applyFlashcards(request(plan))).rejects.toThrow(
-        /TextSegment\[\] with \{"remId"/
-      );
+      expectBadRequest(plan, /Plain-string question contains literal/);
       expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
       expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
     }
@@ -382,9 +409,7 @@ describe('public task operation controls', () => {
     plan.cardCluster = true;
     plan.newCards = plan.newCards!.slice(0, 1);
     const addPowerup = vi.spyOn(MockRem.prototype, 'addPowerup');
-    await expect(f.adapter.applyFlashcards(request(plan))).rejects.toThrow(
-      'cardCluster requires a title and two or more new cards'
-    );
+    expectBadRequest(plan, 'cardCluster requires a title and two or more new cards');
     expect(addPowerup).not.toHaveBeenCalled();
     expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
   });
@@ -684,7 +709,7 @@ describe('Wiki replay ownership and plain-state guards', () => {
       const f = await fixture();
       const plan = wikiPlan();
       Object.assign(plan.pages[0], { indexParentRemId: value });
-      await expect(f.adapter.applyWiki(request(plan))).rejects.toThrow();
+      expectBadRequest(plan);
       expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
     }
   );
@@ -949,7 +974,7 @@ describe('live write gates after awaited reads', () => {
     card.setCardsMock([new MockCard('native', 'old-card', 'forward', 1, [])]);
     const answer = f.plugin.addTestRem('answer', 'Old');
     await answer.setParent(card);
-    const p: FlashcardsPlan = {
+    const p: FlashcardsPlanInput = {
       schemaVersion: 1,
       answerPatches: [
         {
@@ -1106,7 +1131,7 @@ describe('additional repaired boundaries', () => {
         ];
       if (issue === 'pageKey')
         p.pages = [{ key: 'p', title: 'Page', nodes: [], summary: [{ pageKey: 'missing' }] }];
-      await expect(f.adapter.applyWiki(request(p as unknown as WikiPlan))).rejects.toThrow();
+      expectBadRequest(p as unknown as WikiPlan);
       expect(f.plugin.storage.setLocal).not.toHaveBeenCalled();
       expect(f.plugin.rem.createRem).not.toHaveBeenCalled();
     }
@@ -1215,7 +1240,7 @@ describe('code-block flashcard answers', () => {
   it('stores a multiline code answer as one card item and reports it', async () => {
     const f = await fixture();
     const code = 'alpha\nbeta';
-    const plan: FlashcardsPlan = {
+    const plan: FlashcardsPlanInput = {
       schemaVersion: 1,
       dailyRemId: 'daily',
       homeRootId: 'home',
@@ -1271,7 +1296,7 @@ describe('code-block flashcard answers', () => {
     success(cards);
     const answer = await rem(f, cards.ids['answer:a:0']);
     expect(await answer.isCardItem()).toBe(false);
-    const plan: FlashcardsPlan = {
+    const plan: FlashcardsPlanInput = {
       schemaVersion: 1,
       answerPatches: [
         {
@@ -1459,7 +1484,7 @@ describe('code-block flashcard answers', () => {
 
   it('rejects a mixed code-block answer line before writing', async () => {
     const f = await fixture();
-    const plan: FlashcardsPlan = {
+    const plan: FlashcardsPlanInput = {
       ...flashPlan(),
       newCards: [
         {
@@ -1470,16 +1495,14 @@ describe('code-block flashcard answers', () => {
       ],
       title: undefined,
     };
-    await expect(f.adapter.applyFlashcards(request(plan, 'bad-code'))).rejects.toThrow(
-      /single segment/
-    );
+    expectBadRequest(plan, /single segment/, 'bad-code');
     expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
   });
 
   it('fails closed when setIsCardItem does not make the code answer a card item', async () => {
     const f = await fixture();
     vi.spyOn(MockRem.prototype, 'setIsCardItem').mockImplementation(async () => {});
-    const plan: FlashcardsPlan = {
+    const plan: FlashcardsPlanInput = {
       schemaVersion: 1,
       dailyRemId: 'daily',
       homeRootId: 'home',
@@ -1502,7 +1525,7 @@ describe('flashcards under an existing topic (parentRemId)', () => {
     success(first);
     return { f, topicId: first.ids.root, first };
   }
-  const overflow = (topicId: string): FlashcardsPlan => ({
+  const overflow = (topicId: string): FlashcardsPlanInput => ({
     schemaVersion: 1,
     dailyRemId: 'daily',
     homeRootId: 'home',
@@ -1582,10 +1605,8 @@ describe('flashcards under an existing topic (parentRemId)', () => {
     }
   );
   it('rejects parentRemId with a title before any write', async () => {
-    const { f, topicId } = await topicFixture();
-    await expect(
-      f.adapter.applyFlashcards(request({ ...overflow(topicId), title: 'Topic' }, 'titled'))
-    ).rejects.toThrow('omit title');
+    const { topicId } = await topicFixture();
+    expectBadRequest({ ...overflow(topicId), title: 'Topic' }, 'omit title', 'titled');
   });
 });
 
@@ -1596,7 +1617,7 @@ describe('flashcards with explicit tags', () => {
     term.type = RemType.CONCEPT;
     return { f, term };
   }
-  const explicitPlan = (): FlashcardsPlan => ({
+  const explicitPlan = (): FlashcardsPlanInput => ({
     schemaVersion: 1,
     dailyRemId: 'daily',
     title: 'Cluster',
@@ -1606,7 +1627,7 @@ describe('flashcards with explicit tags', () => {
     ],
     tags: { root: [], 'card:a': ['term-topic'], 'card:b': ['term-topic'] },
   });
-  const underTopic = (topicId: string): FlashcardsPlan => ({
+  const underTopic = (topicId: string): FlashcardsPlanInput => ({
     schemaVersion: 1,
     dailyRemId: 'daily',
     parentRemId: topicId,
@@ -1719,7 +1740,7 @@ describe('flashcards with explicit tags', () => {
 
   it('treats a single-card root and its card key as one Rem', async () => {
     const { f } = await tagged();
-    const single: FlashcardsPlan = {
+    const single: FlashcardsPlanInput = {
       schemaVersion: 1,
       dailyRemId: 'daily',
       newCards: [{ key: 's', question: 'Single?', answer: [['Yes']] }],
@@ -1729,11 +1750,11 @@ describe('flashcards with explicit tags', () => {
     success(result);
     expect(result.ids.root).toBe(result.ids['card:s']);
     expect(await tagIds(f, result.ids['card:s'])).toEqual(['term-topic']);
-    await expect(
-      f.adapter.applyFlashcards(
-        request({ ...single, tags: { root: [], 'card:s': ['term-topic'] } }, 'mismatch')
-      )
-    ).rejects.toThrow('tags.root and its card key must match');
+    expectBadRequest(
+      { ...single, tags: { root: [], 'card:s': ['term-topic'] } },
+      'tags.root and its card key must match',
+      'mismatch'
+    );
   });
 
   it.each([
@@ -1744,20 +1765,18 @@ describe('flashcards with explicit tags', () => {
     ['homeRootId alongside tags', { homeRootId: 'home' }, 'omit both'],
   ])('rejects %s before any write', async (_name, patch, message) => {
     const { f } = await tagged();
-    await expect(
-      f.adapter.applyFlashcards(request({ ...explicitPlan(), ...patch }, 'bad'))
-    ).rejects.toThrow(message);
+    expectBadRequest({ ...explicitPlan(), ...patch }, message);
     expect(f.plugin.rem.createTreeWithMarkdown).not.toHaveBeenCalled();
   });
 
   it('rejects tags.root on a parentRemId plan and a missing tag Rem', async () => {
     const { f } = await tagged();
     const first = await f.adapter.applyFlashcards(request(explicitPlan(), 'first'));
-    await expect(
-      f.adapter.applyFlashcards(
-        request({ ...underTopic(first.ids.root), tags: { root: [] } }, 'root')
-      )
-    ).rejects.toThrow('tags.root needs a created root');
+    expectBadRequest(
+      { ...underTopic(first.ids.root), tags: { root: [] } },
+      'tags.root needs a created root',
+      'root'
+    );
     const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
     const missing = await f.adapter.applyFlashcards(
       request({ ...explicitPlan(), tags: { 'card:a': ['nope'] } }, 'missing')

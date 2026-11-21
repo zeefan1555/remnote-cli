@@ -93,13 +93,19 @@ export class DirectClient {
         destructive: this.options.allowDestructive === true,
       };
     });
+    const supportedCapabilities = new Set(
+      catalog.capabilities
+        .filter((capability) => capability.status === 'supported')
+        .map((c) => c.id)
+    );
     this.adapter = new RemAdapter(
       plugin,
       {
         acceptWriteOperations: true,
         acceptReplaceOperation: this.options.allowDestructive === true,
       },
-      this.state
+      this.state,
+      supportedCapabilities
     );
     this.adapter.importSearchSnapshots(await this.state.getLocal('search-snapshots'));
   }

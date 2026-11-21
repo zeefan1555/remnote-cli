@@ -5,7 +5,6 @@ import {
   WikiApplySchema,
   WikiPlanSchema,
 } from '../../src/schemas/task-schemas.js';
-import { validateTaskPlan } from '../../src/business/task-operations.js';
 const hash = 'a'.repeat(64);
 const card = { key: 'c', question: 'Question?', answer: [['Answer', { remId: 'source' }]] };
 const flash = {
@@ -61,24 +60,8 @@ describe('task plan contract', () => {
   it('accepts patch-only and reuse-only cards without creation context', () => {
     const patchOnly = { schemaVersion: 1 as const, answerPatches: [patch] };
     const reuseOnly = { schemaVersion: 1 as const, reusedCardRemIds: ['card'] };
-    expect(FlashcardsPlanSchema.parse(patchOnly)).toEqual(patchOnly);
-    expect(FlashcardsPlanSchema.parse(reuseOnly)).toEqual(reuseOnly);
-    expect(() =>
-      validateTaskPlan('flashcards', {
-        schemaVersion: 1,
-        plan: patchOnly,
-        idempotencyKey: 'patch-only',
-        dryRun: false,
-      })
-    ).not.toThrow();
-    expect(() =>
-      validateTaskPlan('flashcards', {
-        schemaVersion: 1,
-        plan: reuseOnly,
-        idempotencyKey: 'reuse-only',
-        dryRun: false,
-      })
-    ).not.toThrow();
+    expect(FlashcardsPlanSchema.parse(patchOnly)).toEqual({ ...patchOnly, kind: 'patch' });
+    expect(FlashcardsPlanSchema.parse(reuseOnly)).toEqual({ ...reuseOnly, kind: 'reuse' });
   });
   it('rejects creation context without new cards and daily creation without a daily ID', () => {
     expect(
@@ -166,7 +149,7 @@ describe('task plan contract', () => {
   });
   it('accepts parentRemId for several new cards without a title', () => {
     const two = { ...flash, parentRemId: 'topic', newCards: [card, { ...card, key: 'c2' }] };
-    expect(FlashcardsPlanSchema.parse(two)).toEqual(two);
+    expect(FlashcardsPlanSchema.parse(two)).toMatchObject({ kind: 'create', ...two });
     const { parentRemId: _omitted, ...untitled } = two;
     expect(FlashcardsPlanSchema.safeParse(untitled).success).toBe(false);
   });
@@ -176,7 +159,7 @@ describe('task plan contract', () => {
       title: 'Topic',
       newCards: [card, { ...card, key: 'c2' }],
     };
-    expect(FlashcardsPlanSchema.parse(two)).toEqual(two);
+    expect(FlashcardsPlanSchema.parse(two)).toMatchObject({ kind: 'create', ...two });
     expect(FlashcardsPlanSchema.parse({ ...two, cardCluster: false }).cardCluster).toBe(false);
     expect(FlashcardsPlanSchema.parse({ ...two, cardCluster: true }).cardCluster).toBe(true);
     expect(FlashcardsPlanSchema.parse(flash)).not.toHaveProperty('cardCluster');
@@ -190,7 +173,7 @@ describe('task plan contract', () => {
         },
       ],
     };
-    expect(FlashcardsPlanSchema.parse(coded)).toEqual(coded);
+    expect(FlashcardsPlanSchema.parse(coded)).toMatchObject({ kind: 'create', ...coded });
     expect(
       WikiPlanSchema.safeParse({
         ...wiki,

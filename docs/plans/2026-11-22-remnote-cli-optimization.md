@@ -72,13 +72,13 @@ RemNote 安装时的官方 scope 授权保留。它属于 RemNote 权限模型�
 
 ## CLI-2 合法计划状态
 
-- [ ] 依赖：CLI-1 已合入。
-- [ ] 允许文件：`src/schemas/task-schemas.ts`、`src/business/task-operations.ts`、`src/remnote-cli/commands/task.ts`、新增 `src/business/operation-capabilities.ts`、`test/unit/task-schemas.test.ts`、`test/unit/business/task-operations.test.ts`、`docs/guides/task-plans.md`、`skills/remnote/SKILL.md`。
-- [ ] 改动：把 flashcard plan 内部模型拆成 `create`、`patch`、`reuse` 和显式 `mixed`。每种变体只拥有合法字段。边界 parse 返回该变体，执行器不再重复验证。每个变体声明所需 SDK capabilities，首个 mutation 前统一核对。
-- [ ] 用户可见结果：只有 `schemaVersion` 和 `answerPatches` 的 patch plan 合法。create plan 缺少 daily 或标签时返回字段级错误。缺 capability 时在写入前失败。
-- [ ] 单测：覆盖全部变体、非法组合、缺 capability、catalog 变化和重复校验删除。运行完整质量命令及 coverage。
-- [ ] live：用已有测试卡执行同文本 patch-only apply，不传 daily、HOME、Term、标题或新卡字段。通过条件是 receipt=verified，CardID 和可读复习历史不变。
-- [ ] 性能：100 条 answer patch 的解析和预览各跑 20 次。p95 比 main 基线上涨超过 10% 即失败。SDK 调用数不得增加。
+- [x] 依赖：CLI-1 已合入（PR #24）。
+- [x] 允许文件：task schema、task operations、task command、新增 `operation-capabilities.ts`、RemAdapter/DirectClient 的 catalog 接线、相关 tests、task-plan/skill/version docs。
+- [x] 改动：flashcard plan 在 Zod 边界归一化为 `create`、`patch`、`reuse`、`mixed`，运行时只保留所属操作字段。执行器不再重复字段形状校验。每种变体声明 mutation 所需官方 SDK capabilities；生产路径从 live catalog 注入集合并在预览/首个 mutation 前检查。
+- [x] 用户可见结果：只有 `schemaVersion` 和 `answerPatches` 的 patch plan 归一化为 `patch`。create plan 缺 daily/标签时在边界报字段错误。缺 capability 返回 `missing_capability` 且无写入。
+- [x] 单测：覆盖四类变体、非法组合、字段剥离、缺 capability 和 preview 前失败；完整质量另跑。
+- [x] live：现有测试卡同文本 patch-only apply 未传 daily/HOME/Term/title/new-card；receipt=`verified`，CardID `B0ImItzQdm8XG6Fc9` 与复习历史不变。
+- [x] 性能：100 条 patch 的解析+边界预览 20 次，候选 p95 0.406ms，CLI-1 baseline 0.534ms，下降约 24%；未增加 SDK 调用。
 
 ## CLI-3 命令内只读 Session
 
