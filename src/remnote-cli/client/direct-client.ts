@@ -133,8 +133,7 @@ export class DirectClient {
         },
       };
     if (action === 'get_sdk_capabilities') return this.catalog!;
-    if (action === 'sdk_call')
-      return this.connection!.request('sdk_call', schemas.SdkCallSchema.parse(payload));
+    if (action === 'sdk_call') return this.connection!.request('sdk_call', payload);
     if (action === 'get_media') {
       const media = schemas.GetMediaSchema.parse(payload);
       const locator = await this.adapter!.getMediaLocator(media);

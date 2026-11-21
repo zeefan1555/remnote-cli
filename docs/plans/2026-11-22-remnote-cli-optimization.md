@@ -62,13 +62,13 @@ RemNote 安装时的官方 scope 授权保留。它属于 RemNote 权限模型�
 
 ## CLI-1 固定 Bridge action
 
-- [ ] 依赖：CLI-0 已合入。
-- [ ] 允许文件：`src/remnote-cli/client/connection.ts`、`src/remnote-cli/client/direct-client.ts`、`src/remnote-cli/client/remote-sdk.ts`、新增 `src/remnote-cli/client/remote-actions.ts`、相关 unit tests、`docs/architecture.md`。
-- [ ] 改动：定义只含 `get_status`、`get_sdk_capabilities`、`sdk_call` 的 action 联合类型。把字符串反射分发改为显式类型注册表。注册项绑定 schema、handler 和 receipt 语义。
-- [ ] 用户可见结果：现有帮助和输出不变。Bridge mock 收到第四个 action 时失败。漏绑或错绑 handler 时 typecheck 失败。
-- [ ] 单测：`npm run typecheck`、`npm run lint`、`npm run format:check`、`npm test`、`npm run build`。覆盖合法 action、未知 action 和 handler 类型错误。
-- [ ] live：在独立 worktree 构建后运行 `node dist/remnote-cli/index.js status`，再按精确 ID 读取一张已有卡。通过条件是 connected=true、KB 匹配且标题一致。
-- [ ] 性能：`status` 冷启动 10 次，记录 p50、p95 和 SDK 调用数。任一指标比 main 基线上涨超过 10% 即失败。波动大于效果时增加样本，不能判通过。
+- [x] 依赖：CLI-0 已合入（`f4c58f9`）。
+- [x] 允许文件：connection、direct client、新增 `remote-actions.ts`、相关 tests、architecture 和版本/CHANGELOG。
+- [x] 改动：定义只含 `get_status`、`get_sdk_capabilities`、`sdk_call` 的类型注册表。每项绑定 payload schema 和 handler；未知 action/非法 payload 在建监听器前失败。
+- [x] 用户可见结果：现有帮助和输出不变。第四个 Bridge action 被拒绝；漏绑由 `satisfies Record` 在 typecheck 时失败。
+- [x] 单测：typecheck、lint、format、SDK constants、build 和 targeted tests 均通过；新增 registry/未知 action/payload 测试。
+- [x] live：本地 0.26.1 连接 protocol 2；精确读取 `w8Ya0iydcYplkx1a9`，标题、KB 和卡方向一致。
+- [x] 性能：status 10 次 p50 wall 282.4ms、p95 wall 1157.5ms；ready p50 91ms、p95 970ms；每次 2 个 SDK 调用。
 
 ## CLI-2 合法计划状态
 

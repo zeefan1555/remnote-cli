@@ -20,6 +20,9 @@ inside the CLI command, not a separate server product.
   permission checks and KB binding.
 
 Only `get_status`, `get_sdk_capabilities` and `sdk_call` execute in the plugin.
+`src/remnote-cli/client/remote-actions.ts` binds each action to one payload schema,
+one handler, and its receipt/effect semantics. Unknown names and malformed payloads
+reject before a listener opens; a fourth action cannot pass the fixed type registry.
 `transaction_begin` and `transaction_end` explicitly fail without SDK calls. Task names
 such as `flashcards_apply` are local CLI dispatch names, not plugin actions.
 There is no HTTP MCP endpoint, OAuth provider, MCPB proxy, daemon or semver matching.

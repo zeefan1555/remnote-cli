@@ -88,8 +88,12 @@ describe('zero-configuration command-owned loopback session', () => {
       ws.send(JSON.stringify({ id: 'unrelated', result: 'ignored' }));
       ws.send(JSON.stringify({ id: request.id, result: request.payload }));
     });
-    expect(await connection.request('first', { n: 1 })).toEqual({ n: 1 });
-    expect(await connection.request('second', { n: 2 })).toEqual({ n: 2 });
+    expect(
+      await connection.request('sdk_call', { capability: 'first', args: [{ n: 1 }] })
+    ).toMatchObject({ capability: 'first', args: [{ n: 1 }], allowDestructive: false });
+    expect(
+      await connection.request('sdk_call', { capability: 'second', args: [{ n: 2 }] })
+    ).toMatchObject({ capability: 'second', args: [{ n: 2 }], allowDestructive: false });
     expect(seen.map(({ id }) => id)).toEqual(['1', '2']);
     for (const frame of seen) {
       expect(frame).toMatchObject({ knowledgeBaseId: 'kb' });
@@ -113,7 +117,9 @@ describe('zero-configuration command-owned loopback session', () => {
     const expected = expect(opened).rejects.toThrow('Knowledge base mismatch');
     await plugin(port);
     await expected;
-    await expect(connection.request('sdk_call', {})).rejects.toThrow('Knowledge base mismatch');
+    await expect(connection.request('sdk_call', { capability: 'namespace:test' })).rejects.toThrow(
+      'Knowledge base mismatch'
+    );
   });
 
   it.each([
@@ -158,8 +164,10 @@ describe('zero-configuration command-owned loopback session', () => {
     await opened;
     const requests = vi.fn();
     ws.on('message', requests);
-    await expect(connection.request('sdk_call', {}, 15)).rejects.toThrow('outcome unknown');
-    await expect(connection.request('sdk_call', {})).rejects.toThrow();
+    await expect(connection.request('sdk_call', { capability: 'write' }, 15)).rejects.toThrow(
+      'outcome unknown'
+    );
+    await expect(connection.request('sdk_call', { capability: 'write' })).rejects.toThrow();
     expect(requests.mock.calls.filter(([raw]) => JSON.parse(String(raw)).action)).toHaveLength(1);
   });
 
@@ -177,9 +185,13 @@ describe('zero-configuration command-owned loopback session', () => {
         )
       );
     });
-    await expect(connection.request('sdk_call', {})).rejects.toThrow('permission denied');
-    await expect(connection.request('sdk_call', {})).rejects.toThrow('Malformed response');
-    const pending = connection.request('pending', {});
+    await expect(connection.request('sdk_call', { capability: 'read' })).rejects.toThrow(
+      'permission denied'
+    );
+    await expect(connection.request('sdk_call', { capability: 'read' })).rejects.toThrow(
+      'Malformed response'
+    );
+    const pending = connection.request('sdk_call', { capability: 'read' });
     const failed = expect(pending).rejects.toThrow();
     ws.terminate();
     await failed;
@@ -189,16 +201,28 @@ describe('zero-configuration command-owned loopback session', () => {
     const { connection, opened, port } = await listen();
     await plugin(port);
     await opened;
-    await expect(connection.request('sdk_call', {}, 0)).rejects.toThrow('Invalid SDK timeout');
+    await expect(connection.request('sdk_call', { capability: 'read' }, 0)).rejects.toThrow(
+      'Invalid SDK timeout'
+    );
     await expect(
-      connection.request('sdk_call', { huge: 'x'.repeat(8 * 1024 * 1024) })
+      connection.request('sdk_call', { capability: 'x'.repeat(8 * 1024 * 1024) })
     ).rejects.toThrow('too large');
     const pending = Array.from({ length: MAX_PENDING_REQUESTS }, () =>
-      connection.request('sdk_call', {}).catch(() => undefined)
+      connection.request('sdk_call', { capability: 'read' }).catch(() => undefined)
     );
     await vi.waitFor(() => expect(connection.timings.sdkCalls).toBe(MAX_PENDING_REQUESTS));
-    await expect(connection.request('sdk_call', {})).rejects.toThrow('Too many pending');
+    await expect(connection.request('sdk_call', { capability: 'read' })).rejects.toThrow(
+      'Too many pending'
+    );
     await connection.close();
     await Promise.all(pending);
+  });
+
+  it('rejects unknown actions and malformed known payloads before opening a listener', async () => {
+    const connection = new Connection({ port: 0 }, 'v', 10);
+    connections.push(connection);
+    await expect(connection.request('create_note', {})).rejects.toThrow('Unknown Bridge action');
+    await expect(connection.request('get_status', { unexpected: true })).rejects.toThrow();
+    expect((connection as unknown as { server?: WebSocketServer }).server).toBeUndefined();
   });
 });
