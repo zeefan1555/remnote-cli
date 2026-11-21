@@ -132,6 +132,10 @@ title and at least two new cards. Omitted or `false` leaves `cc` unset.
 Patch-only and reuse-only flashcard plans omit `dailyRemId`, `homeRootId`,
 `tagRemId`, `parentRemId`, `title`, `cardCluster`, and `tags`; they target exact
 existing card/answer Rems and do not consult daily or creation context.
+The boundary parser normalizes flashcards to explicit `create`, `patch`, `reuse`,
+or `mixed` variants with only the fields for their operations. Each variant
+declares required official SDK capabilities; the live catalog is checked before
+preview reads or the first mutation, and `missing_capability` is a hard stop.
 Optional flashcard `tags` declares tags by semantic key, e.g.
 `"tags":{"root":[],"card:a":["TAG_ID"]}`; then omit `homeRootId`/`tagRemId`. Every
 created Rem ends with exactly its declared tags (none if undeclared), and a

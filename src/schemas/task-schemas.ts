@@ -1,4 +1,73 @@
 import { z } from 'zod';
+
+export type CodeSegment = { code: string; language?: string };
+export type TextSegment = string | { remId: string } | { pageKey: string } | CodeSegment;
+export interface AnswerPatch {
+  key: string;
+  cardRemId: string;
+  remId: string;
+  expectedTextHash: string;
+  text: TextSegment[];
+}
+export interface NewFlashcard {
+  key: string;
+  question: string | TextSegment[];
+  answer: TextSegment[][];
+}
+export interface FlashcardPlanFields {
+  schemaVersion: 1;
+  dailyRemId?: string;
+  homeRootId?: string;
+  tagRemId?: string;
+  parentRemId?: string;
+  tags?: Record<string, string[]>;
+  title?: string;
+  cardCluster?: boolean;
+  newCards?: NewFlashcard[];
+  answerPatches?: AnswerPatch[];
+  reusedCardRemIds?: string[];
+}
+export type CreateFlashcardsPlan = FlashcardPlanFields & {
+  kind: 'create';
+  dailyRemId: string;
+  newCards: NewFlashcard[];
+  answerPatches?: undefined;
+  reusedCardRemIds?: undefined;
+};
+export type PatchFlashcardsPlan = FlashcardPlanFields & {
+  kind: 'patch';
+  dailyRemId?: undefined;
+  newCards?: undefined;
+  answerPatches: AnswerPatch[];
+  reusedCardRemIds?: undefined;
+};
+export type ReuseFlashcardsPlan = FlashcardPlanFields & {
+  kind: 'reuse';
+  dailyRemId?: undefined;
+  newCards?: undefined;
+  answerPatches?: undefined;
+  reusedCardRemIds: string[];
+};
+export type MixedFlashcardsPlan = FlashcardPlanFields & { kind: 'mixed' };
+export type FlashcardsPlan =
+  CreateFlashcardsPlan | PatchFlashcardsPlan | ReuseFlashcardsPlan | MixedFlashcardsPlan;
+export interface WikiPlan {
+  schemaVersion: 1;
+  wikiRootId: string;
+  partitionRemId: string;
+  indexRemId: string;
+  logRemId: string;
+  pages: Array<{
+    key: string;
+    remId?: string;
+    indexParentRemId?: string;
+    title: string;
+    aliases?: string[];
+    nodes: Array<{ key: string; remId?: string; text: TextSegment[]; expectedTextHash?: string }>;
+    summary: TextSegment[];
+  }>;
+  answerPatches?: AnswerPatch[];
+}
 const RemId = z.string().min(1).max(256).regex(/\S/);
 const Key = z
   .string()
@@ -66,7 +135,7 @@ function keys(entries: Array<{ key: string }>, ctx: z.RefinementCtx): void {
     seen.add(entry.key);
   }
 }
-export const FlashcardsPlanSchema = z
+const FlashcardsPlanInputSchema = z
   .object({
     schemaVersion: z.literal(1),
     dailyRemId: RemId.optional(),
@@ -85,10 +154,11 @@ export const FlashcardsPlanSchema = z
           .object({ key: Key, question: Question, answer: z.array(AnswerLine).min(1).max(100) })
           .strict()
       )
+      .min(1)
       .max(7)
       .optional(),
-    answerPatches: z.array(PlainPatch).max(100).optional(),
-    reusedCardRemIds: z.array(RemId).max(100).optional(),
+    answerPatches: z.array(PlainPatch).min(1).max(100).optional(),
+    reusedCardRemIds: z.array(RemId).min(1).max(100).optional(),
   })
   .strict()
   .superRefine((plan, ctx) => {
@@ -156,6 +226,45 @@ export const FlashcardsPlanSchema = z
       });
     tagRules(plan, ctx);
   });
+function defined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+}
+function classifyFlashcardsPlan(plan: z.infer<typeof FlashcardsPlanInputSchema>): FlashcardsPlan {
+  const create = plan.newCards?.length
+      ? defined({
+          dailyRemId: plan.dailyRemId,
+          homeRootId: plan.homeRootId,
+          tagRemId: plan.tagRemId,
+          parentRemId: plan.parentRemId,
+          tags: plan.tags,
+          title: plan.title,
+          cardCluster: plan.cardCluster,
+          newCards: plan.newCards,
+        })
+      : undefined,
+    patches = plan.answerPatches?.length
+      ? defined({ answerPatches: plan.answerPatches })
+      : undefined,
+    reused = plan.reusedCardRemIds?.length
+      ? defined({ reusedCardRemIds: plan.reusedCardRemIds })
+      : undefined,
+    operationCount = [create, patches, reused].filter(Boolean).length;
+  if (operationCount === 1 && create)
+    return { schemaVersion: 1, kind: 'create', ...create } as CreateFlashcardsPlan;
+  if (operationCount === 1 && patches)
+    return { schemaVersion: 1, kind: 'patch', ...patches } as PatchFlashcardsPlan;
+  if (operationCount === 1 && reused)
+    return { schemaVersion: 1, kind: 'reuse', ...reused } as ReuseFlashcardsPlan;
+  return {
+    schemaVersion: 1,
+    kind: 'mixed',
+    ...create,
+    ...patches,
+    ...reused,
+  } as MixedFlashcardsPlan;
+}
+export const FlashcardsPlanSchema = FlashcardsPlanInputSchema.transform(classifyFlashcardsPlan);
+export type FlashcardsPlanInput = z.input<typeof FlashcardsPlanSchema>;
 function tagRules(
   plan: {
     homeRootId?: string;

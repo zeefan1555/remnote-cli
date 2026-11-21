@@ -238,17 +238,11 @@ describe('four composite commands', () => {
       expect(process.exitCode ?? 0).toBe(status === 'verified' ? 0 : 1);
     }
   );
-  it('never retries failed apply and rejects malformed plans locally', async () => {
-    vi.mocked(readContentFileOrStdin).mockResolvedValue('{}');
+  it('never retries a failed apply', async () => {
+    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.wiki));
     const execute = vi
       .spyOn(DirectClient.prototype, 'execute')
       .mockRejectedValue(new Error('Outcome unknown'));
-    await createProgram('test').parseAsync(
-      ['wiki', 'apply', '--plan', '-', '--idempotency-key', 'batch', '--apply'],
-      { from: 'user' }
-    );
-    expect(execute).not.toHaveBeenCalled();
-    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.wiki));
     await createProgram('test').parseAsync(
       ['wiki', 'apply', '--plan', '-', '--idempotency-key', 'batch', '--apply'],
       { from: 'user' }

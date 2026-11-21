@@ -127,32 +127,33 @@ export async function flashcardsWorkflow(
     label = 'Preview is complete and leaves existing Rems unchanged';
     start = Date.now();
     const key = `cli-flashcards-${ctx.runId.replace(/[^A-Za-z0-9._-]/g, '-')}`;
-    const { plan } = FlashcardsApplySchema.parse({
+    const plan = {
+      schemaVersion: 1,
+      dailyRemId,
+      homeRootId,
+      tagRemId,
+      title: `[CLI-TEST] Two-card task ${ctx.runId}`,
+      newCards: [
+        {
+          key: 'preview',
+          question: '[CLI-TEST] Does a flashcard preview write RemNote content?',
+          answer: [['No. Preview validates the plan without writing card content.']],
+        },
+        {
+          key: 'replay',
+          question: [
+            '[CLI-TEST] What must a verified same-key replay preserve for ',
+            { remId: tagRemId },
+            '?',
+          ],
+          answer: [['The same Rem IDs, native card IDs, content, and review history.']],
+        },
+      ],
+    } as const;
+    FlashcardsApplySchema.parse({
       schemaVersion: 1,
       idempotencyKey: key,
-      plan: {
-        schemaVersion: 1,
-        dailyRemId,
-        homeRootId,
-        tagRemId,
-        title: `[CLI-TEST] Two-card task ${ctx.runId}`,
-        newCards: [
-          {
-            key: 'preview',
-            question: '[CLI-TEST] Does a flashcard preview write RemNote content?',
-            answer: [['No. Preview validates the plan without writing card content.']],
-          },
-          {
-            key: 'replay',
-            question: [
-              '[CLI-TEST] What must a verified same-key replay preserve for ',
-              { remId: tagRemId },
-              '?',
-            ],
-            answer: [['The same Rem IDs, native card IDs, content, and review history.']],
-          },
-        ],
-      },
+      plan,
     });
     const planPath = await jsonFile('plan.json', plan);
     await jsonFile('batch.json', { idempotencyKey: key, resolvedAt: date.toISOString(), planPath });

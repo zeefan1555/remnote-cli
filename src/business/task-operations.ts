@@ -10,8 +10,14 @@ import {
   type InspectionCheck,
   type ScopeExpectation,
 } from './inspection.js';
-export type CodeSegment = { code: string; language?: string };
-export type TextSegment = string | { remId: string } | { pageKey: string } | CodeSegment;
+import type {
+  AnswerPatch,
+  CodeSegment,
+  FlashcardsPlan,
+  TextSegment,
+  WikiPlan,
+} from '../schemas/task-schemas.js';
+import { requiredTaskCapabilities } from './operation-capabilities.js';
 export interface AnswerLineReceipt {
   key: string;
   remId: string;
@@ -21,54 +27,6 @@ export interface AnswerLineReceipt {
   verified: boolean;
   /** Set only when that check fails. Same text as the receipt error. */
   error?: string;
-}
-export interface AnswerPatch {
-  key: string;
-  cardRemId: string;
-  remId: string;
-  expectedTextHash: string;
-  text: TextSegment[];
-}
-export interface FlashcardsPlan {
-  schemaVersion: 1;
-  /** Required when creating new cards; patch/reuse-only plans are independent of a daily note. */
-  dailyRemId?: string;
-  /** Implicit HOME tagging (legacy). Required without `tags`, forbidden with it. */
-  homeRootId?: string;
-  tagRemId?: string;
-  /**
-   * Existing topic Rem (direct child of dailyRemId) that receives new cards. Without `tags` it must
-   * already carry tagRemId.
-   */
-  parentRemId?: string;
-  /**
-   * Explicit tags keyed by receipt semantic key (`root` or `card:<key>`). When present, every
-   * created Rem ends with exactly its declared tag IDs (undeclared ones with none) and no implicit
-   * HOME rule applies.
-   */
-  tags?: Record<string, string[]>;
-  title?: string;
-  cardCluster?: boolean;
-  newCards?: Array<{ key: string; question: string | TextSegment[]; answer: TextSegment[][] }>;
-  answerPatches?: AnswerPatch[];
-  reusedCardRemIds?: string[];
-}
-export interface WikiPlan {
-  schemaVersion: 1;
-  wikiRootId: string;
-  partitionRemId: string;
-  indexRemId: string;
-  logRemId: string;
-  pages: Array<{
-    key: string;
-    remId?: string;
-    indexParentRemId?: string;
-    title: string;
-    aliases?: string[];
-    nodes: Array<{ key: string; remId?: string; text: TextSegment[]; expectedTextHash?: string }>;
-    summary: TextSegment[];
-  }>;
-  answerPatches?: AnswerPatch[];
 }
 export interface TaskApplyParams<T> {
   schemaVersion: 1;
@@ -134,6 +92,7 @@ interface Dependencies {
   journal: Pick<ReactRNPlugin['storage'], 'getLocal' | 'setLocal'>;
   plugin: ReactRNPlugin;
   canWrite: () => boolean;
+  capabilities?: ReadonlySet<string>;
 }
 class TaskError extends Error {
   constructor(
@@ -144,76 +103,8 @@ class TaskError extends Error {
     super(message);
   }
 }
-function object(v: unknown): asserts v is Record<string, unknown> {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('Expected JSON object');
-}
-function keys(v: object, fields: string[]): void {
-  if (Object.keys(v).some((k) => !fields.includes(k))) throw new Error('Unknown task field');
-}
-function string(v: unknown, max = 256): asserts v is string {
-  if (typeof v !== 'string' || !v.trim() || v.length > max)
-    throw new Error('Invalid bounded string');
-}
-function array(v: unknown, max: number, min = 0): asserts v is unknown[] {
-  if (!Array.isArray(v) || v.length < min || v.length > max)
-    throw new Error('Invalid bounded array');
-}
-function key(v: unknown, max = 64): asserts v is string {
-  string(v, max);
-  if (!/^[A-Za-z0-9._-]+$/.test(v)) throw new Error('Invalid operation key');
-}
-function hash(v: unknown): asserts v is string {
-  if (typeof v !== 'string' || !/^[a-f0-9]{64}$/.test(v)) throw new Error('Expected SHA-256 hash');
-}
-const CODE_LANGUAGE = /^[A-Za-z0-9_+#.-]{1,64}$/;
 function isCodeSegment(s: TextSegment): s is CodeSegment {
   return typeof s === 'object' && 'code' in s;
-}
-function segments(v: unknown, pages?: Set<string>, allowCode = false): asserts v is TextSegment[] {
-  array(v, 100, 1);
-  for (const s of v) {
-    if (typeof s === 'string') {
-      if (s.length > 10000) throw new Error('Text segment too long');
-    } else {
-      object(s);
-      if ('remId' in s) {
-        keys(s, ['remId']);
-        string(s.remId);
-      } else if ('pageKey' in s && pages) {
-        keys(s, ['pageKey']);
-        key(s.pageKey);
-        if (!pages.has(s.pageKey)) throw new Error('Unknown pageKey');
-      } else if (allowCode && 'code' in s) {
-        keys(s, ['code', 'language']);
-        if (typeof s.code !== 'string' || s.code.length < 1 || s.code.length > 10000)
-          throw new Error('Invalid code block');
-        if (
-          s.language !== undefined &&
-          (typeof s.language !== 'string' || !CODE_LANGUAGE.test(s.language))
-        )
-          throw new Error('Invalid code language');
-      } else throw new Error('Expected literal text or exact native reference');
-    }
-  }
-}
-function answerLine(v: unknown): asserts v is TextSegment[] {
-  segments(v, undefined, true);
-  if (v.length !== 1 && v.some((s) => isCodeSegment(s)))
-    throw new Error('Code-block answer line must be a single segment');
-}
-const LITERAL_REF_ERROR =
-  'Plain-string question contains literal [[ or ]]; pass question as TextSegment[] with {"remId":"<title Rem ID>"} for each reference';
-function question(v: unknown): asserts v is string | TextSegment[] {
-  if (typeof v === 'string') {
-    string(v, 1000);
-    if (v.includes('[[') || v.includes(']]')) throw new Error(LITERAL_REF_ERROR);
-    return;
-  }
-  segments(v);
-  const text = v.map((s) => (typeof s === 'string' ? s : '')).join('');
-  if (text.length > 1000) throw new Error('Invalid bounded string');
-  if (!v.some((s) => typeof s !== 'string') && !text.trim())
-    throw new Error('Invalid bounded string');
 }
 /** A multi-card plan without parentRemId creates its own titled topic Rem under the daily document. */
 function clustered(p: FlashcardsPlan): boolean {
@@ -222,27 +113,6 @@ function clustered(p: FlashcardsPlan): boolean {
 /** A plan with a tags object declares tags explicitly instead of the implicit HOME rules. */
 function explicitTags(p: FlashcardsPlan): boolean {
   return p.tags !== undefined;
-}
-function validateTags(p: FlashcardsPlan): void {
-  object(p.tags);
-  const cards = new Set((p.newCards ?? []).map((c) => `card:${c.key}`));
-  for (const [k, ids] of Object.entries(p.tags)) {
-    if (k === 'root') {
-      if (p.parentRemId !== undefined || !p.newCards?.length)
-        throw new Error('tags.root needs a created root; parentRemId plans have none');
-    } else if (!cards.has(k)) throw new Error(`Unknown tags key: ${k}`);
-    array(ids, 20);
-    ids.forEach((v) => string(v));
-    if (new Set(ids).size !== ids.length) throw new Error(`Duplicate tag ID in tags.${k}`);
-  }
-  const single = !p.parentRemId && p.newCards?.length === 1 ? `card:${p.newCards[0].key}` : '';
-  if (
-    single &&
-    p.tags.root &&
-    p.tags[single] &&
-    !same([...p.tags.root].sort(), [...p.tags[single]].sort())
-  )
-    throw new Error('A single-card root is the card itself; tags.root and its card key must match');
 }
 /** Declared tags per created Rem ID; a single-card root and its card share one Rem. */
 function declaredTags(p: FlashcardsPlan, ids: Record<string, string>): Map<string, string[]> {
@@ -257,157 +127,6 @@ function declaredTags(p: FlashcardsPlan, ids: Record<string, string>): Map<strin
 /** Parent of the created card scaffold: the existing topic Rem or the daily document. */
 function scaffoldParent(p: FlashcardsPlan): string {
   return p.parentRemId ?? p.dailyRemId!;
-}
-export function validateTaskPlan(
-  kind: 'flashcards' | 'wiki',
-  input: TaskApplyParams<FlashcardsPlan | WikiPlan>
-): void {
-  object(input);
-  keys(input, ['schemaVersion', 'plan', 'dryRun', 'idempotencyKey']);
-  if (input.schemaVersion !== 1) throw new Error('schemaVersion must equal 1');
-  key(input.idempotencyKey, 128);
-  if (input.dryRun !== undefined && typeof input.dryRun !== 'boolean')
-    throw new Error('Invalid dryRun');
-  object(input.plan);
-  const p = input.plan;
-  if (p.schemaVersion !== 1) throw new Error('plan.schemaVersion must equal 1');
-  if (new TextEncoder().encode(JSON.stringify(p)).length > 100 * 1024)
-    throw new Error('Plan exceeds 100 KiB');
-  const seen = new Set<string>(),
-    unique = (v: unknown) => {
-      key(v);
-      if (seen.has(v)) throw new Error('Duplicate plan key');
-      seen.add(v);
-    };
-  let pages: Set<string> | undefined,
-    count = 0;
-  if (kind === 'flashcards') {
-    keys(p, [
-      'schemaVersion',
-      'dailyRemId',
-      'homeRootId',
-      'tagRemId',
-      'parentRemId',
-      'title',
-      'cardCluster',
-      'newCards',
-      'answerPatches',
-      'reusedCardRemIds',
-      'tags',
-    ]);
-    const plan = p as FlashcardsPlan,
-      creating = Boolean(plan.newCards?.length);
-    if (!creating) {
-      for (const field of [
-        'dailyRemId',
-        'homeRootId',
-        'tagRemId',
-        'parentRemId',
-        'title',
-        'cardCluster',
-        'tags',
-      ] as const)
-        if (plan[field] !== undefined) throw new Error(`${field} requires at least one new card`);
-    } else {
-      string(plan.dailyRemId);
-      if (plan.tags !== undefined) {
-        if (plan.homeRootId !== undefined || plan.tagRemId !== undefined)
-          throw new Error('tags replaces homeRootId and tagRemId; omit both');
-      } else [plan.homeRootId, plan.tagRemId].forEach((v) => string(v));
-    }
-    if (plan.parentRemId !== undefined) {
-      string(plan.parentRemId);
-      if (!plan.newCards?.length) throw new Error('parentRemId requires at least one new card');
-      if (plan.title !== undefined)
-        throw new Error('parentRemId places new cards under an existing topic; omit title');
-    }
-    if (plan.title !== undefined) string(plan.title, 1000);
-    if (plan.cardCluster !== undefined && typeof plan.cardCluster !== 'boolean')
-      throw new Error('Invalid cardCluster');
-    if (plan.newCards !== undefined) {
-      array(plan.newCards, 7);
-      if (plan.newCards.length > 1 && !plan.title && !plan.parentRemId)
-        throw new Error('Cluster title required');
-      for (const c of plan.newCards) {
-        object(c);
-        keys(c, ['key', 'question', 'answer']);
-        unique(c.key);
-        question(c.question);
-        array(c.answer, 100, 1);
-        c.answer.forEach((v) => answerLine(v));
-        count += 1 + c.answer.length;
-      }
-    }
-    if (plan.cardCluster === true && ((plan.newCards?.length ?? 0) < 2 || !plan.title))
-      throw new Error('cardCluster requires a title and two or more new cards');
-    if (creating && plan.tags !== undefined) validateTags(plan);
-    if (plan.reusedCardRemIds !== undefined) {
-      array(plan.reusedCardRemIds, 100);
-      plan.reusedCardRemIds.forEach((v) => string(v));
-    }
-    if (!(plan.newCards?.length || plan.answerPatches?.length || plan.reusedCardRemIds?.length))
-      throw new Error('Empty task');
-    count += (creating ? 2 : 0) + (clustered(plan) ? 1 : 0) + (plan.reusedCardRemIds?.length ?? 0);
-  } else {
-    keys(p, [
-      'schemaVersion',
-      'wikiRootId',
-      'partitionRemId',
-      'indexRemId',
-      'logRemId',
-      'pages',
-      'answerPatches',
-    ]);
-    const plan = p as WikiPlan;
-    [plan.wikiRootId, plan.partitionRemId, plan.indexRemId, plan.logRemId].forEach((v) =>
-      string(v)
-    );
-    array(plan.pages, 10);
-    pages = new Set(plan.pages.map((pg) => pg.key));
-    for (const pg of plan.pages) {
-      object(pg);
-      keys(pg, ['key', 'remId', 'indexParentRemId', 'title', 'aliases', 'nodes', 'summary']);
-      unique(pg.key);
-      string(pg.title, 1000);
-      if (pg.remId !== undefined) string(pg.remId);
-      if (pg.indexParentRemId !== undefined) string(pg.indexParentRemId);
-      if (pg.aliases !== undefined) {
-        array(pg.aliases, 20);
-        pg.aliases.forEach((v) => string(v, 200));
-      }
-      array(pg.nodes, 100);
-      for (const n of pg.nodes) {
-        object(n);
-        keys(n, ['key', 'remId', 'text', 'expectedTextHash']);
-        unique(n.key);
-        if (n.remId !== undefined) {
-          string(n.remId);
-          hash(n.expectedTextHash);
-        } else if (n.expectedTextHash !== undefined)
-          throw new Error('New node cannot have original hash');
-        segments(n.text, pages);
-      }
-      segments(pg.summary, pages);
-      count += 2 + pg.nodes.length;
-    }
-    count++;
-    if (!plan.pages.length && !plan.answerPatches?.length) throw new Error('Empty task');
-  }
-  if (p.answerPatches !== undefined) {
-    array(p.answerPatches, 100);
-    for (const patch of p.answerPatches) {
-      object(patch);
-      keys(patch, ['key', 'cardRemId', 'remId', 'expectedTextHash', 'text']);
-      unique(patch.key);
-      string(patch.cardRemId);
-      string(patch.remId);
-      hash(patch.expectedTextHash);
-      if (kind === 'flashcards') answerLine(patch.text);
-      else segments(patch.text, pages);
-    }
-    count += 2 * p.answerPatches.length;
-  }
-  if (count > 1000) throw new Error('Combined receipt exceeds 1000 IDs');
 }
 function canonical(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(canonical);
@@ -433,7 +152,6 @@ export class TaskOperations {
     kind: 'flashcards' | 'wiki',
     input: TaskApplyParams<FlashcardsPlan | WikiPlan>
   ): Promise<TaskReceipt> {
-    validateTaskPlan(kind, input);
     const startedAt = new Date().toISOString(),
       planHash = await contentHash(canonical(input.plan));
     const receipt: TaskReceipt = {
@@ -521,6 +239,13 @@ export class TaskOperations {
         }
       const journal = j,
         save = () => this.mutate(() => this.deps.journal.setLocal(storageKey, journal));
+      const required = requiredTaskCapabilities(kind, input.plan),
+        missing = required.filter((capability) => !this.deps.capabilities?.has(capability));
+      if (this.deps.capabilities && missing.length)
+        throw new TaskError(
+          'missing_capability',
+          `Missing SDK capabilities: ${missing.join(', ')}`
+        );
       await this.preflight(kind, input.plan, j);
       receipt.checks.push({
         kind: 'preflight',

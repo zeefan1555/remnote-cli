@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import { FlashcardsApplySchema, WikiApplySchema } from '../../schemas/task-schemas.js';
 import { createCommandClient } from '../client/command-client.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { EXIT } from '../config.js';
@@ -34,6 +33,7 @@ const help = {
     '  {"schemaVersion":1,"dailyRemId":"DAILY_ID","homeRootId":"HOME_ID","tagRemId":"TAG_ID","title":"Optional cluster title","cardCluster":false,"newCards":[{"key":"card-a","question":"Question?","answer":[["Answer."]]}],"answerPatches":[],"reusedCardRemIds":[]}',
     '  Patch/reuse-only: {"schemaVersion":1,"answerPatches":[{"key":"fix","cardRemId":"CARD_REM_ID","remId":"ANSWER_REM_ID","expectedTextHash":"<sha256>","text":["Corrected"]}]} or {"schemaVersion":1,"reusedCardRemIds":["CARD_REM_ID"]}.',
     'newCards, answerPatches, reusedCardRemIds, parentRemId, title, cardCluster and tags are optional; at least one new/patch/reused card is required.',
+    "The boundary parser returns an explicit create, patch, reuse, or mixed variant with only that operation's fields; missing SDK capabilities fail before preview reads or writes.",
     'tags: optional explicit tags by semantic key for new cards, e.g. "tags":{"root":[],"card:card-a":["TAG_ID"]}. Keys are root or card:<key> (root is rejected with parentRemId; a single-card root is the card itself, so both keys must match); values are <=20 distinct existing tag Rem IDs. With tags, omit homeRootId and tagRemId; no implicit HOME tag or HOME check applies, every created Rem must end with exactly its declared tags (none if undeclared), receipt checks include kind "tags", and parentRemId need not carry a tag. Declare final tags here rather than update-tags afterwards, which breaks same-key replay. New-card plans without tags require dailyRemId, homeRootId and tagRemId; patch/reuse-only plans omit all daily and creation/tag fields.',
     'parentRemId: existing non-card topic Rem directly under dailyRemId that already carries tagRemId (any tags with explicit tags). New cards become its last direct children in plan order and get no tag; title is rejected, no title is needed for several cards, at least one new card is required, ids include parent and no root.',
     'newCards <=7; answer lines 1..100; answerPatches/reusedCardRemIds <=100.',
@@ -90,16 +90,12 @@ export function registerTaskCommands(program: Command): void {
           const client = createCommandClient(program);
           try {
             const plan: unknown = JSON.parse(await readContentFileOrStdin(opts.plan));
-            const schema = kind === 'flashcards' ? FlashcardsApplySchema : WikiApplySchema;
-            const result = (await client.execute(
-              `${kind}_apply`,
-              schema.parse({
-                schemaVersion: 1,
-                plan,
-                idempotencyKey: opts.idempotencyKey,
-                dryRun: !opts.apply,
-              })
-            )) as Record<string, unknown>;
+            const result = (await client.execute(`${kind}_apply`, {
+              schemaVersion: 1,
+              plan,
+              idempotencyKey: opts.idempotencyKey,
+              dryRun: !opts.apply,
+            })) as Record<string, unknown>;
             const output = opts.summary ? summarizeReceipt(result) : result;
             console.log(formatResult(output, format, () => JSON.stringify(output, null, 2)));
             if (
