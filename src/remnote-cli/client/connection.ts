@@ -1,5 +1,6 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
+import { dispatchRemoteAction, type RemoteActionName } from './remote-actions.js';
 
 export const PROTOCOL_VERSION = 2;
 export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
@@ -182,6 +183,19 @@ export class Connection {
     action: string,
     payload: Record<string, unknown>,
     timeoutMs = 15_000
+  ): Promise<unknown> {
+    return dispatchRemoteAction(
+      { sendFrame: (name, body, timeout) => this.sendFrame(name, body, timeout) },
+      action,
+      payload,
+      timeoutMs
+    );
+  }
+
+  private async sendFrame(
+    action: RemoteActionName,
+    payload: Record<string, unknown>,
+    timeoutMs: number
   ): Promise<unknown> {
     const identity = await this.open();
     if (this.failure) throw this.failure;
