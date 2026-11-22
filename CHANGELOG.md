@@ -18,6 +18,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   outcomes without replay. Reuse the existing `rem inspect --fields cards,rawCards`
   facts and shared card snapshot. Keep metadata updates and `card apply` intact.
 
+### Fixed
+
+- Reject `rem update --content` combined with title or alias changes before any
+  Bridge execution. Run separate commands for text and metadata updates.
+
 ## [0.30.1] - 2026-11-23
 
 ### Fixed

@@ -22,7 +22,6 @@ export interface InspectedRawCard {
   timesWrongInRow: number | null;
 }
 
-/** Copy SDK facts so a later write cannot mutate the before snapshot. */
 export function snapshotCardIdentity(card: CardIdentitySource, remId: string): InspectedRawCard {
   if (!card || typeof card._id !== 'string' || !card._id || card.remId !== remId)
     throw new Error('SDK raw card identity/owner malformed');

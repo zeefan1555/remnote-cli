@@ -35,7 +35,7 @@ export function registerUpdateCommand(
     .option('--remove-aliases <aliases...>', 'Real aliases to remove by normalized match')
     .addHelpText(
       'after',
-      '\n--content replaces only this Rem text. It does not replace children.\nUse [[id:<remId>]] for native references, as with rem create.\nContent updates check raw text hash, parent, children, card-item, CardIDs, scheduling and available history.\nA failed write/readback has an unknown outcome. Inspect exact IDs before another write.\n--title retains its existing metadata update behavior and cannot be combined with --content.'
+      '\n--content replaces only this Rem text. It does not replace children.\nUse [[id:<remId>]] for native references, as with rem create.\nContent updates check raw text hash, parent, children, card-item, CardIDs, scheduling and available history.\nA failed write/readback has an unknown outcome. Inspect exact IDs before another write.\n--content cannot be combined with --title, --add-aliases, or --remove-aliases. Run separate commands.\n--title and alias updates retain their existing metadata update behavior.'
     )
     .action(async (remId: string, opts) => {
       const globalOpts = program.opts();

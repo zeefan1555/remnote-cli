@@ -430,6 +430,22 @@ describe('SearchByTagSchema', () => {
 });
 
 describe('UpdateNoteSchema', () => {
+  it.each([
+    { addAliases: ['Added'] },
+    { removeAliases: ['Removed'] },
+    { addAliases: ['Added'], removeAliases: ['Removed'] },
+    { addAliases: [] },
+    { removeAliases: [] },
+  ])('rejects content combined with alias fields: %j', (aliases) => {
+    const result = UpdateNoteSchema.safeParse({
+      remId: 'question',
+      content: 'New',
+      expectedTextHash: 'a'.repeat(64),
+      ...aliases,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('requires a lowercase raw text hash for content without changing metadata-only inputs', () => {
     const input = { remId: 'question', content: 'New', expectedTextHash: 'a'.repeat(64) };
     expect(UpdateNoteSchema.parse(input)).toEqual(input);

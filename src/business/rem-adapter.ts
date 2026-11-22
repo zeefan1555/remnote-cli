@@ -134,11 +134,16 @@ interface UpdateNoteMetadata {
   removeAliases?: string[];
 }
 
-export type UpdateNoteParams = UpdateNoteMetadata &
-  (
-    | { content: string; expectedTextHash: string; title?: never }
-    | { content?: never; expectedTextHash?: never; title?: string }
-  );
+export type UpdateNoteParams =
+  | {
+      remId: string;
+      content: string;
+      expectedTextHash: string;
+      title?: never;
+      addAliases?: never;
+      removeAliases?: never;
+    }
+  | (UpdateNoteMetadata & { content?: never; expectedTextHash?: never; title?: string });
 
 export interface UpdateAnswerParams {
   remId: string;
@@ -3898,6 +3903,9 @@ export class RemAdapter {
       throw new Error('Write operations are disabled in Automation Bridge settings');
     }
 
+    if (params.content !== undefined)
+      return this.updateOwnText(params.remId, params.content, params.expectedTextHash);
+
     const remId = this.requireString(params.remId, 'remId');
     const title =
       params.title === undefined || params.title === null
@@ -3906,19 +3914,6 @@ export class RemAdapter {
     const addAliases = this.parseAliases(params.addAliases, 'addAliases');
     const removeAliases = this.parseAliases(params.removeAliases, 'removeAliases');
     this.rejectOverlappingAliasChanges(addAliases, removeAliases);
-
-    if (params.content !== undefined) {
-      const receipt = await this.updateOwnText(
-        params.remId,
-        params.content,
-        params.expectedTextHash
-      );
-      if (addAliases.length === 0 && removeAliases.length === 0) return receipt;
-      const rem = await this.plugin.rem.findOne(params.remId);
-      if (!rem) throw new Error(`Note not found: ${params.remId}`);
-      await this.updateAliasesOnRem(rem, addAliases, removeAliases, receipt.titles[0]);
-      return receipt;
-    }
 
     if (title === undefined && addAliases.length === 0 && removeAliases.length === 0) {
       throw new Error('update_note requires title, addAliases, or removeAliases');

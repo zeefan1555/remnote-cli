@@ -431,7 +431,9 @@ export const UpdateNoteSchema = z
     content: z
       .string()
       .optional()
-      .describe('Replace only this Rem own text; children are preserved'),
+      .describe(
+        'Replace only this Rem own text and preserve children. Cannot combine with title or alias changes.'
+      ),
     expectedTextHash: ExpectedTextHashSchema.optional(),
     addAliases: AliasArraySchema.describe('Aliases to add if not already present'),
     removeAliases: AliasArraySchema.describe('Aliases to remove by exact normalized match'),
@@ -450,6 +452,13 @@ export const UpdateNoteSchema = z
         path: ['title'],
         message: 'Use either title or content, not both',
       });
+    for (const field of ['addAliases', 'removeAliases'] as const)
+      if (value.content !== undefined && value[field] !== undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `content cannot be combined with ${field}; run separate commands`,
+        });
     if (value.expectedTextHash !== undefined && value.content === undefined)
       ctx.addIssue({
         code: 'custom',

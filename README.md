@@ -228,7 +228,8 @@ Both content commands require a 64-character lowercase SHA-256 hash of the curre
 raw rich text. Obtain `textHash` from `rem context --request` with the target in `remIds`.
 Do not use the displayed title, Markdown, or `rem inspect`'s `cards[].hash` as the text hash.
 Content accepts Markdown and the same `[[id:<remId>]]` native references as `rem create`.
-`--content -` reads UTF-8 stdin. `--title` and `--content` are mutually exclusive.
+`--content -` reads UTF-8 stdin. `--content` cannot be combined with `--title`,
+`--add-aliases`, or `--remove-aliases`. Run separate commands for text and metadata updates.
 
 Each content update uses one text setter without an outer transaction, then verifies
 raw text, parent, children, card-item status, CardIDs, creation time, scheduling, and

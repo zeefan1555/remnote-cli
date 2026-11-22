@@ -575,7 +575,8 @@ remnote-cli rem update <rem-id> [options]
 At least one update option is required. Alias additions/removals are idempotent, and the same normalized alias cannot
 be requested in both operations.
 
-`--title` and `--content` are mutually exclusive. `--expected-text-hash` is valid
+`--content` cannot be combined with `--title`, `--add-aliases`, or `--remove-aliases`.
+Run separate commands for text and metadata updates. `--expected-text-hash` is valid
 only with `--content`. Obtain the target's `textHash` through `rem context --request`
 with that Rem in `remIds`. Hash the raw rich text, not the rendered title or Markdown.
 

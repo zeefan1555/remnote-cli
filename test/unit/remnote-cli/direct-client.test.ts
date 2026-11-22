@@ -150,6 +150,50 @@ describe('local business dispatch', () => {
     expect(await rem.getAliases()).toHaveLength(1);
     expect(plugin.app.transaction).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    { addAliases: ['Added'] },
+    { removeAliases: ['Existing'] },
+    { addAliases: ['Added'], removeAliases: ['Existing'] },
+  ])('rejects content and aliases before connecting or writing: %j', async (aliases) => {
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const rem = plugin.addTestRem('question', 'Old');
+    rem.setAliasesMock([['Existing']]);
+    const textWrite = vi.spyOn(rem, 'setText');
+    await expect(
+      client.execute('update_note', {
+        remId: 'question',
+        content: 'New',
+        expectedTextHash: await contentHash(rem.text),
+        ...aliases,
+      })
+    ).rejects.toThrow();
+    expect(wire.constructed).not.toHaveBeenCalled();
+    expect(wire.open).not.toHaveBeenCalled();
+    expect(wire.request).not.toHaveBeenCalled();
+    expect(textWrite).not.toHaveBeenCalled();
+    expect(rem.text).toEqual(['Old']);
+    expect((await rem.getAliases()).map((alias) => alias.text)).toEqual([['Existing']]);
+    expect(plugin.app.transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps metadata-only alias additions and removals without changing text', async () => {
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const rem = plugin.addTestRem('metadata', 'Old');
+    rem.setAliasesMock([['Existing']]);
+    const textWrite = vi.spyOn(rem, 'setText');
+    expect(
+      await client.execute('update_note', {
+        remId: 'metadata',
+        addAliases: ['Added'],
+        removeAliases: ['Existing'],
+      })
+    ).toEqual({ titles: ['Old'], remIds: ['metadata'] });
+    expect(textWrite).not.toHaveBeenCalled();
+    expect(rem.text).toEqual(['Old']);
+    expect((await rem.getAliases()).map((alias) => alias.text)).toEqual([['Added']]);
+    expect(plugin.app.transaction).toHaveBeenCalledOnce();
+  });
   it('uses one command connection for status, workflows and low-level calls', async () => {
     expect(await client.execute('get_status', {})).toMatchObject({
       connected: true,

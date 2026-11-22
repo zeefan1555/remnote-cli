@@ -98,6 +98,33 @@ describe('command bridge action mapping', () => {
   });
 
   it.each([
+    ['--add-aliases', 'Added'],
+    ['--remove-aliases', 'Removed'],
+    ['--add-aliases', 'Added', '--remove-aliases', 'Removed'],
+  ])(
+    'rejects content combined with alias flags before bridge execution: %j',
+    async (...aliases) => {
+      const executeSpy = vi
+        .spyOn(DirectClient.prototype, 'execute')
+        .mockResolvedValue({ ok: true });
+      const result = await runCliForTest([
+        'rem',
+        'update',
+        'question',
+        '--content',
+        'New',
+        '--expected-text-hash',
+        'a'.repeat(64),
+        ...aliases,
+      ]);
+      expect(result.exitCode).toBe(EXIT.USAGE);
+      expect(parseFailure(result.stderr).type).toBe('usage');
+      expect(executeSpy).not.toHaveBeenCalled();
+      executeSpy.mockRestore();
+    }
+  );
+
+  it.each([
     ['rem', 'update', 'question', '--content', 'New'],
     ['rem', 'update', 'question', '--content', 'New', '--expected-text-hash', 'A'.repeat(64)],
     ['rem', 'update-answer', 'answer', '--content', 'New', '--expected-text-hash', 'a'.repeat(64)],
