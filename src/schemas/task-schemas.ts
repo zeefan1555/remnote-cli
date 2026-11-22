@@ -123,10 +123,6 @@ const WikiText = z.array(WikiSegment).min(1).max(100);
 const patch = { key: Key, cardRemId: RemId, remId: RemId, expectedTextHash: Hash };
 const PlainPatch = z.object({ ...patch, text: AnswerLine }).strict();
 const WikiPatch = z.object({ ...patch, text: WikiText }).strict();
-function size(plan: unknown, ctx: z.RefinementCtx): void {
-  if (Buffer.byteLength(JSON.stringify(plan), 'utf8') > 100 * 1024)
-    ctx.addIssue({ code: 'custom', message: 'JSON plan exceeds 100 KiB limit' });
-}
 function keys(entries: Array<{ key: string }>, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   for (const entry of entries) {
@@ -143,26 +139,22 @@ const FlashcardsPlanInputSchema = z
     tagRemId: RemId.optional(),
     parentRemId: RemId.optional(),
     tags: z
-      .record(z.string(), z.array(RemId).max(20))
+      .record(z.string(), z.array(RemId))
       .optional()
       .describe('Explicit tag Rem IDs by semantic key: root or card:<key>'),
     title: Title.optional(),
     cardCluster: z.boolean().optional(),
     newCards: z
       .array(
-        z
-          .object({ key: Key, question: Question, answer: z.array(AnswerLine).min(1).max(100) })
-          .strict()
+        z.object({ key: Key, question: Question, answer: z.array(AnswerLine).min(1) }).strict()
       )
       .min(1)
-      .max(7)
       .optional(),
-    answerPatches: z.array(PlainPatch).min(1).max(100).optional(),
-    reusedCardRemIds: z.array(RemId).min(1).max(100).optional(),
+    answerPatches: z.array(PlainPatch).min(1).optional(),
+    reusedCardRemIds: z.array(RemId).min(1).optional(),
   })
   .strict()
   .superRefine((plan, ctx) => {
-    size(plan, ctx);
     keys([...(plan.newCards ?? []), ...(plan.answerPatches ?? [])], ctx);
     if (!plan.newCards?.length) {
       for (const field of [
@@ -187,14 +179,6 @@ const FlashcardsPlanInputSchema = z
         message: 'dailyRemId is required when creating new cards',
       });
     }
-    const count =
-      (plan.newCards ?? []).reduce((n, c) => n + 1 + c.answer.length, 0) +
-      ((plan.newCards?.length ?? 0) > 1 ? 1 : 0) +
-      ((plan.newCards?.length ?? 0) > 0 ? 2 : 0) +
-      (plan.reusedCardRemIds?.length ?? 0) +
-      2 * (plan.answerPatches?.length ?? 0);
-    if (count > 1000)
-      ctx.addIssue({ code: 'custom', message: 'Flashcard receipt ID budget exceeds 1000 entries' });
     if (!(plan.newCards?.length || plan.answerPatches?.length || plan.reusedCardRemIds?.length))
       ctx.addIssue({
         code: 'custom',
@@ -334,40 +318,29 @@ export const WikiPlanSchema = z
     partitionRemId: RemId,
     indexRemId: RemId,
     logRemId: RemId,
-    pages: z
-      .array(
-        z
-          .object({
-            key: Key,
-            remId: RemId.optional(),
-            indexParentRemId: RemId.optional(),
-            title: Title,
-            aliases: z.array(z.string().min(1).max(200).regex(/\S/)).max(20).optional(),
-            nodes: z.array(WikiNode).max(100),
-            summary: WikiText,
-          })
-          .strict()
-      )
-      .max(10),
-    answerPatches: z.array(WikiPatch).max(100).optional(),
+    pages: z.array(
+      z
+        .object({
+          key: Key,
+          remId: RemId.optional(),
+          indexParentRemId: RemId.optional(),
+          title: Title,
+          aliases: z.array(z.string().min(1).max(200).regex(/\S/)).optional(),
+          nodes: z.array(WikiNode),
+          summary: WikiText,
+        })
+        .strict()
+    ),
+    answerPatches: z.array(WikiPatch).optional(),
   })
   .strict()
   .superRefine((plan, ctx) => {
-    size(plan, ctx);
     keys(
       [...plan.pages, ...plan.pages.flatMap((p) => p.nodes), ...(plan.answerPatches ?? [])],
       ctx
     );
     if (!plan.pages.length && !plan.answerPatches?.length)
       ctx.addIssue({ code: 'custom', message: 'At least one page or answer patch is required' });
-    if (
-      2 * plan.pages.length +
-        plan.pages.reduce((n, p) => n + p.nodes.length, 0) +
-        1 +
-        2 * (plan.answerPatches?.length ?? 0) >
-      1000
-    )
-      ctx.addIssue({ code: 'custom', message: 'WIKI receipt ID budget exceeds 1000 entries' });
     const pageKeys = new Set(plan.pages.map((p) => p.key));
     for (const text of [
       ...plan.pages.flatMap((p) => [p.summary, ...p.nodes.map((n) => n.text)]),

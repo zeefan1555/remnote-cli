@@ -58,10 +58,10 @@ still run. Put `--allow-destructive` on `batch` when an inner `sdk` call needs i
 `read` and `list-children` also accept multiple Rem IDs in one call. One ID keeps
 the previous JSON object; several IDs return `results` keyed by ID.
 Prefer file payloads (`--content-file`, `--plan`, `--request`,
-`--expect`, `--file`) over shell interpolation. Write payloads are bounded to
-100 KiB for native content commands; workspace Markdown uses the sync reference's
-file bound. A batch file is bounded to 1 MB and 100 commands. Inner batch commands
-must not read stdin.
+`--expect`, `--file`) over shell interpolation. Ordinary native content payloads
+are bounded to 100 KiB; task plans have no artificial file-size or object-count
+ceiling. Workspace Markdown uses the sync reference's file bound. A batch file is
+bounded to 1 MB and 100 commands. Inner batch commands must not read stdin.
 Use exact Rem IDs, not ambiguous tag names. Respect repository policy: live
 development/acceptance tests run only through the guarded integration wrapper
 after explicit authorization.
@@ -120,7 +120,7 @@ Use stale-state guards where provided. Existing title/card/document identity and
 exact tag/property semantics are documented in the
 [command reference](../../docs/guides/remnote-cli-command-reference.md).
 
-## Bounded Tasks
+## Task Plans
 
 Use `context --request FILE` for bounded exact-ID metadata, then
 `verify scope --expect FILE` for fresh proof. Raw text appears only for explicit
@@ -160,6 +160,12 @@ verified. A passed line has `verified: true`. After apply, `answerLines` reports
 each answer's `remId`, `isCardItem`, `hasCardStructure`, and `verified`. Preview
 omits `answerLines`.
 
+Task plans have no artificial card, answer, patch, page, node, alias or plan-file
+size ceiling. Scaffold creation is partitioned before it reaches the transport.
+When the command already has 32 SDK requests in flight, additional requests wait
+instead of failing. Do not pre-split a valid reviewed plan merely to stay under an
+implementation limit.
+
 Use `--summary` on task apply and `verify scope` when only IDs/hashes, scopes, counts
 and failures are needed. It does not change exit or recovery semantics. Wiki batch
 receipts certify `verificationScope:affected_objects`, not the whole Wiki. After
@@ -173,8 +179,11 @@ any mutation clears it before later commands read again. The session never survi
 the batch process.
 
 Flashcard and workspace writes use the same mutation kernel: `started` is durable
-before the native call, only readback sets `verified`, and uncertain failure becomes
-`unknown`. Preserve the exact plan/journal and reconcile IDs instead of replaying.
+before the native call, and only readback sets `verified`. A flashcard scaffold
+becomes `applied` when every exact ID is durably saved; a later binding or content
+failure is `partial` and resumes safely under the same key. `unknown` is reserved
+for outcomes whose affected objects cannot be identified. Preserve the exact
+plan/journal and reconcile IDs instead of blindly replaying.
 
 Task commands do not look up dates or create daily documents. The caller validates
 the intended date before new batches/after midnight; same-key replay retains its

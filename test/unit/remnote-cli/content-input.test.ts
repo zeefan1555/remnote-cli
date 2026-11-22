@@ -63,6 +63,14 @@ with "quotes" and \`ticks\``;
     await expect(readContentFileOrStdin('-', stdin)).rejects.toThrow('exceeds 100 KB limit');
   });
 
+  it('allows a task-plan reader to use the process resource bound instead of the content cap', async () => {
+    const largePlan = 'x'.repeat(MAX_WRITE_CONTENT_BYTES + 1);
+    const path = await createTempFile(largePlan);
+    await expect(readContentFileOrStdin(path, undefined, Number.MAX_SAFE_INTEGER)).resolves.toBe(
+      largePlan
+    );
+  });
+
   it('rejects mutually-exclusive optional inline and file flags', async () => {
     await expect(
       resolveOptionalInlineOrFileContent({

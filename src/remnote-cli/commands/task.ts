@@ -14,15 +14,15 @@ const commonHelp = [
   'Applied flashcard receipts include answerLines: [{key,remId,isCardItem,hasCardStructure,verified,error?}] for each recorded answer line. verified is true only after that second check. A failed check leaves verified false and error set to the same message.',
   'AnswerPatch = {"key":"patch-key","cardRemId":"CARD_REM_ID","remId":"ANSWER_REM_ID","expectedTextHash":"64 lowercase SHA256 hex characters","text":TextSegments}.',
   'Keys: 1..64 ASCII letters/digits/._- and unique across all plan objects/patches.',
-  'Idempotency key: 1..128 of the same characters. Plan JSON <=100KiB; IDs <=256 chars.',
+  'Idempotency key: 1..128 of the same characters. IDs <=256 chars.',
   'Title/plain-string question: nonblank <=1000 chars. Question TextSegments: <=1000 literal chars and nonblank text or a native reference.',
   'Other TextSegment strings: <=10000 chars each (empty allowed).',
   'Default is read-only preview. --apply explicitly applies; preserve the same key for a reviewed plan.',
   'Preview and apply never look up dates or create daily documents.',
   'Every SDK mutation rechecks the active knowledge base and official authorization immediately before its call, after awaited reads.',
-  'Receipts contain metadata only, including ids mapping semantic keys to exact Rem IDs (max1000).',
+  'Receipts contain metadata only, including ids mapping semantic keys to exact Rem IDs.',
   'Use ids such as card:<key>, answer:<key>:<zero-index>, page:<key>, node:<key>, index:<pageKey>, log:batch; never infer IDs from creation order.',
-  'facts contains up to 1000 selected {remId,textHash,cardIds,reviewHash} entries, without text/history bodies.',
+  'facts contains selected {remId,textHash,cardIds,reviewHash} entries without text/history bodies.',
   'Use exact-ID reads for semantic review of final text; receipt hashes do not replace that review.',
   'No deletes, replacements, moves, or rollback guarantee.',
   'Partial/unknown/incomplete/conflict receipts exit nonzero; do not blindly replay writes.',
@@ -36,27 +36,25 @@ const help = {
     "The boundary parser returns an explicit create, patch, reuse, or mixed variant with only that operation's fields; missing SDK capabilities fail before preview reads or writes.",
     'tags: optional explicit tags by semantic key for new cards, e.g. "tags":{"root":[],"card:card-a":["TAG_ID"]}. Keys are root or card:<key> (root is rejected with parentRemId; a single-card root is the card itself, so both keys must match); values are <=20 distinct existing tag Rem IDs. With tags, omit homeRootId and tagRemId; no implicit HOME tag or HOME check applies, every created Rem must end with exactly its declared tags (none if undeclared), receipt checks include kind "tags", and parentRemId need not carry a tag. Declare final tags here rather than update-tags afterwards, which breaks same-key replay. New-card plans without tags require dailyRemId, homeRootId and tagRemId; patch/reuse-only plans omit all daily and creation/tag fields.',
     'parentRemId: existing non-card topic Rem directly under dailyRemId that already carries tagRemId (any tags with explicit tags). New cards become its last direct children in plan order and get no tag; title is rejected, no title is needed for several cards, at least one new card is required, ids include parent and no root.',
-    'newCards <=7; answer lines 1..100; answerPatches/reusedCardRemIds <=100.',
+    'Plans may contain any number of new cards, answer lines, patches, or reused cards; execution is chunked and resumable.',
     'question is a plain string or TextSegments, e.g. "question":["Compare ",{"remId":"TITLE_ID"}," and PB?"]. A plain-string question containing [[ or ]] is rejected: RemNote stores it as literal text, so use {"remId"} segments for references.',
     'A title is required for two or more new cards unless parentRemId is set. Card Cluster powerup cc is off unless cardCluster is true, which also requires that title and at least two new cards. Omitted or false never adds cc. pageKey segments are forbidden.',
     'dailyRemId must name an explicit existing dailyDocument when creating new cards; patch/reuse-only plans omit it. Native type validation cannot prove calendar freshness.',
     'No date scalar is supplied. The caller resolves/revalidates the intended date before a new batch and after midnight.',
     'Replay uses the original recorded diary; it never switches an existing batch to a newly resolved date.',
-    'Receipt budget: sum(1 + answer lines per newCard) + (newCards.length > 1 && !parentRemId ? 1 : 0) + (newCards.length > 0 ? 2 : 0) + reused IDs + 2*patches <=1000.',
   ],
   wiki: [
     'Plan shape:',
     '  {"schemaVersion":1,"wikiRootId":"WIKI_ID","partitionRemId":"PARTITION_ID","indexRemId":"INDEX_ID","logRemId":"LOG_ID","pages":[{"key":"page-a","title":"Page title","aliases":[],"nodes":[{"key":"node-a","text":["Content."]}],"summary":["Summary."]}],"answerPatches":[]}',
-    'pages is required (0..10); answerPatches is optional (<=100); at least one page/patch is required.',
+    'pages and answerPatches are unlimited in count; at least one page/patch is required.',
     'A page may also contain remId for an existing page; its title must match. aliases is optional (<=20 nonblank strings, <=200 chars).',
-    'nodes is required (0..100). Existing nodes add remId and expectedTextHash; new nodes must omit both.',
+    'nodes is required and has no artificial count limit. Existing nodes add remId and expectedTextHash; new nodes must omit both.',
     'Known-created Wiki objects must remain ordinary, plain, untagged non-card text before mutation.',
     'Existing grouped-index entries are traversed through the full bounded tree and keep their parent.',
     'Optional page indexParentRemId selects the exact index root or existing descendant for its entry; it never moves existing entries.',
     'A missing/new entry in an index with nested entries requires indexParentRemId. Foreign or conflicting parents fail before writes.',
     'Index ancestry is rechecked before mutations and the exact parent is verified after writing; incomplete traversal is a blocker.',
     'summary is required TextSegments. WIKI TextSegments also allow {"pageKey":"page-a"} referring to an input page key.',
-    'Receipt budget: 2*pages + total nodes + 1 + 2*answerPatches <=1000.',
     'verificationScope=affected_objects: verified/complete certify this batch, never the whole WIKI.',
     'After the last Wiki mutation, run verify scope with the WIKI root and zeroCards for final task acceptance.',
   ],
@@ -65,7 +63,7 @@ export function registerTaskCommands(program: Command): void {
   for (const kind of ['flashcards', 'wiki'] as const)
     program
       .command(kind)
-      .description(`Plan and apply bounded ${kind} tasks`)
+      .description(`Plan and apply ${kind} tasks`)
       .command('apply')
       .description(`Preview a ${kind} plan; use --apply to perform guarded writes`)
       .requiredOption(
@@ -89,7 +87,9 @@ export function registerTaskCommands(program: Command): void {
           const format = program.opts().text ? 'text' : 'json';
           const client = createCommandClient(program);
           try {
-            const plan: unknown = JSON.parse(await readContentFileOrStdin(opts.plan));
+            const plan: unknown = JSON.parse(
+              await readContentFileOrStdin(opts.plan, undefined, Number.MAX_SAFE_INTEGER)
+            );
             const result = (await client.execute(`${kind}_apply`, {
               schemaVersion: 1,
               plan,

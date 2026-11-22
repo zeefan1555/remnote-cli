@@ -145,7 +145,11 @@ remnote-cli flashcards apply --plan /tmp/flashcards.json --idempotency-key cards
 
 Preview is the default. `--apply` performs writes. The CLI does not choose or validate the calendar date. Pass an existing daily document and recheck the intended date before a new batch or after midnight.
 
-Plan variants, text segments, limits, and receipt fields are documented in [Task plans](docs/guides/task-plans.md).
+Task plans have no artificial card, answer, patch, page, node, alias or plan-file
+size ceiling. The CLI partitions internal scaffold calls, persists progress and
+queues SDK requests when the Bridge connection reaches its in-flight capacity.
+Bindings, text segments and receipt fields are documented in
+[Task plans](docs/guides/task-plans.md).
 
 ## Maintain a Wiki
 
@@ -228,6 +232,12 @@ Native writes are sequential, not atomic. A timeout, disconnect, `unknown` recei
 2. Keep the reviewed plan, plan hash, idempotency key, journal, and every returned ID.
 3. Read the exact IDs to reconcile the outcome.
 4. Use a documented recovery command only when it accepts the original evidence.
+
+Capacity backpressure is not a failed write. When the Bridge already has 32 SDK
+requests in flight, the CLI queues additional requests and continues as responses
+arrive. A flashcard scaffold whose exact IDs were durably saved is `applied`;
+failure before its content is complete is `partial` and resumes under the same
+idempotency key. `unknown` means the affected objects cannot be identified.
 
 Do not rerun the write or choose a new idempotency key to bypass uncertainty. Do not delete journals to force a fresh attempt. Some native update commands fail closed until the SDK can safely abort them. A preview receipt is not write approval.
 

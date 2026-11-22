@@ -44,6 +44,12 @@ export class Connection {
       timer: NodeJS.Timeout;
     }
   >();
+  private readonly capacityWaiters: Array<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }> = [];
+  /** Reserved slots, including a waiter whose slot is transferred on release. */
+  private activeRequests = 0;
   private connectionTimer?: NodeJS.Timeout;
   private rejectOpening?: (error: Error) => void;
   readonly timings = { listeningMs: 0, connectionMs: 0, sdkCalls: 0, sdkMs: 0 };
@@ -163,6 +169,7 @@ export class Connection {
             const pending = this.pending.get(message.id);
             if (!pending) return;
             this.pending.delete(message.id);
+            this.releaseCapacity();
             clearTimeout(pending.timer);
             if (typeof message.error === 'string') pending.reject(new Error(message.error));
             else if ('result' in message) pending.resolve(message.result);
@@ -203,8 +210,15 @@ export class Connection {
       throw new Error('Session closed; do not replay writes');
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
       throw new Error('Invalid SDK timeout');
-    if (this.pending.size >= MAX_PENDING_REQUESTS)
-      throw new Error(`Too many pending SDK requests (maximum ${MAX_PENDING_REQUESTS})`);
+    await this.acquireCapacity();
+    if (this.failure) {
+      this.releaseCapacity();
+      throw this.failure;
+    }
+    if (!this.client || this.client.readyState !== WebSocket.OPEN) {
+      this.releaseCapacity();
+      throw new Error('Session closed; do not replay writes');
+    }
     const ws = this.client,
       id = String(this.nextRequestId++),
       started = performance.now();
@@ -215,7 +229,10 @@ export class Connection {
       knowledgeBaseId: identity.knowledgeBaseId,
       deadline: Date.now() + timeoutMs,
     });
-    if (Buffer.byteLength(frame) > MAX_MESSAGE_BYTES) throw new Error('Request too large');
+    if (Buffer.byteLength(frame) > MAX_MESSAGE_BYTES) {
+      this.releaseCapacity();
+      throw new Error('Request too large');
+    }
     this.timings.sdkCalls++;
     try {
       return await new Promise((resolve, reject) => {
@@ -244,11 +261,30 @@ export class Connection {
 
   private failPending(error: Error): void {
     this.failure = error;
+    for (const waiter of this.capacityWaiters.splice(0)) waiter.reject(error);
+    this.activeRequests = 0;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private async acquireCapacity(): Promise<void> {
+    if (this.failure) throw this.failure;
+    if (this.activeRequests < MAX_PENDING_REQUESTS) {
+      this.activeRequests += 1;
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      this.capacityWaiters.push({ resolve, reject });
+    });
+  }
+
+  private releaseCapacity(): void {
+    const waiter = this.capacityWaiters.shift();
+    if (waiter) waiter.resolve();
+    else this.activeRequests = Math.max(0, this.activeRequests - 1);
   }
 
   async close(): Promise<void> {

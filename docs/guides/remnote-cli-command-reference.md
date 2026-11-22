@@ -1318,6 +1318,9 @@ tag IDs, verified in the receipt, and `parentRemId` no longer requires a tag on 
 `TextSegments`; native references use `{"remId":"EXACT_ID"}`, and plain strings containing `[[` or `]]` are rejected.
 Flashcard plans that contain only `answerPatches` or `reusedCardRemIds` omit `dailyRemId`, `homeRootId`, `tagRemId`,
 `parentRemId`, `title`, `cardCluster`, and `tags`; exact existing targets replace creation context.
+Flashcard and Wiki task plans have no artificial object-count or task-file-size cap.
+Scaffold creation is partitioned internally, and SDK requests beyond the live
+in-flight window wait rather than failing.
 A flashcard answer line may be one code-block segment `{"code":"...","language":"plaintext"}`. Apply stores the SDK
 code-block element and sets `isCardItem` so the line is on the card back. Applied receipts include `answerLines`
 with `verified`. New cards and flashcard patches compare card facts before the text write and again after

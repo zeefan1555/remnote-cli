@@ -197,9 +197,9 @@ describe('zero-configuration command-owned loopback session', () => {
     await failed;
   });
 
-  it('bounds request sizes, timeouts and pending work before sending', async () => {
+  it('queues requests beyond the in-flight window instead of rejecting them', async () => {
     const { connection, opened, port } = await listen();
-    await plugin(port);
+    const ws = await plugin(port);
     await opened;
     await expect(connection.request('sdk_call', { capability: 'read' }, 0)).rejects.toThrow(
       'Invalid SDK timeout'
@@ -207,15 +207,25 @@ describe('zero-configuration command-owned loopback session', () => {
     await expect(
       connection.request('sdk_call', { capability: 'x'.repeat(8 * 1024 * 1024) })
     ).rejects.toThrow('too large');
-    const pending = Array.from({ length: MAX_PENDING_REQUESTS }, () =>
-      connection.request('sdk_call', { capability: 'read' }).catch(() => undefined)
+    const seen: Array<{ id: string }> = [];
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw)) as { id?: string; action?: string };
+      if (!frame.id || !frame.action) return;
+      seen.push({ id: frame.id });
+    });
+    const total = MAX_PENDING_REQUESTS + 8;
+    const pending = Array.from({ length: total }, () =>
+      connection.request('sdk_call', { capability: 'read' })
     );
     await vi.waitFor(() => expect(connection.timings.sdkCalls).toBe(MAX_PENDING_REQUESTS));
-    await expect(connection.request('sdk_call', { capability: 'read' })).rejects.toThrow(
-      'Too many pending'
-    );
-    await connection.close();
-    await Promise.all(pending);
+    expect(seen).toHaveLength(MAX_PENDING_REQUESTS);
+    for (let index = 0; index < total; index++) {
+      await vi.waitFor(() => expect(seen.length).toBeGreaterThan(index));
+      ws.send(JSON.stringify({ id: seen[index]!.id, result: { capability: 'read' } }));
+    }
+    await expect(Promise.all(pending)).resolves.toHaveLength(total);
+    expect(seen).toHaveLength(total);
+    expect(connection.timings.sdkCalls).toBe(total);
   });
 
   it('rejects unknown actions and malformed known payloads before opening a listener', async () => {

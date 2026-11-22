@@ -75,7 +75,6 @@ describe('task plan contract', () => {
   it.each([
     { newCards: [] },
     { newCards: [card, { ...card, key: 'c2' }] },
-    { newCards: Array(8).fill(card) },
     { newCards: [{ ...card, question: ' ' }] },
     { newCards: [{ ...card, question: '[[能力圈]] 和长远怎么取舍？' }] },
     { newCards: [{ ...card, question: 'x ]]' }] },
@@ -97,7 +96,6 @@ describe('task plan contract', () => {
     { tagRemId: 'x'.repeat(257) },
     { answerPatches: [{ ...patch, key: 'c' }] },
     { answerPatches: [{ ...patch, expectedTextHash: 'A'.repeat(64) }] },
-    { reusedCardRemIds: Array(101).fill('r') },
     { answerPatches: Array(101).fill(patch) },
     { today: true },
     { cardCluster: 'yes' },
@@ -117,8 +115,6 @@ describe('task plan contract', () => {
     { pages: [{ ...page, indexParentRemId: ' ' }] },
     { pages: [{ ...page, indexParentRemId: 'x'.repeat(257) }] },
     { pages: [{ ...page, indexParentRemId: 1 }] },
-    { pages: Array(11).fill(page) },
-    { pages: [{ ...page, aliases: Array(21).fill('alias') }] },
     { pages: [{ ...page, aliases: [' '] }] },
     { pages: [{ ...page, aliases: ['x'.repeat(201)] }] },
     { pages: [{ ...page, nodes: [{ key: 'n', remId: 'r', text: ['x'] }] }] },
@@ -208,26 +204,26 @@ describe('task plan contract', () => {
     const plan = { ...wiki, pages: [{ ...page, indexParentRemId: 'section' }] };
     expect(WikiPlanSchema.parse(plan)).toEqual(plan);
   });
-  it('enforces UTF8 size and idempotency bounds', () => {
+  it('accepts plans beyond the former UTF8 size bound and still bounds the idempotency key', () => {
     expect(
       FlashcardsPlanSchema.safeParse({
         ...flash,
         newCards: [{ ...card, answer: [Array(10).fill('é'.repeat(6000))] }],
       }).success
-    ).toBe(false);
+    ).toBe(true);
     for (const k of ['', 'bad key', 'x'.repeat(129)])
       expect(
         FlashcardsApplySchema.safeParse({ schemaVersion: 1, plan: flash, idempotencyKey: k })
           .success
       ).toBe(false);
   });
-  it('bounds complete flashcard receipt including reused and patched targets', () => {
-    const newCards = Array.from({ length: 7 }, (_, i) => ({
+  it('accepts flashcard plans beyond the former card, answer, patch and receipt bounds', () => {
+    const newCards = Array.from({ length: 8 }, (_, i) => ({
       ...card,
       key: `c${i}`,
-      answer: Array.from({ length: 100 }, () => ['x']),
+      answer: Array.from({ length: 101 }, () => ['x']),
     }));
-    const patches = Array.from({ length: 100 }, (_, i) => ({ ...patch, key: `patch${i}` }));
+    const patches = Array.from({ length: 101 }, (_, i) => ({ ...patch, key: `patch${i}` }));
     const p = {
       ...flash,
       title: 'Cluster',
@@ -235,20 +231,19 @@ describe('task plan contract', () => {
       reusedCardRemIds: Array(100).fill('r'),
       answerPatches: patches,
     };
-    expect(FlashcardsPlanSchema.safeParse(p).success).toBe(false);
-    expect(
-      FlashcardsPlanSchema.safeParse({ ...p, answerPatches: patches.slice(0, 95) }).success
-    ).toBe(true);
+    expect(FlashcardsPlanSchema.safeParse(p).success).toBe(true);
   });
-  it('bounds complete Wiki receipt including patch pairs at1000/1001', () => {
-    const pages = Array.from({ length: 10 }, (_, i) => ({
+  it('accepts Wiki plans beyond the former page, node, alias and receipt bounds', () => {
+    const pages = Array.from({ length: 11 }, (_, i) => ({
       ...page,
       key: `p${i}`,
-      nodes: Array.from({ length: 78 }, (_, j) => ({ key: `n${i}-${j}`, text: ['x'] })),
+      aliases: Array.from({ length: 21 }, (_, j) => `alias-${i}-${j}`),
+      nodes: Array.from({ length: 101 }, (_, j) => ({ key: `n${i}-${j}`, text: ['x'] })),
     }));
-    const answerPatches = Array.from({ length: 100 }, (_, i) => ({ ...patch, key: `patch${i}` }));
-    expect(WikiPlanSchema.safeParse({ ...wiki, pages, answerPatches }).success).toBe(false);
-    pages[0].nodes.pop();
+    const answerPatches = Array.from({ length: 101 }, (_, i) => ({
+      ...patch,
+      key: `patch${i}`,
+    }));
     expect(WikiPlanSchema.safeParse({ ...wiki, pages, answerPatches }).success).toBe(true);
   });
   it('accepts explicit tags instead of homeRootId/tagRemId and enforces their keys', () => {
