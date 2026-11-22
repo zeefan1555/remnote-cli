@@ -80,6 +80,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Add read-only `doctor` diagnostics for Node, CLI policy, state directories,
   Bridge identity, protocol, knowledge base, SDK catalog, required capabilities
   and local journal health. `--offline` never opens a socket.
+- Add bounded automatic pagination to `search`, `search-by-tag` and
+  single-parent `list-children`. Results report completeness, page count, item
+  count and the next cursor, while missing or repeated cursors fail as conflicts.
 
 ### Changed
 

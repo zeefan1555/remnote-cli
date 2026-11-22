@@ -75,6 +75,22 @@ remnote-cli doctor --text
 Warnings and skips do not fail the command. Any failing check returns exit code
 3 with the complete report in `error.details`. See [Doctor](doctor.md).
 
+## Pagination
+
+`search`, `search-by-tag` and single-parent `list-children` accept:
+
+| Flag | Meaning |
+| --- | --- |
+| `--all` | Follow every page from the current cursor snapshot |
+| `--max-pages <n>` | Explicit page bound for `--all`; requires `--all` |
+| `--page-delay <ms>` | Delay between page requests |
+
+The result always includes `paging: {complete,pages,itemCount,nextCursor?}`.
+At `--max-pages`, an unfinished result keeps `hasMore=true` and its
+`nextCursor`. Missing or repeated cursors fail as conflicts. Several-parent
+`list-children` keeps its raw multi-result shape because independent parent cursors
+cannot be merged. See [Pagination](pagination.md).
+
 ### Argument Quoting and Shifting
 
 CLI environments (especially Windows shells) can sometimes "swallow" empty strings or misinterpret arguments if quoting is missing. This can lead to **argument shifting**, where a flag (like `--content`) is incorrectly interpreted as the _value_ for a preceding option (like `--title`).
