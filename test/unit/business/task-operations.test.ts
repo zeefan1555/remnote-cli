@@ -117,8 +117,8 @@ function success(r: TaskReceipt): void {
   expect(r.complete).toBe(true);
 }
 const journalKey = (kind: string, key = 'batch') => `task-v1:test-kb:${kind}:${key}`;
-async function loadJournal<T>(f: Fixture, kind: string): Promise<T> {
-  return (await f.plugin.storage.getLocal(journalKey(kind))) as T;
+async function loadJournal<T>(f: Fixture, kind: string, key = 'batch'): Promise<T> {
+  return (await f.plugin.storage.getLocal(journalKey(kind, key))) as T;
 }
 async function existingPage(f: Fixture) {
   const page = f.plugin.addTestRem('existing-page', 'Existing page');
@@ -333,6 +333,93 @@ describe('public task operation controls', () => {
     expect(f.plugin.date.getTodaysDoc).not.toHaveBeenCalled();
     expect(f.plugin.app.transaction).not.toHaveBeenCalled();
   });
+  it('applies 46 scaffold nodes through one bounded findMany read', async () => {
+    const f = await fixture();
+    const plan: FlashcardsPlanInput = {
+      schemaVersion: 1,
+      dailyRemId: 'daily',
+      homeRootId: 'home',
+      tagRemId: 'tag',
+      title: 'Large cluster',
+      newCards: Array.from({ length: 3 }, (_, cardIndex) => ({
+        key: `large-${cardIndex}`,
+        question: `Question ${cardIndex}?`,
+        answer: Array.from({ length: 14 }, (_, answerIndex) => [
+          `Answer ${cardIndex}:${answerIndex}`,
+        ]),
+      })),
+    };
+    const result = await f.adapter.applyFlashcards(request(plan, 'large-46'));
+    success(result);
+    expect(result.created).toHaveLength(46);
+    expect(result.answerLines).toHaveLength(42);
+    expect(f.plugin.rem.findMany.mock.calls.some(([ids]) => ids.length === 46)).toBe(true);
+    expect(f.plugin.rem.findMany.mock.calls.every(([ids]) => ids.length <= 100)).toBe(true);
+  });
+  it('chunks scaffolds beyond one internal call without exposing a plan limit', async () => {
+    const f = await fixture();
+    const plan: FlashcardsPlanInput = {
+      schemaVersion: 1,
+      dailyRemId: 'daily',
+      homeRootId: 'home',
+      tagRemId: 'tag',
+      newCards: [
+        {
+          key: 'many-answers',
+          question: 'What are all the answers?',
+          answer: Array.from({ length: 120 }, (_, index) => [`Answer ${index}`]),
+        },
+      ],
+    };
+    const result = await f.adapter.applyFlashcards(request(plan, 'chunked-122'));
+    success(result);
+    expect(result.created).toHaveLength(121);
+    expect(result.answerLines).toHaveLength(120);
+    expect(f.plugin.rem.createTreeWithMarkdown.mock.calls.length).toBeGreaterThan(1);
+  });
+  it('recovers unknown creation when every exact scaffold ID is present', async () => {
+    const f = await fixture();
+    const plan = flashPlan();
+    vi.spyOn(MockRem.prototype, 'setIsCollapsed').mockRejectedValueOnce(
+      new Error('Collapse interrupted')
+    );
+    const first = await f.adapter.applyFlashcards(request(plan, 'recover-exact'));
+    expect(first.status).toBe('partial');
+    const stored = await loadJournal<{
+      ids: Record<string, string>;
+      steps: Record<string, { state: string }>;
+    }>(f, 'flashcards', 'recover-exact');
+    stored.ids = {};
+    stored.steps['create:cards'].state = 'unknown';
+    await f.plugin.storage.setLocal(journalKey('flashcards', 'recover-exact'), stored);
+    const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+    const recovered = await adapter(f.plugin).applyFlashcards(request(plan, 'recover-exact'));
+    success(recovered);
+    expect(recovered.ids).toEqual(first.ids);
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+  });
+  it('does not recover unknown creation after a placeholder changed', async () => {
+    const f = await fixture();
+    const plan = flashPlan();
+    vi.spyOn(MockRem.prototype, 'setIsCollapsed').mockRejectedValueOnce(
+      new Error('Collapse interrupted')
+    );
+    const first = await f.adapter.applyFlashcards(request(plan, 'recover-changed'));
+    expect(first.status).toBe('partial');
+    const answer = await rem(f, first.ids['answer:a:0']);
+    answer.text = ['Changed externally'];
+    const stored = await loadJournal<{
+      ids: Record<string, string>;
+      steps: Record<string, { state: string }>;
+    }>(f, 'flashcards', 'recover-changed');
+    stored.ids = {};
+    stored.steps['create:cards'].state = 'unknown';
+    await f.plugin.storage.setLocal(journalKey('flashcards', 'recover-changed'), stored);
+    const creations = f.plugin.rem.createTreeWithMarkdown.mock.calls.length;
+    const result = await adapter(f.plugin).applyFlashcards(request(plan, 'recover-changed'));
+    expect(result.status).toBe('unknown');
+    expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(creations);
+  });
   it.each([undefined, false] as const)(
     'does not add Card Cluster when cardCluster is %s',
     async (cardCluster) => {
@@ -419,16 +506,16 @@ describe('public task operation controls', () => {
       new Error('Collapse failed')
     );
     const first = await f.adapter.applyFlashcards(request(flashPlan()));
-    expect(first.status).toBe('unknown');
-    const stored = await loadJournal<{ steps: Record<string, { remIds: string[] }> }>(
-      f,
-      'flashcards'
-    );
+    expect(first.status).toBe('partial');
+    const stored = await loadJournal<{
+      steps: Record<string, { state: string; remIds: string[] }>;
+    }>(f, 'flashcards');
+    expect(stored.steps['create:cards'].state).toBe('applied');
     expect(stored.steps['create:cards'].remIds).toHaveLength(5);
     expect(first.steps.find((step) => step.key === 'create:cards')?.remIds).toEqual(
       stored.steps['create:cards'].remIds
     );
-    expect((await adapter(f.plugin).applyFlashcards(request(flashPlan()))).status).toBe('unknown');
+    success(await adapter(f.plugin).applyFlashcards(request(flashPlan())));
     expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledOnce();
     expect(f.plugin.app.transaction).not.toHaveBeenCalled();
   });
@@ -448,49 +535,21 @@ describe('public task operation controls', () => {
       expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(1);
     }
   );
-  it.each([45001, 60001])(
-    'starts no new scaffold mutations after a tree call returns at %i ms',
-    async (elapsedMs) => {
-      const f = await fixture();
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
-      const mutations = [
-        vi.spyOn(MockRem.prototype, 'setParent'),
-        vi.spyOn(MockRem.prototype, 'remove'),
-        vi.spyOn(MockRem.prototype, 'addTag'),
-        vi.spyOn(MockRem.prototype, 'setIsCollapsed'),
-      ];
-      const createTree = f.plugin.rem.createTreeWithMarkdown.getMockImplementation()!;
-      f.plugin.rem.createTreeWithMarkdown.mockImplementation(async (...args) => {
-        const tree = await createTree(...args);
-        clock.mockReturnValue(elapsedMs);
-        for (const mutation of mutations) mutation.mockClear();
-        return tree;
-      });
-      expect((await f.adapter.applyFlashcards(request(flashPlan()))).status).toBe('unknown');
-      for (const mutation of mutations) expect(mutation).not.toHaveBeenCalled();
-      expect((await adapter(f.plugin).applyFlashcards(request(flashPlan()))).status).toBe(
-        'unknown'
-      );
-      expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(1);
-      const independent = await f.adapter.createNote({ title: 'Independent', parentId: 'daily' });
-      expect(independent.remIds).toHaveLength(1);
-    }
-  );
-  it('does not tag a cluster after slow native tree creation', async () => {
+  it('continues after wall-clock time that exceeded the old task deadline', async () => {
     const f = await fixture();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
     const tag = vi.spyOn(MockRem.prototype, 'addTag');
     const createTree = f.plugin.rem.createTreeWithMarkdown.getMockImplementation()!;
     f.plugin.rem.createTreeWithMarkdown.mockImplementation(async (...args) => {
       const tree = await createTree(...args);
-      clock.mockReturnValue(45001);
+      clock.mockReturnValue(60001);
       return tree;
     });
-    expect((await f.adapter.applyFlashcards(request(flashPlan()))).status).toBe('unknown');
-    expect(tag).not.toHaveBeenCalled();
+    success(await f.adapter.applyFlashcards(request(flashPlan())));
+    expect(tag).toHaveBeenCalled();
     expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(1);
   });
-  it('does not tag a single card after its in-flight collapse crosses the deadline', async () => {
+  it('continues tagging after an in-flight collapse crosses the old deadline', async () => {
     const f = await fixture();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
     const tag = vi.spyOn(MockRem.prototype, 'addTag');
@@ -504,9 +563,9 @@ describe('public task operation controls', () => {
       });
     const plan = flashPlan();
     plan.newCards = plan.newCards!.slice(0, 1);
-    expect((await f.adapter.applyFlashcards(request(plan))).status).toBe('unknown');
+    success(await f.adapter.applyFlashcards(request(plan)));
     expect(collapse).toHaveBeenCalledTimes(1);
-    expect(tag).not.toHaveBeenCalled();
+    expect(tag).toHaveBeenCalled();
   });
   it('applies Wiki native references and cross-page summaries without confusing index ownership', async () => {
     const f = await fixture();
@@ -763,27 +822,23 @@ describe('Wiki replay ownership and plain-state guards', () => {
     expect((await rem(f, entryId)).parent).toBeUndefined();
     expect(f.plugin.rem.createRem).toHaveBeenCalledTimes(3);
   });
-  it.each(['gate', 'deadline'])('rechecks %s after awaited index ancestry', async (boundary) => {
+  it('rechecks the write gate after awaited index ancestry', async () => {
     const f = await fixture();
     const e = await groupedPage(f);
     e.plan.pages[0].summary = ['Changed'];
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
     let patchRead = false;
     vi.spyOn(e.entry, 'getTagRems').mockImplementation(async () => {
       patchRead = true;
       return [];
     });
     vi.spyOn(e.section, 'getParentRem').mockImplementation(async () => {
-      if (patchRead) {
-        if (boundary === 'gate') f.adapter.updateSettings({ acceptWriteOperations: false });
-        else clock.mockReturnValue(45001);
-      }
+      if (patchRead) f.adapter.updateSettings({ acceptWriteOperations: false });
       return f.index;
     });
     const setter = vi.spyOn(e.entry, 'setText');
     const result = await f.adapter.applyWiki(request(e.plan));
     expect(result.complete).toBe(false);
-    expect(result.errors[0].code).toBe(boundary === 'gate' ? 'write_disabled' : 'incomplete');
+    expect(result.errors[0].code).toBe('write_disabled');
     expect(setter).not.toHaveBeenCalled();
   });
   it('rejects late parent drift in final proof instead of reporting success', async () => {
@@ -888,10 +943,11 @@ describe('durable journal and bounded recovery', () => {
       ids: Record<string, string>;
     }>(f, 'flashcards');
     expect(stored!.steps['create:cards'].state).toBe('started');
-    expect(stored!.ids['card:a']).toBe(first.ids['card:a']);
-    expect(stored!.ids['card:a']).toBeTruthy();
+    expect(stored!.ids['card:a']).toBeUndefined();
+    expect(first.steps.find((step) => step.key === 'create:cards')?.remIds).toHaveLength(5);
     const again = await adapter(f.plugin).applyFlashcards(request(flashPlan()));
-    expect(again.status).toBe('unknown');
+    success(again);
+    expect(again.ids['card:a']).toBeTruthy();
     expect(f.plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(count);
   });
   it('does not overwrite a verified Wiki node restored externally to its original hash during partial work', async () => {
@@ -941,7 +997,11 @@ describe('durable journal and bounded recovery', () => {
       const text = vi.spyOn(MockRem.prototype, 'setText');
       const power = vi.spyOn(MockRem.prototype, 'addPowerup');
       const result = await adapter(f.plugin).applyFlashcards(request(p));
-      expect(result.status).toBe('conflict');
+      if (drift === 'mapping') {
+        success(result);
+        expect(result.ids['card:a']).toBe(first.ids['card:a']);
+        expect(result.ids['card:b']).toBe(first.ids['card:b']);
+      } else expect(result.status).toBe('conflict');
       expect(text).not.toHaveBeenCalled();
       expect(power).not.toHaveBeenCalled();
     }

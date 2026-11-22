@@ -86,6 +86,7 @@ interface Journal {
   cardBaselines: Record<string, string>;
   textPreconditions: Record<string, string>;
   textCompleted: Record<string, string>;
+  prepared: boolean;
   batchDate: string;
   completed: boolean;
 }
@@ -140,14 +141,22 @@ function canonical(v: unknown): unknown {
   return v;
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const READ_BATCH_SIZE = 100;
+/** Internal wire partition. It is not a user-facing task limit. */
+const SCAFFOLD_NODES_PER_CALL = 100;
 const nativeIds = (v: PluginRem[]): string[] => {
   if (!Array.isArray(v) || v.some((r) => !r || typeof r._id !== 'string' || !r._id))
     throw new Error('Malformed SDK Rem list');
   return v.map((r) => r._id);
 };
+function expectedScaffoldCount(p: FlashcardsPlan): number {
+  return (p.newCards ?? []).reduce(
+    (count, card) => count + 1 + card.answer.length,
+    clustered(p) ? 1 : 0
+  );
+}
 export class TaskOperations {
   private busy = false;
-  private deadline = 0;
   private operationKernel?: OperationKernel;
   constructor(private deps: Dependencies) {}
   async apply(
@@ -184,7 +193,6 @@ export class TaskOperations {
       return receipt;
     }
     this.busy = true;
-    this.deadline = Date.now() + 45000;
     let j: Journal | undefined;
     try {
       const kb = await this.deps.plugin.kb.getCurrentKnowledgeBaseData();
@@ -218,9 +226,21 @@ export class TaskOperations {
         cardBaselines: {},
         textPreconditions: {},
         textCompleted: {},
+        prepared: false,
         batchDate: startedAt.slice(0, 10),
         completed: false,
       };
+      const required = requiredTaskCapabilities(kind, input.plan),
+        missing = required.filter((capability) => !this.deps.capabilities?.has(capability));
+      if (this.deps.capabilities && missing.length)
+        throw new TaskError(
+          'missing_capability',
+          `Missing SDK capabilities: ${missing.join(', ')}`
+        );
+      const journal = j,
+        save = () => this.mutate(() => this.deps.journal.setLocal(storageKey, journal));
+      if (kind === 'flashcards')
+        await this.recoverKnownScaffold(input.plan as FlashcardsPlan, journal, save);
       if (Object.values(j.steps).some((s) => ['started', 'unknown'].includes(s.state)))
         throw new TaskError(
           'unknown',
@@ -239,11 +259,8 @@ export class TaskOperations {
           )
             j.ids[k] = step.remIds[0];
         }
-      const journal = j,
-        save = () => this.mutate(() => this.deps.journal.setLocal(storageKey, journal));
       this.operationKernel = new OperationKernel({
         canWrite: this.deps.canWrite,
-        deadline: this.deadline,
         persist: save,
         getStep: (step) => {
           const state = journal.steps[step]?.state;
@@ -262,13 +279,6 @@ export class TaskOperations {
               : []
           ),
       });
-      const required = requiredTaskCapabilities(kind, input.plan),
-        missing = required.filter((capability) => !this.deps.capabilities?.has(capability));
-      if (this.deps.capabilities && missing.length)
-        throw new TaskError(
-          'missing_capability',
-          `Missing SDK capabilities: ${missing.join(', ')}`
-        );
       await this.preflight(kind, input.plan, j);
       receipt.checks.push({
         kind: 'preflight',
@@ -328,7 +338,6 @@ export class TaskOperations {
     return receipt;
   }
   private assertCanMutate(): void {
-    if (Date.now() > this.deadline) throw new TaskError('incomplete', 'Task deadline exhausted');
     if (!this.deps.canWrite()) throw new TaskError('write_disabled', 'Bridge writes disabled');
   }
   private async mutate<T>(fn: () => Promise<T>, beforeWrite?: () => Promise<void>): Promise<T> {
@@ -340,6 +349,27 @@ export class TaskOperations {
     const r = await this.deps.plugin.rem.findOne(id);
     if (!r || r._id !== id) throw new TaskError('missing_rem', 'Rem missing or inaccessible', id);
     return r;
+  }
+  private async rems(ids: readonly string[]): Promise<PluginRem[]> {
+    const unique = [...new Set(ids)];
+    const found = new Map<string, PluginRem>();
+    for (let offset = 0; offset < unique.length; offset += READ_BATCH_SIZE) {
+      const chunk = unique.slice(offset, offset + READ_BATCH_SIZE);
+      const values = await this.deps.plugin.rem.findMany(chunk);
+      if (!Array.isArray(values))
+        throw new TaskError('incomplete', 'SDK did not return a Rem array');
+      for (const rem of values) {
+        if (!rem || typeof rem._id !== 'string' || !chunk.includes(rem._id))
+          throw new TaskError('incomplete', 'SDK returned an unexpected Rem');
+        if (found.has(rem._id)) throw new TaskError('incomplete', 'SDK returned a duplicate Rem');
+        found.set(rem._id, rem);
+      }
+    }
+    return unique.map((id) => {
+      const rem = found.get(id);
+      if (!rem) throw new TaskError('missing_rem', 'Rem missing or inaccessible', id);
+      return rem;
+    });
   }
   private add(
     j: Journal,
@@ -661,7 +691,7 @@ export class TaskOperations {
     if (old) {
       if (['started', 'unknown'].includes(old.state))
         throw new TaskError('unknown', 'Creation outcome unknown');
-      for (const id of old.remIds) await this.rem(id);
+      await this.rems(old.remIds);
       return old.remIds;
     }
     if (j.completed) throw new TaskError('conflict', 'Completed task cannot create missing object');
@@ -673,17 +703,7 @@ export class TaskOperations {
       if (!ids.length || new Set(ids).size !== ids.length) throw new Error('Ambiguous created IDs');
       j.steps[k].remIds = ids;
       await save();
-      for (const id of ids) {
-        const r = await this.rem(id);
-        j.createdTextHashes[id] = await contentHash(r.text);
-        j.createdParentIds[id] = (await r.getParentRem())?._id ?? null;
-        j.createdChildrenIds[id] = nativeIds(await r.getChildrenRem());
-        j.createdTagIds[id] = nativeIds(await r.getTagRems()).sort();
-        this.add(j, 'created', k, id);
-      }
-      j.steps[k] = { key: k, state: 'applied', remIds: ids };
-      await this.operationKernel?.checkpoint(k, 'applied');
-      if (!this.operationKernel) await save();
+      await this.rememberCreated(k, ids, await this.rems(ids), j, save);
       return ids;
     } catch (e) {
       j.steps[k].state = 'unknown';
@@ -697,6 +717,27 @@ export class TaskOperations {
         }
       throw new TaskError('unknown', `Creation ${k} may have succeeded; reconcile exact IDs`);
     }
+  }
+  private async rememberCreated(
+    key: string,
+    ids: string[],
+    rems: PluginRem[],
+    j: Journal,
+    save: () => Promise<void>
+  ): Promise<void> {
+    const byId = new Map(rems.map((rem) => [rem._id, rem]));
+    for (const id of ids) {
+      const rem = byId.get(id);
+      if (!rem) throw new TaskError('missing_rem', 'Created Rem is missing', id);
+      j.createdTextHashes[id] = await contentHash(rem.text);
+      j.createdParentIds[id] = (await rem.getParentRem())?._id ?? null;
+      j.createdChildrenIds[id] = nativeIds(await rem.getChildrenRem());
+      j.createdTagIds[id] = nativeIds(await rem.getTagRems()).sort();
+      this.add(j, 'created', key, id);
+    }
+    j.steps[key] = { key, state: 'applied', remIds: ids };
+    await this.operationKernel?.checkpoint(key, 'applied');
+    if (!this.operationKernel) await save();
   }
   private async createPlain(
     k: string,
@@ -938,7 +979,7 @@ export class TaskOperations {
     }
   }
   private async bindScaffold(p: FlashcardsPlan, ids: string[], j: Journal): Promise<void> {
-    const all = await Promise.all(ids.map((id) => this.rem(id))),
+    const all = await this.rems(ids),
       base = scaffoldParent(p),
       roots: PluginRem[] = [];
     for (const r of all) if ((await r.getParentRem())?._id === base) roots.push(r);
@@ -1010,13 +1051,11 @@ export class TaskOperations {
       expected = cards.reduce((n, c) => n + 1 + c.answer.length, clustered(p) ? 1 : 0);
     if (bound.size !== expected || ids.length !== expected || ids.some((id) => !bound.has(id)))
       throw new TaskError('conflict', 'Inconsistent scaffold bindings');
-    const root = p.parentRemId ? undefined : await this.rem(j.ids.root),
-      remCards = await Promise.all(cards.map((c) => this.rem(j.ids[`card:${c.key}`]))),
-      answers = await Promise.all(
-        cards.map((c) =>
-          Promise.all(c.answer.map((_, i) => this.rem(j.ids[`answer:${c.key}:${i}`])))
-        )
-      );
+    const all = await this.rems(needed.map((key) => j.ids[key]!)),
+      byId = new Map(all.map((rem) => [rem._id, rem])),
+      root = p.parentRemId ? undefined : byId.get(j.ids.root)!,
+      remCards = cards.map((c) => byId.get(j.ids[`card:${c.key}`]!)!),
+      answers = cards.map((c) => c.answer.map((_, i) => byId.get(j.ids[`answer:${c.key}:${i}`]!)!));
     const baseline = (id: string, parent: string, children: string[]) => {
       if (j.createdParentIds[id] !== parent || !same(j.createdChildrenIds[id], children))
         throw new TaskError('conflict', 'Baseline disagrees with semantic bindings', id);
@@ -1064,6 +1103,164 @@ export class TaskOperations {
     j.textCompleted[id] = desired;
     await save();
   }
+  private async recoverKnownScaffold(
+    p: FlashcardsPlan,
+    j: Journal,
+    save: () => Promise<void>
+  ): Promise<void> {
+    const step = j.steps['create:cards'];
+    if (!step || !['started', 'unknown'].includes(step.state)) return;
+    if (step.remIds.length !== expectedScaffoldCount(p)) return;
+    try {
+      const rems = await this.rems(step.remIds);
+      await this.bindScaffold(p, step.remIds, j);
+      this.assertPlaceholderScaffold(p, rems, j);
+      await this.rememberCreated('create:cards', step.remIds, rems, j, save);
+      delete step.error;
+      await save();
+    } catch (error) {
+      step.error = error instanceof Error ? error.message : String(error);
+      try {
+        await save();
+      } catch {
+        // A persisted unknown state still blocks unsafe replay.
+      }
+    }
+  }
+  private assertPlaceholderScaffold(p: FlashcardsPlan, rems: PluginRem[], j: Journal): void {
+    const byId = new Map(rems.map((rem) => [rem._id, rem]));
+    const expect = (key: string, text: string): void => {
+      const id = j.ids[key];
+      const rem = id ? byId.get(id) : undefined;
+      if (!rem || !same(rem.text, [text]))
+        throw new TaskError('conflict', 'Scaffold placeholder changed before recovery', id);
+    };
+    if (clustered(p)) expect('root', 'Task card cluster');
+    for (const [cardIndex, card] of (p.newCards ?? []).entries()) {
+      expect(`card:${card.key}`, `Task card ${cardIndex + 1}`);
+      card.answer.forEach((_, answerIndex) =>
+        expect(`answer:${card.key}:${answerIndex}`, `Answer ${answerIndex + 1}`)
+      );
+    }
+  }
+  private async createScaffold(
+    p: FlashcardsPlan,
+    j: Journal,
+    save: () => Promise<void>
+  ): Promise<string[]> {
+    const cards = p.newCards!,
+      expected = expectedScaffoldCount(p),
+      ids: string[] = [];
+    const append = async (markdown: string, parentId: string): Promise<PluginRem[]> => {
+      this.assertCanMutate();
+      const rems = await this.deps.plugin.rem.createTreeWithMarkdown(markdown, parentId);
+      const createdIds = nativeIds(rems ?? []);
+      if (!createdIds.length) throw new TaskError('incomplete', 'Scaffold chunk created no Rems');
+      ids.push(...createdIds);
+      j.steps['create:cards'].remIds = [...ids];
+      await save();
+      return rems;
+    };
+    if (expected <= SCAFFOLD_NODES_PER_CALL) {
+      const lines = cards
+        .map(
+          (card, index) =>
+            `- Task card ${index + 1} ===\n${card.answer
+              .map((_, answerIndex) => `    - Answer ${answerIndex + 1}`)
+              .join('\n')}`
+        )
+        .join('\n');
+      const markdown = clustered(p)
+        ? 'Task card cluster\n' +
+          lines
+            .split('\n')
+            .map((line) => '  ' + line)
+            .join('\n')
+        : lines;
+      await append(markdown, scaffoldParent(p));
+      if (ids.length !== expected)
+        throw new TaskError('incomplete', 'Scaffold count does not match the plan');
+      return ids;
+    }
+
+    let parentId = scaffoldParent(p);
+    if (clustered(p)) {
+      const roots = await append('Task card cluster', p.dailyRemId!);
+      if (roots.length !== 1)
+        throw new TaskError('incomplete', 'Cluster scaffold did not create one root');
+      parentId = roots[0]._id;
+    }
+    for (let cardIndex = 0; cardIndex < cards.length; cardIndex++) {
+      const card = cards[cardIndex],
+        firstAnswerCount = Math.min(card.answer.length, SCAFFOLD_NODES_PER_CALL - 1),
+        firstLines = [
+          `- Task card ${cardIndex + 1} ===`,
+          ...card.answer
+            .slice(0, firstAnswerCount)
+            .map((_, answerIndex) => `    - Answer ${answerIndex + 1}`),
+        ],
+        first = await append(firstLines.join('\n'), parentId);
+      if (first.length !== firstAnswerCount + 1)
+        throw new TaskError('incomplete', 'Card scaffold chunk has an unexpected shape');
+      const cardRemId = first[0]._id;
+      for (
+        let answerIndex = firstAnswerCount;
+        answerIndex < card.answer.length;
+        answerIndex += SCAFFOLD_NODES_PER_CALL
+      ) {
+        const answerCount = Math.min(card.answer.length - answerIndex, SCAFFOLD_NODES_PER_CALL),
+          lines = Array.from(
+            { length: answerCount },
+            (_, offset) => `- Answer ${answerIndex + offset + 1}`
+          );
+        const chunk = await append(lines.join('\n'), cardRemId);
+        if (chunk.length !== answerCount)
+          throw new TaskError('incomplete', 'Answer scaffold chunk has an unexpected shape');
+      }
+    }
+    if (ids.length !== expected)
+      throw new TaskError('incomplete', 'Scaffold chunk count does not match the plan');
+    return ids;
+  }
+  private async prepareScaffold(
+    p: FlashcardsPlan,
+    ids: string[],
+    j: Journal,
+    save: () => Promise<void>
+  ): Promise<void> {
+    if (j.prepared) return;
+    const initial = await this.rems(ids);
+    for (const rem of initial) {
+      if (!(await rem.getChildrenRem()).length) continue;
+      this.assertCanMutate();
+      await rem.setIsCollapsed(true, p.dailyRemId!);
+    }
+    if (explicitTags(p)) {
+      for (const [id, tagIds] of declaredTags(p, j.ids)) {
+        const rem = initial.find((candidate) => candidate._id === id);
+        if (!rem) throw new TaskError('missing_rem', 'Scaffold Rem is missing', id);
+        const current = new Set(nativeIds(await rem.getTagRems()));
+        for (const tagId of tagIds) {
+          if (current.has(tagId)) continue;
+          this.assertCanMutate();
+          await rem.addTag(tagId);
+        }
+      }
+    } else if (!p.parentRemId) {
+      const root = initial.find((candidate) => candidate._id === j.ids.root);
+      if (!root) throw new TaskError('missing_rem', 'Scaffold root is missing', j.ids.root);
+      if (!nativeIds(await root.getTagRems()).includes(p.tagRemId!)) {
+        this.assertCanMutate();
+        await root.addTag(p.tagRemId!);
+      }
+    }
+    const refreshed = await this.rems(ids);
+    for (const rem of refreshed) {
+      j.createdTagIds[rem._id] = nativeIds(await rem.getTagRems()).sort();
+    }
+    j.prepared = true;
+    await save();
+  }
   private async flashcards(
     p: FlashcardsPlan,
     j: Journal,
@@ -1077,48 +1274,10 @@ export class TaskOperations {
     const cards = p.newCards ?? [];
     const cardCluster = p.cardCluster === true && cards.length > 1 && Boolean(p.title);
     if (cards.length) {
-      const ids = await this.create('create:cards', j, save, async () => {
-        const lines = cards
-          .map(
-            (card, index) =>
-              `- Task card ${index + 1} ===\n${card.answer.map((_, n) => `    - Answer ${n + 1}`).join('\n')}`
-          )
-          .join('\n');
-        const markdown = clustered(p)
-          ? 'Task card cluster\n' +
-            lines
-              .split('\n')
-              .map((line) => '  ' + line)
-              .join('\n')
-          : lines;
-        this.assertCanMutate();
-        const rems = await this.deps.plugin.rem.createTreeWithMarkdown(markdown, scaffoldParent(p));
-        const ids = nativeIds(rems ?? []);
-        j.steps['create:cards'].remIds = ids;
-        await save();
-        await this.bindScaffold(p, ids, j);
-        for (const rem of rems ?? []) {
-          if ((await rem.getChildrenRem()).length) {
-            this.assertCanMutate();
-            await rem.setIsCollapsed(true, p.dailyRemId!);
-          }
-        }
-        // Tags are written inside the creation action so createdTagIds records the final set.
-        if (explicit)
-          for (const [id, tagIds] of declaredTags(p, j.ids)) {
-            const r = await this.rem(id);
-            for (const tagId of tagIds) {
-              this.assertCanMutate();
-              await r.addTag(tagId);
-            }
-          }
-        else if (!p.parentRemId) {
-          const root = await this.rem(j.ids.root);
-          this.assertCanMutate();
-          await root.addTag(p.tagRemId!);
-        }
-        return ids;
-      });
+      const ids = await this.create('create:cards', j, save, () => this.createScaffold(p, j, save));
+      await this.bindScaffold(p, ids, j);
+      await save();
+      await this.prepareScaffold(p, ids, j, save);
       const bound = await this.boundScaffold(p, ids, j);
       for (let i = 0; i < cards.length; i++) {
         const q = cards[i].question;

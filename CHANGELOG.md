@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-11-22
+
+### Changed
+
+- Remove artificial flashcard and Wiki task caps on cards, answer lines, patches,
+  pages, nodes, aliases, receipts and plan-file size. Large flashcard scaffolds are
+  partitioned internally without exposing a user-facing count limit.
+- Queue SDK requests when the 32-request in-flight window is full instead of
+  rejecting a legitimate burst. Batch exact-ID reads with `findMany`.
+- Separate scaffold creation from later binding and content writes. Durably saved
+  scaffold IDs become `applied`; a later failure is `partial` and can resume under
+  the same idempotency key. Reconcile an unknown scaffold when all exact IDs are
+  present and their structure still matches.
+- Remove the fixed 45-second command-wide task deadline. Individual SDK calls retain
+  their 15-second deadline while long tasks remain durable and resumable.
+
 ## [0.26.5] - 2026-11-22
 
 ### Added

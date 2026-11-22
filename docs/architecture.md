@@ -37,7 +37,10 @@ There is no HTTP MCP endpoint, OAuth provider, MCPB proxy, daemon or semver matc
    catalog hash before generating remote method bindings.
 4. Every request carries an ID, KB binding and deadline. The plugin validates
    live permissions immediately before invoking an allowlisted SDK method.
-5. The CLI closes all sockets and its listener on completion or failure.
+5. Up to 32 SDK requests are in flight over the command-owned socket. Additional
+   requests wait in FIFO order and are admitted as responses free capacity; a
+   normal burst is throttled rather than rejected.
+6. The CLI closes all sockets and its listener on completion or failure.
 
 Concurrent commands fail on the occupied port; no process is stopped automatically.
 The plugin retries at delays up to 1.5 seconds while idle. Browser timer throttling
@@ -54,6 +57,9 @@ SDK 0.0.46 does not acknowledge a rejected callback and can block the editor. Se
 additive-write and rejected atomic-command boundary. Timeout or disconnect does
 not prove cancellation or rollback. No running command reconnects or replays writes
 automatically. New plugin sessions wait only for prior individual SDK calls to settle.
+Tasks have no command-wide 45-second deadline; every task mutation remains guarded by
+its journal, and a long-running operation can be resumed under the same idempotency
+key instead of being truncated by wall-clock time.
 
 The trust boundary is the current operating-system user. Origin validation blocks
 ordinary webpages, not native local processes that can forge headers.
@@ -78,9 +84,12 @@ discard the entire cache after any mutation. Values never survive the owning
 `DirectClient`, so batch commands can benefit without leaking state across commands.
 
 `OperationKernel` is the common mutation policy. Task and workspace journals both
-persist a `started` step before a native write, advance to `verified` only after
-their own readback, and use `unknown` plus exact-ID reconciliation after uncertain
-failure. Publication and business-specific proof remain in their owning modules.
+persist a `started` step before a native write and advance to `verified` only
+after their own readback. Flashcard scaffolding advances to `applied` as soon as
+all returned IDs are durably saved; later binding and content failures remain
+`partial` and resume under the same key. `unknown` plus exact-ID reconciliation
+is reserved for outcomes that cannot identify the affected objects. Publication
+and business-specific proof remain in their owning modules.
 
 See [the approved decision](adr/0001-direct-cli.md),
 [read receipts](guides/read-receipts.md) and [task plans](guides/task-plans.md).

@@ -63,7 +63,6 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "maxItems": 20,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -84,7 +83,6 @@
             },
             "newCards": {
               "minItems": 1,
-              "maxItems": 7,
               "type": "array",
               "items": {
                 "type": "object",
@@ -135,7 +133,6 @@
                   },
                   "answer": {
                     "minItems": 1,
-                    "maxItems": 100,
                     "type": "array",
                     "items": {
                       "minItems": 1,
@@ -199,7 +196,6 @@
             },
             "answerPatches": {
               "minItems": 1,
-              "maxItems": 100,
               "type": "array",
               "items": {
                 "type": "object",
@@ -289,7 +285,6 @@
             },
             "reusedCardRemIds": {
               "minItems": 1,
-              "maxItems": 100,
               "type": "array",
               "items": {
                 "type": "string",
@@ -362,7 +357,6 @@
               "pattern": "\\S"
             },
             "pages": {
-              "maxItems": 10,
               "type": "array",
               "items": {
                 "type": "object",
@@ -392,7 +386,6 @@
                     "pattern": "\\S"
                   },
                   "aliases": {
-                    "maxItems": 20,
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -402,7 +395,6 @@
                     }
                   },
                   "nodes": {
-                    "maxItems": 100,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -536,7 +528,6 @@
               }
             },
             "answerPatches": {
-              "maxItems": 100,
               "type": "array",
               "items": {
                 "type": "object",
@@ -714,6 +705,7 @@
       "create": [
         "namespace:rem.createTreeWithMarkdown",
         "namespace:rem.findOne",
+        "namespace:rem.findMany",
         "namespace:richText.rem",
         "rem:addPowerup",
         "rem:addTag",
@@ -745,6 +737,7 @@
       "pages": [
         "namespace:rem.createRem",
         "namespace:rem.findOne",
+        "namespace:rem.findMany",
         "namespace:richText.rem",
         "rem:getAliases",
         "rem:getCards",

@@ -37,8 +37,12 @@ describe('task capability declarations', () => {
     expect(requiredTaskCapabilities('flashcards', create)).toContain(
       'namespace:rem.createTreeWithMarkdown'
     );
+    expect(requiredTaskCapabilities('flashcards', create)).toContain('namespace:rem.findMany');
     expect(requiredTaskCapabilities('flashcards', patchOnly)).not.toContain(
       'namespace:rem.createTreeWithMarkdown'
+    );
+    expect(requiredTaskCapabilities('flashcards', patchOnly)).not.toContain(
+      'namespace:rem.findMany'
     );
     expect(requiredTaskCapabilities('flashcards', reuseOnly)).not.toContain('rem:setText');
     expect(requiredTaskCapabilities('flashcards', mixed)).toEqual(

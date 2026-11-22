@@ -3,6 +3,7 @@ import type { FlashcardsPlan, WikiPlan } from '../schemas/task-schemas.js';
 export const FLASHCARD_CREATE_CAPABILITIES = [
   'namespace:rem.createTreeWithMarkdown',
   'namespace:rem.findOne',
+  'namespace:rem.findMany',
   'namespace:richText.rem',
   'rem:addPowerup',
   'rem:addTag',
@@ -32,6 +33,7 @@ export const FLASHCARD_REUSE_CAPABILITIES = ['namespace:rem.findOne', 'rem:getCa
 export const WIKI_CREATE_CAPABILITIES = [
   'namespace:rem.createRem',
   'namespace:rem.findOne',
+  'namespace:rem.findMany',
   'namespace:richText.rem',
   'rem:getAliases',
   'rem:getCards',
