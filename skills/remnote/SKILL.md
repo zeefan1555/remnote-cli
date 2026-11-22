@@ -23,7 +23,10 @@ Apply the connection prerequisites below to commands that contact RemNote.
 - RemNote desktop is open with protocol 2 RemNote CLI Bridge (`remnote-cli-bridge`) enabled.
 - No pairing token, endpoint, port, KB selection, or Bridge write setting is required. The CLI uses the live active KB.
 - Official content and `KnowledgeBaseInfo: Read` permissions are granted.
-- Run `remnote-cli status` and verify plugin ID, active KB, protocol 2 and the live SDK catalog hash.
+- Run `remnote-cli doctor --text` for the aggregated diagnosis. If it fails,
+  inspect its named check before retrying; `doctor --offline` never opens the Bridge.
+- `status` remains the focused handshake read for plugin ID, active KB, protocol 2
+  and SDK catalog hash.
 - No MCP endpoint or business daemon is required. Local plugin loading uses a
   file-only static host; product versions need not match.
 - Treat the current operating-system user as the trust boundary. Origin checking rejects ordinary webpages, not native same-user programs.
@@ -32,8 +35,28 @@ See [installation](../../docs/guides/installation.md) and
 [configuration](../../docs/guides/configuration.md).
 
 For machine-readable schemas and capability requirements while RemNote is closed,
-run `remnote-cli contract --json` or select one schema with
+run `remnote-cli contract`, `remnote-cli schema` or
+`remnote-cli schema search`. Select one plan schema with
 `remnote-cli contract --schema flashcards|wiki|workspace`.
+
+## Output Contract
+
+JSON success is one stdout envelope:
+
+```json
+{"schemaVersion":2,"ok":true,"data":{}}
+```
+
+JSON failure is one stderr envelope with `error.type`, `error.subtype`,
+`error.message`, optional `hint`, `retryable` and optional
+`details`. Exit codes are 0 success, 1 internal, 2 usage, 3 configuration or
+connection unavailable, 4 missing target or conflict, 5 unknown write outcome, and
+6 unsupported capability. Read task receipts from `data` on success and from
+`error.details` on a failed or incomplete result.
+
+`unknown_outcome` means a write may have changed RemNote and is never
+retryable. Reconcile exact affected IDs before another write. Text mode remains
+human-readable and strips terminal control characters.
 
 ## Safety
 
@@ -53,8 +76,10 @@ Prefer one `remnote-cli` process per turn. Do not shell-chain separate processes
 each process owns the loopback port, and the next process can fail with
 `CLI port occupied`. Use `batch --file commands.jsonl` to run several argv
 commands on one connection, in order, and read each `results[]` entry.
-Help, `--version`, and usage errors stay inside that envelope and later commands
-still run. Put `--allow-destructive` on `batch` when an inner `sdk` call needs it.
+Each entry includes `ok`, `exitCode`, and either `result` or a
+structured `error`. Help, `--version`, and usage errors stay inside that
+envelope and later commands still run. Put `--allow-destructive` on
+`batch` when an inner `sdk` call needs it.
 `read` and `list-children` also accept multiple Rem IDs in one call. One ID keeps
 the previous JSON object; several IDs return `results` keyed by ID.
 Prefer file payloads (`--content-file`, `--plan`, `--request`,
@@ -70,12 +95,17 @@ after explicit authorization.
 
 ```bash
 remnote-cli status
+remnote-cli doctor --text
+remnote-cli doctor --offline
+remnote-cli schema
 remnote-cli search "topic" --parent-id ROOT_ID
+remnote-cli search "topic" --all
 remnote-cli search "topic" --cards-only --include-review-stats
 remnote-cli search-by-tag --tag-id TAG_ID
 remnote-cli read REM_ID --content-mode structured --depth 1 --child-limit 100
 remnote-cli read REM_ID OTHER_ID --content-mode none
 remnote-cli list-children ROOT_ID
+remnote-cli list-children ROOT_ID --all
 remnote-cli list-children ROOT_ID OTHER_ID
 remnote-cli batch --file commands.jsonl
 remnote-cli inspect REM_ID --fields elements,markdown,tags,parent,portal,cards
@@ -90,13 +120,17 @@ remnote-cli sdk rem object-get-children-rem --help
 
 JSON is preferred for ID-based follow-up work. Use shallow structured reads for
 navigation, Markdown for presentation. Increase bounds only when needed.
+`--all` follows every cursor page; `--max-pages` is an explicit optional
+bound and requires `--all`. Require `data.paging.complete=true` when the
+whole snapshot is needed, and preserve `nextCursor` when it is false.
 `inspect` is the generic state read: one session, many IDs, optional descendants.
 Code blocks are rich-text elements with `code:true`, not `rem.isCode`. Tag and parent
 chains include names, ids, and types. Portal query/filter slots are `sp`/`q` and `sp`/`f`;
 the CLI maps those codes to `Query` and `Filter` before the SDK call. The plugin does not.
 `assert --file rules.json` checks that JSON with generic path rules, including `rems[*].field`.
 Its report includes `complete` and read `errors`; `ok` is false when the read failed.
-Add `--strict` when a failed rule or an incomplete read must exit 1. Compare `cards[].hash` to a baseline file to see that card
+Add `--strict` when a failed rule or an incomplete read must fail with exit 4.
+Compare `cards[].hash` to a baseline file to see that card
 identity and history did not change. See
 [state verification](../../docs/guides/state-verification.md).
 SDK command help comes from the live catalog. Callback/private/stateful-handle
@@ -126,6 +160,10 @@ Use `context --request FILE` for bounded exact-ID metadata, then
 `verify scope --expect FILE` for fresh proof. Raw text appears only for explicit
 `remIds`; request it narrowly. Required subtree and inverse-tag scopes must not
 be narrowed merely to pass. Incomplete evidence is not success.
+Read a successful receipt from `data`. Failed or incomplete receipts use
+`error.type=conflict` with the receipt preserved in `error.details`.
+`error.type=unknown_outcome` with exit 5 is reserved for a write whose affected
+objects cannot be identified.
 
 `flashcards apply` and `wiki apply` take an inner schema-1 plan and stable
 `--idempotency-key`. Preview first, then authorized apply. Existing text patches
@@ -299,16 +337,21 @@ entrypoints.
 
 ## Recovery
 
-Exit 0 means success; 1 includes validation, connection and incomplete-receipt
-failures. Preserve available receipts on failure.
+Exit 0 means success. Exit 3 means configuration or connection unavailable, 4 a
+missing target/conflict/incomplete receipt, 5 an unknown write outcome, 2 invalid
+input, 6 an unsupported capability, and 1 an internal failure. Parse the stderr
+envelope for `error.type`, `error.hint` and `error.details`; preserve
+available receipts on every failure.
 
 A timed-out or disconnected write may have taken effect. Preserve its exact plan,
 key and local journal. Inspect known IDs and reconcile the outcome before another
 authorized operation. Never blind-retry, change a plan under its key or remove a
 journal/create a new key to bypass uncertainty.
 
-For connection failures, check protocol 2, official permissions and occupied
-port. The plugin normally waits between commands. Bring RemNote to the foreground
+For connection failures, run `remnote-cli doctor --text` once and inspect the
+named failing checks. Continue with protocol 2, official permissions and occupied
+port checks only when the doctor report leaves them unresolved. The plugin normally
+waits between commands. Bring RemNote to the foreground
 for a read-only status retry if background timer throttling is suspected. Do not
 stop arbitrary listeners, weaken KB binding or disable browser security.
 
