@@ -9,15 +9,15 @@ remnote-cli [global-options] <domain> <action> [command-options]
 ```
 
 Live commands require RemNote open with the protocol 2 RemNote CLI Bridge enabled.
-`sync read`, `sync save`, `sync status`, `sync lint`, `sync diff`, `sync format` and `sync relocate` operate offline. A live command owns a
-short-lived loopback connection; no daemon or MCP endpoint is used.
+A live command owns a short-lived loopback connection. No daemon or MCP endpoint is used.
 No pairing or initialization command is required. The CLI uses the Bridge's active
 knowledge base. See [configuration](configuration.md) for permissions and state paths.
 
 ### Native Transaction Restriction
 
 SDK 0.0.46 cannot safely abort a native transaction. `rem update`, `rem children
-replace`, `rem property set` and changed TODO `--apply` operations fail before mutation.
+replace`, and `rem property set` fail before mutation. Native TODO status changes
+use their single SDK setter and exact readback, without an outer transaction.
 `rem create`, `journal append` and `rem children insert` perform sequential additive writes with
 private recovery journals, not atomic transactions. A failure can leave partial
 content: retain the reported key/IDs and read back before retrying. Use the task
@@ -114,553 +114,6 @@ To prevent this:
 | `4` | Missing target or state conflict |
 | `5` | Write outcome unknown; reconcile before retrying |
 | `6` | Unsupported capability |
-
-## sync
-
-The private Obsidian vault and RemNote are both editable endpoints. Users in
-Obsidian and agents edit the **same Markdown files**; a user may also edit cards
-during RemNote review. The candidate uses a common baseline and per-Rem semantic
-three-way merging. The receipts below describe the current source contract;
-offline tests are not native acceptance or a release claim. Legacy `pull`/`push`
-aliases are removed.
-
-`sync` is a pure command group. The commands below are separate entry points,
-not a required pipeline. After editing, daily synchronization needs only
-`sync apply DIR` within the authorized scope; it has no `--apply` flag. `DIR`
-below is the authorized private vault's absolute path.
-
-| Scenario | Command and boundary |
-| --- | --- |
-| Initial import | `remnote-cli sync import DIR --kb-id KB_ID --root-id ROOT_ID`, or `--export /PRIVATE/export.rem`; a new empty vault only |
-| Daily local changes | `remnote-cli sync apply DIR`; defaults to `--scope changed`, plans and applies in one invocation |
-| One file or directory | `remnote-cli sync apply DIR --path 'Folder/Note.md' --path 'OtherFolder'`; repeatable path filtering, not patch selection |
-| Reconcile a selected area | `remnote-cli sync apply DIR --scope all --path 'Folder'`; all bound IDs inside that selection |
-| Reconcile all bound IDs | `remnote-cli sync apply DIR --scope all`; no path filter, no new-root discovery |
-| Preview / approved plan | `remnote-cli sync plan DIR` has zero native writes; `sync apply DIR --plan-hash HASH` requires the same frozen plan and selectors |
-| Offline inspection | `remnote-cli sync diff DIR --path 'Folder'`; `sync lint DIR` and `sync status DIR` remain whole-vault |
-| Explicit deletion | `remnote-cli sync delete DIR --id ID --scope-root ID` previews; execution additionally requires `--allow-destructive --apply --plan-hash HASH` and live gates |
-| Guarded local edit | `remnote-cli sync read DIR PATH`, then optionally `sync save DIR PATH --content-file FILE --expected-file-hash HASH`; offline, not a daily prerequisite |
-| Format conversion | `remnote-cli sync format DIR`; convert or canonically re-render a clean sealed publication, zero backend calls |
-| Interrupted outgoing sync | `remnote-cli sync resume DIR --plan-hash HASH`; exact original plan and IDs only, no new scope/path selectors, never replay an uncertain write |
-| Local publication recovery | `remnote-cli sync recover DIR` only finishes verified local publication; preserve exact plans, journals and IDs |
-
-### Scope and path selection
-
-Plan and apply share `--scope changed|all` (default `changed`) and repeatable
-`--path PATH`. These are independent dimensions: scope chooses changed Rems or
-all bound IDs, while path chooses the files/directories containing them. With no
-path filter, the selection is the entire vault. Changed scope reads locally dirty
-Rems plus necessary dependencies; all scope reconciles every bound ID in selected
-documents, including remote-only edits. Neither is a remote changes-since API.
-
-Paths are vault-relative Markdown files or directories, not globs or native IDs.
-Repeated/equivalent paths such as `Folder` and `./Folder` are normalized and
-deduplicated. Missing paths, paths outside the vault, symlinks and non-content
-files are rejected. An existing directory with no content Markdown is a valid
-empty selection: it returns offline `unchanged`, `remoteChecked: false`, with no
-remote reads. Path filtering is not hunk selection; existing unsynced edits in a
-selected file remain in scope. Out-of-scope changes are not absorbed into the
-baseline or overwritten by publication.
-
-Every selection still runs full-vault local lint, identity validation and frozen
-file checks. A scoped command cannot bypass invalid content elsewhere.
-`sync diff DIR` accepts the same path filter but is offline and has no scope selector.
-Status/lint inspect the whole vault. Delete has its own exact ID/root boundary,
-not scope/path filters. There are no root sync actions, push/pull aliases, force,
-since, daemon or arbitrary conflict-winner options.
-
-### Initial import and privacy
-
-`sync import` publishes the human-readable format by default. It requires explicit leaf `--kb-id` and a new directory without
-content or a prior manifest. It establishes the initial common baseline; even a
-clean existing vault cannot be re-imported. Later edits from either endpoint are
-inputs to three-way sync. Re-importing or overwriting a whole file is not a merge.
-
-| Import option | Scope |
-| --- | --- |
-| `--root-id ID` | One exact native subtree in a new dedicated vault |
-| `--export FILE.rem` | Official full JSON archive with original records and snapshot provenance |
-| `--snapshot FILE` | Optional public SDK snapshot bound to the exact archive and KB |
-| `--editable-root-id ID` | Fully inspect the selected subtree during official import before enabling supported edits |
-
-`--snapshot` requires `--export`; `--root-id` is an independent scope, not an
-editable-root modifier. Archive IDs, relationships and provenance are validated;
-raw short codes do not certify writable semantics. The import receipt reports
-`status: "imported"`, `complete`, `scope`, `rootIds`,
-`globalDiscoveryComplete`, counts and `git: "unchanged"`. Completeness is
-limited to the declared scope and snapshot time. Subtree or known-ID inspection
-cannot discover new top-level roots or prove current global completeness.
-
-Continuous sync reads bound IDs only, using public `findMany` batches of at most
-50. Its receipts always report `discoveryScope: "bound-ids"` and
-`globalDiscoveryComplete: false`; this is distinct from the historic initial
-import receipt. Unknown children, missing objects and reparenting are explicit
-failures or conflicts, not silently omitted content. New top-level roots are not
-discoverable in this scope. Public `getAll` exceeds the current Bridge serializer's
-1,000-item limit, and empty siblings on parentless anchors do not enumerate roots.
-Global discovery needs a separately authorized Bridge change, release and device
-update; it is not supplied by this CLI change.
-
-The vault root must be 0700. Markdown saved normally by Obsidian may be 0644;
-CLI-created Markdown is 0600. Native sidecars and runtime state remain 0600.
-Symlinks are not a content access path. Keep a separately authorized private
-content Git repository; network backup needs explicit user authorization. Sync
-does not configure Git or publish files. Content must stay out of code
-repositories and public evidence.
-
-Ignore `.sync/`, locks and credentials in content Git. Exclude `.obsidian/`,
-`.trash/` and `.DS_Store` from content scanning, candidate freeze and Git.
-Do not delete user configuration or Trash to make validation pass. Private CLI
-state holds authoritative manifests and metadata journals; vault state is not
-independent permission to bypass those guards.
-Only root `AGENTS.md` and exact `.agents/skills/remnote-obsidian/SKILL.md` are excluded
-from content parsing as tooling documents; they are still scanned and frozen.
-Other `README.md` or `SKILL.md` files are not silently exempt from content lint.
-
-`sync relocate OLD NEW` moves the existing private directory and rebinds its
-authoritative manifest offline. Stop all other filesystem writers first: Node's
-rename is not atomic no-replace, so destination prechecks do not close the external
-check/rename race. Content, dirty files,
-identity records, Git files and historical `.sync/` records are moved unchanged;
-only the current manifest's directory binding and mirror change. RemNote receives
-zero calls. Existing destinations (including orphaned CLI manifests), symlink
-aliases, nested paths, different filesystems, incomplete baselines and pending
-publication/native journals are refused. The command does not change Git remotes
-or Obsidian's recent-vault list.
-
-A durable private relocation receipt binds the exact paths, source inode/device
-and original state hash before rename. After failure, inspect both paths and the
-receipt before rerunning the same command. Recovery accepts only that directory
-and the exact original/new manifests and mirror; the old manifest remains until
-new-authority/mirror readback succeeds. Unknown writer locks are never broken
-automatically: inspect their recorded process and pending outcome first. Do not
-raw-move a bound directory, rewrite its mirror, or substitute another destination.
-Caught failures release the same owned lock inode; a hard kill can leave a lock
-and requires manual outcome inspection. Failure-injection tests are not proof of
-automatic recovery after process death or power loss.
-
-Lossless native records live in `.remnote/records/ID.json`; imported payloads
-live under `.remnote/originals/{rems,cards,public}/`. These read-only sidecars
-belong in private content Git and are hidden in Obsidian's normal file tree.
-They are not disposable cache or part of `.sync/` runtime state.
-Tracked `.remnote/identity.json` is a schema/KB/document/block-to-Rem identity
-projection, derived from the authoritative manifest; it does not duplicate native
-records, card history or scheduling. Native truth stays in records/originals.
-
-Markdown, individual native/original records and other ordinary files are limited
-to 4 MiB each. Only the aggregate `.remnote/identity.json`, `.remnote/originals/manifest.json` and
-`.sync/state.json` use a 32 MiB bound, matching the private CLI manifest and
-publication stores. Import/publication prechecks the final serialized UTF-8 bytes
-of every payload, the state mirror and the complete publication ledger before
-writing any staging content. Staged/displaced files inherit their destination's
-bound; reading, freezing, integrity checks and recovery enforce the same limits.
-Oversized metadata is rejected without truncation or relaxing individual-file limits.
-
-### Guarded local editing
-
-Users and agents may edit the same Markdown directly, then run `sync apply DIR`
-once. Separate read/save/lint/diff/preview commands are not a required daily pipeline.
-For guarded editing and trusted local version clocks, use `sync read DIR PATH` to obtain the complete tracked Markdown `content`
-and its `fileHash` from the same read, then edit that source and call `sync save`
-with the returned hash and complete `--content-file` (or `-` for stdin). `PATH` is
-the exact workspace-relative Markdown path, not a native Rem ID. Both commands
-are offline and report `remoteWrites: 0`; read returns `status: "read"`, and save
-returns `status: "saved"` or `"unchanged"`, the resulting `fileHash` and changed
-Rem keys. Copy the returned hash verbatim rather than substituting a file mtime.
-
-Save validates the entire workspace and rejects a stale hash before publication.
-Only Rems whose semantic front/back content changed receive a millisecond local
-version timestamp bound to their content hash. New Rems use engine-generated temporary keys in the same
-path and lose those temporary clocks after verified native-ID assignment. No-op
-or formatting-only saves do not retime content. The source and clock metadata use
-the existing staged publication/recovery mechanism, without advancing the native
-baseline; `sync recover` finishes an interrupted save with its original timestamp.
-
-Obsidian or direct file edits remain valid one-sided sync input, but do not gain
-a trusted per-Rem clock. Saving an already-edited file unchanged cannot add one
-retroactively. Use guarded save for Agent edits when automatic same-Rem resolution
-is needed. Uncertain mutation journals still block save and sync; a prior preview
-with no write steps can be replaced by a fresh preview.
-
-### Human Markdown and stable identities
-
-The vault uses ordinary nested Markdown lists plus document/Folder notes and
-wikilinks. It is not one file per Rem, and a Markdown file or directory does not
-by itself establish native Document or Folder status. With no user attributes,
-there is no YAML. One hidden `<!-- remnote:document-key -->` before H1 binds the
-document; short anchors bind existing ordinary Rems. Native identity, type,
-parent/order, card shape, tags, references and Power-ups are hydrated through
-`.remnote/identity.json` and sealed native records, not copied into user YAML.
-Unknown native `null`, missing facts and `false` remain distinct; unsupported
-native data stays lossless and read-only. Unknown user YAML fields instead fail
-lint before remote calls. Mapping a field does not certify writable support.
-
-Folder layout is `Name/Name.md`; a Document or top-level plain Rem uses `Name.md`.
-Child Documents live under the same stem directory, such as `Name/Child.md`.
-Folder wins when both native capabilities are present. Existing `.md` titles do
-not receive a second extension; collisions receive a stable-ID suffix. Pages are
-not all named `index.md`. Auto-opening a folder's description note on folder click
-is not an Obsidian core feature; sync does not install a plugin for that behavior.
-
-Existing list items place a short Obsidian anchor at the end of their first
-paragraph, such as ` ^r-a1b2c3d4`. Keys contain 1–64 ASCII letters, digits or
-hyphens; H1 has no anchor. The tracked identity projection uses
-`schema: remnote-identity/1`, `kbId` and `documents[documentKey]` with `rootId`
-and a `blocks` map from short keys to native Rem IDs. It is not a user-editable
-native property database. Assigning a newly created Rem ID preserves its
-existing short key. Renaming a file preserves native identities rather than
-deleting and recreating them; it does not authorize native movement or reparenting,
-which remains unsupported and is rejected.
-
-Optional frontmatter accepts a display-only `title` string, `aliases` and `tags` arrays,
-plus `rems[shortKey].content` (`text` or `multiline`) when a new node needs an
-explicit content kind. Ordinary text is the default; only a new multiline
-question needs the explicit `multiline` declaration. Existing node/card kinds
-come from identity-bound records and flags: edit their body directly, without
-restating native metadata. Existing identity and native facts cannot be replaced
-through YAML. H1 is the sole root-text authority; optional `title` is not a
-second source of native text. Publication preserves display attributes.
-
-The following native facts are retained in hidden records and hydrated metadata,
-not accepted as user frontmatter:
-
-`native` records type, parent, ordered children, Document/Folder/card-item flags,
-practice direction/enabled state, tags and references. Structured facts use:
-
-- `powerups`: `{code, slots: [{slot, valueRemId, valueRichText}]}` entries.
-- `propertyValues`: `{propertyId, valueRemId, valueRichText}` entries (not `properties`).
-- `portal`: `{type, directlyIncludedRemIds}`, or `null`.
-- `cards`: exact `id`, `remId`, forward/backward or `{clozeId}` type, `createdAt`,
-  `repetitionHistory`, `nextRepetitionTime`, `lastRepetitionTime`, `timesWrongInRow`.
-  History and scheduling fields are read-only.
-  SDK history snapshots accept plain or null-prototype objects only and omit
-  undefined object properties recursively, preserving defined JSON values,
-  unknown fields and array order. Undefined array elements, array holes and
-  other non-JSON values remain invalid.
-
-Nullable orthogonal details preserve list/quote/code/TODO/table, property and
-Power-up flags; `embeddedQueueViewMode`, `todoStatus`, `fontSize`, `highlightColor`,
-`propertyType` (including numeric `0`), `aliasRemIds`, `sourceRemIds`, `createdAt`,
-`localUpdatedAt` and `updatedAt`. `collected` is the set of explicitly read native
-field names: it distinguishes unknown `null` from a known-null observation.
-Unknown facts remain `null`; they are not permission to invent a value or an edit
-timestamp. Hydrated `readOnly.record` binds `.remnote/records/ID.json`; `readOnly.public` and
-`readOnly.original` bind the corresponding imported public/native record paths,
-or `null` when absent.
-
-New ordinary bullets need neither YAML nor an anchor; successful apply assigns
-their native identity and publishes short anchors. A valid unique manual short
-key is also accepted. New multiline questions require a short question anchor
-and matching `rems` attribute; direct leaf answer bullets may omit anchors.
-Creating those answers sets native `isCardItem: true`. New basic cards remain
-unsupported. Engine-generated `new:key` values in receipts are temporary keys,
-not frontmatter users must type. References to unpublished targets are rejected
-until native identity exists.
-
-This synthetic note needs no YAML; preserve its real imported document binding
-and existing anchors when editing:
-
-```markdown
-<!-- remnote:doc-a1 -->
-# Example
-
-- A topic ^topic-a1
-  - A child ^child-a1
-- A new ordinary note, without a hand-written identity.
-
-- [[path/note|Example]]
-- [[path/note#^child-a1|This child]]
-```
-
-For a new multiline question in an existing imported note, preserve its document
-binding and other content, and add only the needed declaration and bullets:
-
-```markdown
----
-rems:
-  question-1:
-    content: multiline
----
-
-<!-- remnote:doc-a1 -->
-# Example
-
-- A new question ^question-1
-  - An answer
-```
-
-| Input | Meaning |
-| --- | --- |
-| `[[path/note|label]]` | Full vault-relative note path resolves to its document/root Rem |
-| `[[path/note#^short-key|label]]` | That note's tracked identity mapping resolves to an ordinary Rem |
-| Top-level YAML `aliases` / `tags`, or `#tag` | Obsidian display/search metadata; no automatic native Alias/Tag change |
-| Hidden native Tag/reference metadata | Read-only exact Rem ID relationships, never inferred from display labels |
-| `![[path/note]]` | An Obsidian embed, not automatically a RemNote reference or Portal |
-
-Generated links use full vault paths. Input resolves exact paths first, then a
-unique basename; `[[path/note#Current H1]]` resolves that note's sole current H1.
-Broken paths, missing block IDs, ambiguous short names and
-duplicate identities fail lint instead of guessing a target. Renames must leave
-references resolvable. Display aliases do not change native identity. New embeds
-without a verified public-SDK mapping fail the whole sync before remote writes;
-existing native Portals retain their original value and are explicitly read-only.
-Auxiliary reference/Portal areas are distinct from actual multiline answer items;
-they are not flattened into diagnostic body text or presented as working
-Obsidian dynamic queries.
-
-Top-level aliases and tags use standard Obsidian properties. Edit the optional
-nested content-kind attributes in **Source mode**: the Properties GUI does not support nested properties.
-These conventions use Obsidian's documented [links](https://help.obsidian.md/links),
-[embeds](https://help.obsidian.md/embeds),
-[properties](https://help.obsidian.md/properties) and
-[aliases](https://help.obsidian.md/aliases). Obsidian readability is not proof of
-RemNote semantic acceptance.
-
-### Explicit format conversion
-
-`sync format DIR` is an explicit offline conversion of a clean, sealed legacy
-publication to human Markdown, or canonical rendering of a clean already-human
-publication. It requires a complete manifest, no pending remote
-journal or local publication, unchanged published source hashes, complete document
-coverage and intact native records. It preserves native/original record bytes,
-publishes short anchors and tracked identity through staged local publication,
-then validates the resulting vault. It makes zero backend calls and performs no
-remote write. There is no legacy parse fallback in daily sync.
-
-Success returns `status: "formatted"`, `complete: true`, `remoteWrites: 0`,
-document/Rem counts, `identityPath`, previous/current manifest hashes and
-`originals: "unchanged"`. Already-human input preserves attributes and stable
-anchors, native/original bytes and all content clocks while canonical rendering
-can repair empty-note anchor presentation. `status: "already-formatted"` means
-validation found nothing to publish. Invalid or forged identity is refused, not
-silently rebuilt. Dirty or semantically divergent source is preserved and refused
-rather than reformatted from stale records; reconcile that work first.
-
-### Supported write boundary
-
-The first write surface is plain text, bold/italic text, inline and fenced code,
-exact wikilinks, basic-card back text, new plain Rems, multiline cards and explicit
-bounded deletion. A multiline question is an ordinary bullet with answer child
-bullets. Existing type comes from identity-bound records; a new question uses the
-explicit multiline attribute, and each actual answer has native `isCardItem`.
-Auxiliary Portal/reference children are not answer items. For a basic card, the first paragraph is the front and a blockquote inside
-the same list item is the back, not a new Rem. Literal `===` and `>>` in ordinary
-text do not declare cards.
-
-Native Folder/Document/Tag/Power-up changes, moves, new embeds/media and complex
-rich-text edits are outside this write surface. Existing native content is kept
-losslessly and displayed read-only as faithfully as supported. Portal metadata
-records its native type and directly included Rem IDs; it does not grant Portal
-write support. Raw-record preservation, metadata mapping, writable support and
-live/UI verification are separate coverage claims.
-
-### Common baseline and convergence
-
-Compare semantic content for each stable Rem across baseline, local and remote.
-One-sided edits propagate to the other endpoint; identical results converge;
-edits to different Rems merge, including a local question edit and a remote
-answer edit in the same file. The merge unit is a whole Rem: for a basic card,
-the selected version supplies both front and back, never a field-wise hybrid.
-For divergent versions, `version-time-lww` compares the local `cli-save` timestamp
-with the observed native `rem-updated-at` timestamp only when each is bound to the
-matching semantic content hash. The greater timestamp wins. Missing, equal,
-invalid, decreasing or more-than-five-minutes-future timestamps preserve both
-versions as `untrusted-edit-order`. Markdown file mtime and sync capture time
-are not version evidence.
-
-Remote `updatedAt` is epoch milliseconds and describes a native Rem version,
-not a text-only edit log. Once observed, unchanged content retains its version
-timestamp across later metadata/review changes. A controlled local or observed
-remote A→B→A revert is a new version; A→A is not. Publication consumes those
-change markers, so a resolved revert does not trigger repeated writes. This is
-version-time ordering, not guaranteed physical edit chronology across devices:
-an unobserved review or metadata update can affect the native timestamp before
-the changed content is first observed.
-
-Before any automatic winner overwrites either endpoint, the preview stores an
-immutable `.sync/conflicts/` record containing both semantic versions, their
-hashes/timestamps and the decision. Archive failure or mismatched existing history
-blocks writes. The preview's `resolutions` include exact `historyPath` and
-`historyHash`; apply verifies and reuses the same evidence.
-
-The target sync plan can contain incoming and outgoing changes together. Recheck
-both endpoints before apply; publish only the planned semantic result and advance
-the common baseline only after verification. Frozen-file checks guard local
-publication, and remote pre/post hashes detect observed version changes. These
-are client optimistic checks: the SDK has no native conditional setter, so they
-cannot eliminate the check-write lost-update window. Native transactions remain
-disabled. Partial or uncertain results retain the baseline, both versions and
-recovery evidence rather than claiming atomic convergence.
-
-Review history and scheduling are exclusively owned by RemNote. Local copies are
-read-only snapshots and never become outgoing updates. Missing files, nodes or
-remote objects are not automatic deletion requests; absence must be distinguished
-from incomplete reads. Deletion remains explicit and bounded in either direction.
-
-### Lint, preview and apply
-
-`lint` returns `ok`, `complete` and diagnostics with `path`, one-based
-`line`, stable `code` and `message`. Text mode prints
-`path:line / CODE / message`. Any diagnostic blocks the **entire** sync before
-remote calls. Metadata unsupported by the current write matrix is read-only,
-not silently dropped. Existing Rem/card identity, parent/order and review history
-are protected. Missing files, nodes or remote objects do not authorize movement
-or automatic deletion.
-
-`status` and `diff` inspect local state without applying changes. `sync plan DIR`
-previews with zero native writes. `sync apply DIR` performs whole-workspace lint, fresh bidirectional planning,
-guarded apply and verification in one invocation, without requiring a separate preview.
-Use `sync apply DIR --plan-hash HASH` to require an exact previous preview instead.
-The hash binds normalized scope/path selectors, selected documents,
-reconciliation/verification IDs and all frozen vault files, including files
-outside the selection. A changed scope, materially different selection, stale
-file, native content or hash is refused, not silently accepted as a new plan.
-Equivalent normalized selectors reuse the same selection, not a bypass of content
-freshness checks.
-Either apply path binds a frozen plan, unchanged candidate files, matching KB and native
-state, with live writes enabled for outgoing changes. Incoming changes are merged
-semantic results, not arbitrary remote snapshot overwrites. SDK writes are
-sequential, not atomic; there is no server-side CAS or exactly-once guarantee.
-Unknown or partial journal outcomes remain blocked for exact-ID reconciliation;
-omitting `--plan-hash` is not a retry or recovery bypass. Deletion still requires
-its explicit ID, scope boundary and destructive permission gates.
-
-Only reads are parallel: up to 16 local file reads and 4 exact-ID remote batches
-of 50. Each native batch snapshots at most 4 Rems concurrently, each with up to
-12 independent SDK flags (192 in-flight flag reads at the composed maximum).
-Read results retain input order; failures stop their pool and drain in-flight
-work before returning, without passing partial reads into writes. Parsed source
-and bytes are reused only within one operation. Full content hashes, safe paths,
-permissions and metadata are freshly checked at the write/publication boundaries;
-mtime is never a freshness shortcut. There is no persistent parse cache.
-
-Current receipt fields (arrays contain exact Rem IDs unless noted):
-
-| Status | Fields and meaning |
-| --- | --- |
-| `preview` | `complete: true`, `planHash`, numeric `creates` / `updates`, `incoming`, `converged`, `outgoing`, `metadataRefresh`, `resolutions`, optional `deletion`, `atomic: false`; new outgoing entries use `new:key` |
-| `verified` | `complete: true`, `planHash`, `ids` mapping `new:key` to native ID, existing `updated`, `incoming`, `converged`, native-ID `outgoing`, `metadataRefresh`, `resolutions`, `deleted`, `nativeCards`, `cardsPreserved: true`, `atomic: false` |
-| `unchanged` | `complete: true`, `changes: 0`; no content or metadata publication needed |
-| planning `conflict` | Exit 1, `complete: false`, `planHash`, `conflicts`, any archived `resolutions`, `remoteWrites: 0`; no apply is authorized by this receipt |
-| offline layout `preview` / `verified` | `remoteChecked: false`, `remoteWrites: 0`, `planHash`, empty direction arrays; `localPublished` is false for preview and true after apply |
-
-Read `remoteChecked` as actual remote-read evidence, not a constant: an empty
-selection or changed scope with no candidates can return offline `unchanged`
-with `remoteChecked: false` and no checked IDs. Bound-ID planning reports
-`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`; even an all-scope
-success cannot establish global discovery. `diff` is local-only and reports
-`remoteChecked: false`; it cannot establish remote freshness or convergence.
-`checkedIds` / `checkedCount` describe the initial bound-ID verification set,
-not the number of SDK calls or repeated reads. Created IDs have separate `ids`
-and readback receipts. `selection` records canonical `paths`, selected `files`,
-actual local-key `outgoingKeys`, `reconcileIds` and disjoint `verificationIds`.
-Verification-only dependencies do not advance their shared native baseline or
-content clocks. Unselected bytes and unassigned bullets remain intact. Selected
-layout-only apply advances only local layout/file hashes and display attributes;
-it preserves all native records/clocks and any separate pending native plan.
-The acceptance driver records wall time and native mutation steps separately;
-SDK transport calls are explicitly `not-instrumented`.
-Each planning conflict records `id`, `path`, `reason` (`untrusted-edit-order`,
-`remote-structure` or `remote-missing`), `baseHash`, `localHash`, nullable
-`remoteHash` / `remoteUpdatedAt`, a private `localSnapshot` path and a
-`remoteSnapshot` path or `null`. The local version remains in place; opaque local
-snapshots preserve the real baseline content rather than their display placeholder.
-A mutation-stage failure may also use status
-`conflict`, but carries `journalKey`, known `ids` and `steps` instead of the
-planning `remoteWrites: 0` guarantee: inspect that evidence before any next action.
-
-Deletion is explicit and separate from file absence. Keep the local outline
-intact for preview:
-
-```bash
-remnote-cli sync delete /PRIVATE/vault --id CARD_ID --scope-root ROOT_ID
-remnote-cli sync delete /PRIVATE/vault --id CARD_ID --scope-root ROOT_ID --allow-destructive --apply --plan-hash PREVIEW_HASH
-```
-
-Delete previews by default; unlike `sync apply`, its execution requires both
-`--apply` and `--plan-hash`. It accepts no scope/path selectors.
-The target must be a strict descendant of the exact scope root. Review the
-bounded exact descendant IDs. Native Document/Folder deletion is unsupported;
-global `--allow-destructive` is required; official RemNote scopes remain the native permission boundary.
-Deleting a Rem does not promise to purge all historical Card records. Never
-delete review history to make an acceptance test pass.
-
-The verified receipt distinguishes incoming/outgoing changes and identity/card
-checks after baseline publication. Read back exact semantic state:
-exit 0, a Markdown card shape or a Rem ID alone is not native-card acceptance.
-
-### Failure, recovery and development acceptance
-
-Preserve the exact plan/hash, journal and known IDs after `unknown`,
-`conflict` or `publication-incomplete`. A lost response does not prove that
-a write failed. Do not change its key, remove its journal, recreate objects or
-start a new test batch to bypass uncertainty.
-
-Recovery finishes only already-verified publication and must not replay remote
-mutations. Exact-ID reads may be needed before local publication. Acknowledged
-writes followed by validation or publication failure are not a zero-write failure
-and must be reconciled. A recovered local publication reports `status: "recovered"`,
-`complete: true`, `remoteWrites: 0` and the existing `ids`; it does not mean the
-original operation had zero remote writes.
-
-`sync resume DIR --plan-hash HASH` is a separate, explicit write entry point,
-not an automatic retry by `apply`. Ensure the original CLI writer has stopped;
-keep the source files, sealed baseline and original journal unchanged. Resume:
-
-1. Reconstructs the original plan offline from its bound local files, baseline
-   and selectors, requiring the same complete plan hash. Current remote edits
-   cannot silently turn this into a new plan.
-2. Folds the contiguous verified journal prefix and at most one final uncertain
-   step into its expected graph. It verifies the original immutable/Card guard,
-   exact native IDs, fields, flags, tags and both sides of ordered parent links.
-3. Recognizes an uncertain step only when its complete intended effect already
-   exists. Known creation IDs are reused; an unknown creation without an ID or a
-   setter still showing its before-state is refused, never replayed. A delayed
-   old SDK request cannot be ruled out merely by reading a before-state.
-4. Continues only never-attempted steps under the same journal, then uses normal
-   native verification and staged publication. A second interruption retains
-   those same identities. Repeating a published plan returns `already-complete`
-   with zero native calls/writes while its published baseline still matches.
-
-The bounded resume implementation accepts outgoing-only plans that reconstruct
-exactly; it does not resume deletion, incoming/converged or LWW-resolution plans.
-Different source bytes, malformed/noncontiguous steps or concurrent native edits
-require reconciliation outside this command. Do not delete state to bypass a
-refusal. A verified remote journal delegates to local-only recovery.
-
-Old journals do not record the creation-time Card identities of newly made Rems.
-Resume therefore validates their constructor/default shape plus recorded effects,
-including explicitly collected empty tags, and establishes their Card identity
-baseline at this exact readback. It does **not** prove those new Card IDs are the
-same as at the original creation; use any independent original receipt to check
-that history. The resumed receipt reports `resumed: true`, `recognizedSteps`,
-`existingCardsPreserved: true`, `newCardIdentityBaseline: "resume-readback"`, and
-`remoteWrites` counting mutation attempts in this invocation only. Already
-verified or recognized steps do not inflate that count. Newly observed Card IDs
-are protected during continuation. Review/scheduling metadata remains native-owned.
-All writes remain `atomic: false`: optimistic read-before/read-after checks are
-not server-side compare-and-set or an exactly-once promise.
-
-Development acceptance needs a frozen candidate, exclusive live ownership and
-the guarded integration wrapper. Exercise `scripts/sync-agent-acceptance.mjs`
-against current-format fixtures before any authorized native run. Acceptance must
-use a new synthetic subtree with guarded local new-card saves, current-format
-stable-block checks, incoming-only, mixed-direction, same-result convergence,
-both version-time winners with pre-apply archives and same-Rem conflict
-cases. The deliberate conflict must prove zero remote writes and preserve both
-versions before resolving only local synthetic text to the observed remote value.
-Cleanup requires fresh exact root text/parent/children plus a recorded intent.
-SDK `findMany` may filter missing IDs; deletion proof uses `inspect --strict` and
-accepts exit 1 only for the exact expected `missing: true` records, no truncation
-and no other read errors. It does not assume null padding or equate any failed read
-with deletion.
-Card lookup records returned and unreturned IDs separately, rejects duplicate or
-out-of-scope IDs, and makes no historical-card purge claim from an absent result.
-Its `node --import tsx scripts/sync-agent-acceptance.mjs --self-test` checks
-synthetic codec/receipt boundaries offline, without live calls or file writes.
-Preserve existing failed batches for their owner's reconciliation; never treat
-another batch's repair or cleanup as this driver's acceptance. A new live run
-requires approval and native/UI evidence; offline checks do not establish it.
 
 ## rem create
 
@@ -980,7 +433,7 @@ Preview or update folding for every non-leaf Rem below one root Rem:
 ```bash
 remnote-cli rem outline collapse --today
 remnote-cli rem outline collapse --today --apply
-remnote-cli rem outline collapse --root-id <wiki-rem-id> --apply
+remnote-cli rem outline collapse --root-id <root-rem-id> --apply
 remnote-cli rem outline expand --root-id <root-rem-id> --apply
 ```
 
@@ -990,17 +443,23 @@ selected root itself is not changed.
 
 ## todo
 
-List exact-tag todos and synchronize native checkbox state with TODO/DONE tags:
+List native RemNote TODOs and change their native status:
 
 ```bash
-remnote-cli todo list --tag-id <todo-tag-rem-id>
-remnote-cli todo complete <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id>
-remnote-cli todo complete <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id> --apply
-remnote-cli todo reopen <rem-id> --todo-tag-id <todo-tag-rem-id> --done-tag-id <done-tag-rem-id> --apply
+remnote-cli todo list
+remnote-cli todo list --status finished
+remnote-cli todo list --status all
+remnote-cli todo list --root-id <root-rem-id>
+remnote-cli todo complete <rem-id>
+remnote-cli todo complete <rem-id> --apply
+remnote-cli todo reopen <rem-id> --apply
 ```
 
-`complete` and `reopen` default to preview. Changed apply operations require atomic
-native status/tag synchronization and are currently unavailable; previews remain usable.
+`list` returns Rems where native `isTodo()` is true. It defaults to
+`Unfinished`. Optional `--root-id` scans that Rem and its descendants.
+`complete` and `reopen` preview by default. Apply calls `setTodoStatus()` on
+the exact native TODO and reads the status back. TODO tags and TODO text do not
+identify or change these Rems.
 
 ## SDK commands
 
@@ -1367,14 +826,12 @@ remnote-cli status --text
 ## contract
 
 Print the offline machine-readable protocol, plan schemas, required SDK capabilities,
-receipt statuses, workspace operation boundaries, and exit codes. This command never
+receipt statuses, and exit codes. This command never
 opens a Bridge session and succeeds while RemNote is closed.
 
 ```bash
 remnote-cli contract
 remnote-cli contract --schema flashcards
-remnote-cli contract --schema wiki
-remnote-cli contract --schema workspace
 ```
 
 The committed generated artifact is
@@ -1387,7 +844,6 @@ The committed generated artifact is
 | `rem context --request <path or ->` | `inspectMany` |
 | `rem verify scope --expect <path or -> [--summary]` | `verifyScope` |
 | `card apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyFlashcards` |
-| `wiki apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyWiki` |
 
 [Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
 inner plan, bound, text segment and apply receipt. Flashcard `cardCluster` defaults off; `cc` is added only when the
@@ -1398,7 +854,7 @@ tag IDs, verified in the receipt, and `parentRemId` no longer requires a tag on 
 `TextSegments`; native references use `{"remId":"EXACT_ID"}`, and plain strings containing `[[` or `]]` are rejected.
 Flashcard plans that contain only `answerPatches` or `reusedCardRemIds` omit `dailyRemId`, `homeRootId`, `tagRemId`,
 `parentRemId`, `title`, `cardCluster`, and `tags`; exact existing targets replace creation context.
-Flashcard and Wiki task plans have no artificial object-count or task-file-size cap.
+Flashcard task plans have no artificial object-count or task-file-size cap.
 Scaffold creation is partitioned internally, and SDK requests beyond the live
 in-flight window wait rather than failing.
 A flashcard answer line may be one code-block segment `{"code":"...","language":"plaintext"}`. Apply stores the SDK
@@ -1410,19 +866,17 @@ Patching that line back to plain text leaves `isCardItem` true.
 Leaf `--help` includes examples and schemas for
 installed agents.
 Read input is the whole request; apply files contain only the inner plan. Preview is default. Full receipts precede
-nonzero exits on failed/incomplete reads or nonverified apply. Required WIKI/card proof scopes must not be narrowed
+nonzero exits on failed/incomplete reads or nonverified apply. Required full-card proof scopes must not be narrowed
 merely to pass. Raw context title/text/backText/aliases are limited to explicit remIds; task ids/facts contain metadata.
 
-`--summary` keeps status, IDs/hashes, scopes, counts and failures, without content/history
-bodies or passing-check detail. Exit semantics are unchanged. Wiki batch receipts use
-`verificationScope:affected_objects`; after the last Wiki mutation, final task acceptance
-still requires explicit whole-Wiki `rem verify scope` zero-card/card-structure proof.
+`--summary` keeps status, IDs/hashes, scopes, counts, and failures without content or
+history bodies. It also omits passing check detail. Exit semantics are unchanged.
 
 Preview/apply never look up dates or create daily documents. Native dailyDocument type does not prove calendar
-freshness without a date scalar. Caller revalidates intended dates before new batches/after midnight; replay keeps
-the original diary. Active KB and official authorization are rechecked immediately before each SDK mutation after awaits; known-created
-Wiki objects must remain plain/ordinary/untagged non-card. Existing grouped-index entries use the full bounded tree;
-missing/new grouped entries fail before writes and require reviewed exact-section fallback. Do not flatten/guess.
+freshness without a date scalar. The caller revalidates the intended date before
+new batches and after midnight. Replay keeps the original diary. The active KB and
+official authorization are rechecked immediately before each SDK mutation after
+awaited reads.
 
 SDK discovery fetches and verifies the live catalog once per command. Calls carry the
 expected catalog hash and fail on drift. There is no persistent metadata cache or offline

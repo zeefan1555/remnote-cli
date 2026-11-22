@@ -1,7 +1,7 @@
 {
   "name": "remnote-cli",
   "private": true,
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "Direct CLI automation for RemNote through the RemNote CLI Bridge plugin",
   "type": "module",
   "main": "dist/remnote-cli/index.js",
@@ -39,11 +39,7 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^15.0.0",
-    "fflate": "^0.8.3",
-    "mdast-util-from-markdown": "^2.1.0",
-    "mdast-util-to-markdown": "^2.2.3",
     "ws": "^8.20.0",
-    "yaml": "^2.9.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -57,7 +53,6 @@
     "@vitest/ui": "^4.1.3",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
-    "micromark-util-types": "^2.0.3",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",

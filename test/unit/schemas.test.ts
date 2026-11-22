@@ -93,22 +93,21 @@ describe('Outline and todo schemas', () => {
   });
 
   it('validates todo list and update inputs', () => {
-    expect(ListTodosSchema.parse({ tagRemId: 'todo-tag' })).toEqual({ tagRemId: 'todo-tag' });
+    expect(ListTodosSchema.parse({})).toEqual({ status: 'unfinished' });
+    expect(ListTodosSchema.parse({ status: 'all' })).toEqual({ status: 'all' });
+    expect(ListTodosSchema.parse({ status: 'all', rootRemId: 'root' })).toEqual({
+      status: 'all',
+      rootRemId: 'root',
+    });
+    expect(() => ListTodosSchema.parse({ tagRemId: 'todo-tag' })).toThrow();
     expect(
       UpdateTodoSchema.parse({
         remId: 'todo-1',
         finished: true,
-        todoTagRemId: 'todo-tag',
-        doneTagRemId: 'done-tag',
       })
     ).toMatchObject({ finished: true, dryRun: true });
     expect(() =>
-      UpdateTodoSchema.parse({
-        remId: 'todo-1',
-        finished: true,
-        todoTagRemId: 'same',
-        doneTagRemId: 'same',
-      })
+      UpdateTodoSchema.parse({ remId: 'todo-1', finished: true, doneTagRemId: 'x' })
     ).toThrow();
   });
 });

@@ -1,7 +1,6 @@
 import type { PluginRem, ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
 import { RemType } from './sdk-constants.generated.js';
 import { contentHash } from './content-hash.js';
-import { plainText } from './plain-text.js';
 import { hasCardStructure } from './card-structure.js';
 import {
   inspectWithEvidence,
@@ -15,7 +14,6 @@ import type {
   CodeSegment,
   FlashcardsPlan,
   TextSegment,
-  WikiPlan,
 } from '../schemas/task-schemas.js';
 import { requiredTaskCapabilities } from './operation-capabilities.js';
 import { OperationKernel } from './operation-kernel.js';
@@ -49,12 +47,11 @@ interface Identity {
 }
 export interface TaskReceipt {
   schemaVersion: 1;
-  kind: 'flashcards' | 'wiki';
+  kind: 'flashcards';
   batchKey: string;
   planHash: string;
   status: 'preview' | 'verified' | 'partial' | 'unknown' | 'incomplete' | 'conflict';
   complete: boolean;
-  verificationScope?: 'affected_objects';
   ids: Record<string, string>;
   facts: Array<{ remId: string; textHash: string; cardIds: string[]; reviewHash: string }>;
   created: Identity[];
@@ -70,7 +67,7 @@ export interface TaskReceipt {
 }
 interface Journal {
   schemaVersion: 1;
-  kind: 'flashcards' | 'wiki';
+  kind: 'flashcards';
   batchKey: string;
   planHash: string;
   steps: Record<string, Step>;
@@ -84,7 +81,6 @@ interface Journal {
   createdChildrenIds: Record<string, string[]>;
   createdTagIds: Record<string, string[]>;
   cardBaselines: Record<string, string>;
-  textPreconditions: Record<string, string>;
   textCompleted: Record<string, string>;
   prepared: boolean;
   batchDate: string;
@@ -159,20 +155,16 @@ export class TaskOperations {
   private busy = false;
   private operationKernel?: OperationKernel;
   constructor(private deps: Dependencies) {}
-  async apply(
-    kind: 'flashcards' | 'wiki',
-    input: TaskApplyParams<FlashcardsPlan | WikiPlan>
-  ): Promise<TaskReceipt> {
+  async apply(input: TaskApplyParams<FlashcardsPlan>): Promise<TaskReceipt> {
     const startedAt = new Date().toISOString(),
       planHash = await contentHash(canonical(input.plan));
     const receipt: TaskReceipt = {
       schemaVersion: 1,
-      kind,
+      kind: 'flashcards',
       batchKey: input.idempotencyKey,
       planHash,
       status: 'preview',
       complete: false,
-      ...(kind === 'wiki' ? { verificationScope: 'affected_objects' as const } : {}),
       ids: {},
       facts: [],
       created: [],
@@ -197,20 +189,20 @@ export class TaskOperations {
     try {
       const kb = await this.deps.plugin.kb.getCurrentKnowledgeBaseData();
       if (!kb?._id) throw new TaskError('missing_kb', 'No current knowledge base');
-      const storageKey = `task-v1:${kb._id}:${kind}:${input.idempotencyKey}`;
+      const storageKey = `task-v1:${kb._id}:flashcards:${input.idempotencyKey}`;
       const prior =
         input.dryRun === false ? await this.deps.journal.getLocal<Journal>(storageKey) : undefined;
       if (
         prior &&
         (prior.schemaVersion !== 1 ||
-          prior.kind !== kind ||
+          prior.kind !== 'flashcards' ||
           prior.batchKey !== input.idempotencyKey ||
           prior.planHash !== planHash)
       )
         throw new TaskError('conflict', 'Idempotency key belongs to a different plan');
       j = prior ?? {
         schemaVersion: 1,
-        kind,
+        kind: 'flashcards',
         batchKey: input.idempotencyKey,
         planHash,
         steps: {},
@@ -224,13 +216,12 @@ export class TaskOperations {
         createdChildrenIds: {},
         createdTagIds: {},
         cardBaselines: {},
-        textPreconditions: {},
         textCompleted: {},
         prepared: false,
         batchDate: startedAt.slice(0, 10),
         completed: false,
       };
-      const required = requiredTaskCapabilities(kind, input.plan),
+      const required = requiredTaskCapabilities(input.plan),
         missing = required.filter((capability) => !this.deps.capabilities?.has(capability));
       if (this.deps.capabilities && missing.length)
         throw new TaskError(
@@ -239,26 +230,12 @@ export class TaskOperations {
         );
       const journal = j,
         save = () => this.mutate(() => this.deps.journal.setLocal(storageKey, journal));
-      if (kind === 'flashcards')
-        await this.recoverKnownScaffold(input.plan as FlashcardsPlan, journal, save);
+      await this.recoverKnownScaffold(input.plan, journal, save);
       if (Object.values(j.steps).some((s) => ['started', 'unknown'].includes(s.state)))
         throw new TaskError(
           'unknown',
           'Prior creation outcome is unknown; reconcile exact IDs before retry'
         );
-      if (kind === 'wiki')
-        for (const p of (input.plan as WikiPlan).pages) {
-          const k = `page:${p.key}`,
-            step = j.steps[k];
-          if (
-            !p.remId &&
-            !j.ids[k] &&
-            step &&
-            ['applied', 'verified'].includes(step.state) &&
-            step.remIds.length === 1
-          )
-            j.ids[k] = step.remIds[0];
-        }
       this.operationKernel = new OperationKernel({
         canWrite: this.deps.canWrite,
         persist: save,
@@ -279,15 +256,15 @@ export class TaskOperations {
               : []
           ),
       });
-      await this.preflight(kind, input.plan, j);
+      await this.preflight(input.plan);
+      const preflightRemId =
+        input.plan.dailyRemId ??
+        input.plan.answerPatches?.[0]?.cardRemId ??
+        input.plan.reusedCardRemIds?.[0];
+      if (!preflightRemId) throw new TaskError('incomplete', 'Task plan has no inspection root');
       receipt.checks.push({
         kind: 'preflight',
-        remId:
-          kind === 'wiki'
-            ? (input.plan as WikiPlan).wikiRootId
-            : ((input.plan as FlashcardsPlan).dailyRemId ??
-                (input.plan as FlashcardsPlan).answerPatches?.[0]?.cardRemId ??
-                (input.plan as FlashcardsPlan).reusedCardRemIds?.[0])!,
+        remId: preflightRemId,
         status: 'passed',
         expected: { planHash },
         actual: { validated: true },
@@ -297,9 +274,7 @@ export class TaskOperations {
         return receipt;
       }
       await save();
-      if (kind === 'flashcards')
-        await this.flashcards(input.plan as FlashcardsPlan, j, save, receipt);
-      else await this.wiki(input.plan as WikiPlan, j, save, receipt);
+      await this.flashcards(input.plan, j, save, receipt);
       j.completed = true;
       await save();
       receipt.status = 'verified';
@@ -390,55 +365,11 @@ export class TaskOperations {
     }
     return false;
   }
-  private async plain(rem: PluginRem): Promise<boolean> {
-    const [folder, doc, tags, item, cards] = await Promise.all([
-      rem.isFolder(),
-      rem.isDocument(),
-      rem.getTagRems(),
-      rem.isCardItem(),
-      rem.getCards(),
-    ]);
-    if (
-      typeof folder !== 'boolean' ||
-      typeof doc !== 'boolean' ||
-      typeof item !== 'boolean' ||
-      !Array.isArray(cards)
-    )
-      throw new Error('Malformed plain-node facts');
-    return (
-      rem.type === RemType.DEFAULT_TYPE &&
-      !folder &&
-      !doc &&
-      !nativeIds(tags).length &&
-      !cards.length &&
-      !hasCardStructure(rem.text, rem.backText, item)
-    );
-  }
-  private async assertPlain(
-    id: string,
-    parents: Array<string | null>,
-    hashes: string[]
-  ): Promise<{ rem: PluginRem; parentId: string | null; textHash: string }> {
-    const rem = await this.rem(id);
-    if (!(await this.plain(rem)))
-      throw new TaskError(
-        'conflict',
-        'Wiki target must remain ordinary untagged non-card text',
-        id
-      );
-    const parentId = (await rem.getParentRem())?._id ?? null;
-    if (!parents.includes(parentId))
-      throw new TaskError('conflict', 'Wiki parent changed externally', id);
-    const textHash = await contentHash(rem.text);
-    if (!hashes.includes(textHash))
-      throw new TaskError('conflict', 'Wiki text changed externally', id);
-    return { rem, parentId, textHash };
-  }
   private async checkSegments(text: TextSegment[]): Promise<void> {
     for (const part of text)
       if (typeof part !== 'string' && 'remId' in part) await this.rem(part.remId);
   }
-  private async richText(text: TextSegment[], j: Journal): Promise<RichTextInterface> {
+  private async richText(text: TextSegment[]): Promise<RichTextInterface> {
     const out: RichTextInterface = [];
     for (const p of text) {
       if (typeof p === 'string') out.push(p);
@@ -447,8 +378,7 @@ export class TaskOperations {
           throw new TaskError('conflict', 'Code-block answer line must be a single segment');
         out.push({ i: 'm', text: p.code, code: true, language: p.language ?? 'plaintext' });
       } else {
-        const id = 'remId' in p ? p.remId : j.ids[`page:${p.pageKey}`];
-        if (!id) throw new TaskError('incomplete', 'Unresolved page binding');
+        const id = p.remId;
         const target = await this.rem(id);
         const reference = await this.deps.plugin.richText.rem(target).value();
         if (
@@ -488,185 +418,87 @@ export class TaskOperations {
     if (expected.some((id) => !actual.includes(id)))
       throw new TaskError('incomplete', 'Native references did not resolve after writing', rem._id);
   }
-  private async allowedPatch(
-    rem: PluginRem,
-    expected: string,
-    text: TextSegment[],
-    j: Journal
-  ): Promise<void> {
+  private async allowedPatch(rem: PluginRem, expected: string, text: TextSegment[]): Promise<void> {
     const current = await contentHash(rem.text);
-    if (text.some((p) => typeof p !== 'string' && 'pageKey' in p && !j.ids[`page:${p.pageKey}`])) {
-      if (current !== expected)
-        throw new TaskError('conflict', 'Text changed since inspection', rem._id);
-      return;
-    }
-    if (current !== expected && current !== (await contentHash(await this.richText(text, j))))
+    if (current !== expected && current !== (await contentHash(await this.richText(text))))
       throw new TaskError('conflict', 'Text changed since inspection', rem._id);
   }
-  private async preflight(
-    kind: 'flashcards' | 'wiki',
-    input: FlashcardsPlan | WikiPlan,
-    j: Journal
-  ): Promise<void> {
-    if (kind === 'flashcards') {
-      const p = input as FlashcardsPlan,
-        explicit = explicitTags(p),
-        dailyRemId = p.dailyRemId!;
-      if (p.newCards?.length && explicit) {
-        const context = (
-          await inspectWithEvidence(this.deps.plugin, { schemaVersion: 1, remIds: [dailyRemId] })
-        ).result;
-        if (!context.complete) throw new TaskError('incomplete', 'Cannot read daily context');
-        if (context.objects[0]?.remType !== 'dailyDocument')
-          throw new TaskError('conflict', 'Expected existing daily document', dailyRemId);
-        for (const id of new Set(Object.values(p.tags!).flat())) await this.rem(id);
-      } else if (p.newCards?.length) {
-        const homeRootId = p.homeRootId!,
-          tagRemId = p.tagRemId!,
-          evidence = await inspectWithEvidence(this.deps.plugin, {
-            schemaVersion: 1,
-            remIds: [dailyRemId, homeRootId, tagRemId],
-          });
-        const context = evidence.result;
-        if (!context.complete)
-          throw new TaskError('incomplete', 'Cannot read daily/HOME/tag context');
-        const ancestry = verifyInspection(
-          context,
-          {
-            schemaVersion: 1,
-            inspect: { schemaVersion: 1, remIds: [dailyRemId, homeRootId, tagRemId] },
-            expectations: [{ kind: 'ancestor', remId: tagRemId, value: homeRootId }],
-          },
-          evidence.ancestorTails
+  private async preflight(input: FlashcardsPlan): Promise<void> {
+    const p = input,
+      explicit = explicitTags(p),
+      dailyRemId = p.dailyRemId!;
+    if (p.newCards?.length && explicit) {
+      const context = (
+        await inspectWithEvidence(this.deps.plugin, { schemaVersion: 1, remIds: [dailyRemId] })
+      ).result;
+      if (!context.complete) throw new TaskError('incomplete', 'Cannot read daily context');
+      if (context.objects[0]?.remType !== 'dailyDocument')
+        throw new TaskError('conflict', 'Expected existing daily document', dailyRemId);
+      for (const id of new Set(Object.values(p.tags!).flat())) await this.rem(id);
+    } else if (p.newCards?.length) {
+      const homeRootId = p.homeRootId!,
+        tagRemId = p.tagRemId!,
+        evidence = await inspectWithEvidence(this.deps.plugin, {
+          schemaVersion: 1,
+          remIds: [dailyRemId, homeRootId, tagRemId],
+        });
+      const context = evidence.result;
+      if (!context.complete)
+        throw new TaskError('incomplete', 'Cannot read daily/HOME/tag context');
+      const ancestry = verifyInspection(
+        context,
+        {
+          schemaVersion: 1,
+          inspect: { schemaVersion: 1, remIds: [dailyRemId, homeRootId, tagRemId] },
+          expectations: [{ kind: 'ancestor', remId: tagRemId, value: homeRootId }],
+        },
+        evidence.ancestorTails
+      );
+      if (ancestry.status === 'incomplete')
+        throw new TaskError(
+          'incomplete',
+          'HOME ancestry requires the unread ancestor tail',
+          tagRemId
         );
-        if (ancestry.status === 'incomplete')
-          throw new TaskError(
-            'incomplete',
-            'HOME ancestry requires the unread ancestor tail',
-            tagRemId
-          );
-        const daily = context.objects.find((o) => o.remId === dailyRemId),
-          home = context.objects.find((o) => o.remId === homeRootId),
-          tag = context.objects.find((o) => o.remId === tagRemId);
-        if (
-          daily?.remType !== 'dailyDocument' ||
-          home?.remType !== 'folder' ||
-          tag?.remType !== 'concept' ||
-          !tag.ancestorRemIds.includes(homeRootId)
-        )
-          throw new TaskError(
-            'conflict',
-            'Expected existing daily document and HOME descendant Concept Tag'
-          );
-      }
-      for (const card of p.newCards ?? []) {
-        if (Array.isArray(card.question)) await this.checkSegments(card.question);
-        for (const line of card.answer) await this.checkSegments(line);
-      }
-      if (p.parentRemId) {
-        const topic = await this.rem(p.parentRemId);
-        if (
-          (await topic.getParentRem())?._id !== dailyRemId ||
-          topic.type !== RemType.DEFAULT_TYPE ||
-          (await topic.isFolder()) ||
-          (await topic.isDocument()) ||
-          (await topic.getCards()).length ||
-          (!explicit && !nativeIds(await topic.getTagRems()).includes(p.tagRemId!))
-        )
-          throw new TaskError(
-            'conflict',
-            explicit
-              ? 'parentRemId must be an existing non-card topic Rem directly under the daily document'
-              : 'parentRemId must be an existing non-card topic Rem directly under the daily document carrying tagRemId',
-            p.parentRemId
-          );
-      }
-      for (const id of p.reusedCardRemIds ?? [])
-        if (!(await (await this.rem(id)).getCards()).length)
-          throw new TaskError('conflict', 'Reused Rem is not a card', id);
-    } else {
-      const p = input as WikiPlan,
-        root = await this.rem(p.wikiRootId),
-        partition = await this.rem(p.partitionRemId),
-        index = await this.rem(p.indexRemId),
-        log = await this.rem(p.logRemId);
+      const daily = context.objects.find((o) => o.remId === dailyRemId),
+        home = context.objects.find((o) => o.remId === homeRootId),
+        tag = context.objects.find((o) => o.remId === tagRemId);
       if (
-        !(await root.isFolder()) ||
-        !(await root.hasPowerup('u')) ||
-        !(await partition.isFolder()) ||
-        !(await this.within(partition, root._id)) ||
-        !(await index.isDocument()) ||
-        (await index.isFolder()) ||
-        !(await log.isDocument()) ||
-        (await log.isFolder()) ||
-        !(await this.within(index, root._id)) ||
-        !(await this.within(log, root._id))
+        daily?.remType !== 'dailyDocument' ||
+        home?.remType !== 'folder' ||
+        tag?.remType !== 'concept' ||
+        !tag.ancestorRemIds.includes(homeRootId)
       )
         throw new TaskError(
           'conflict',
-          'Expected disabled WIKI folders and index/log documents within WIKI'
+          'Expected existing daily document and HOME descendant Concept Tag'
         );
-      const siblings = p.pages.length ? await partition.getChildrenRem() : [];
-      if (siblings.length > 1000)
-        throw new TaskError('incomplete', 'Partition duplicate scope exceeds limit');
-      const graph = p.pages.length ? await this.indexGraph(index) : undefined,
-        names = new Map<string, string>(),
-        normalize = (s: string) => s.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-      const siblingNames = new Map<string, Set<string>>();
-      for (const sibling of siblings) {
-        const texts = [sibling.text, ...(await sibling.getAliases()).map((a) => a.text)];
-        for (const text of texts) {
-          const name = normalize(await plainText(this.deps.plugin, text));
-          const owners = siblingNames.get(name) ?? new Set<string>();
-          owners.add(sibling._id);
-          siblingNames.set(name, owners);
-        }
-      }
-      for (const pg of p.pages) {
-        const choices = [pg.title, ...(pg.aliases ?? [])].map(normalize);
-        for (const name of choices) {
-          if (names.has(name) && names.get(name) !== pg.key)
-            throw new TaskError('conflict', 'Planned canonical names/aliases collide');
-          names.set(name, pg.key);
-        }
-        const own = pg.remId ?? j.ids[`page:${pg.key}`];
-        await this.indexTarget(index, pg, own, graph);
-        for (const name of choices) {
-          const conflict = [...(siblingNames.get(name) ?? [])].find((id) => id !== own);
-          if (conflict)
-            throw new TaskError(
-              'conflict',
-              'Canonical name or alias already exists; use exact page ID',
-              conflict
-            );
-        }
-        if (own) {
-          const parents: Array<string | null> = [p.partitionRemId],
-            hashes = [await contentHash([pg.title])];
-          if (!pg.remId && !j.completed && j.steps[`page:${pg.key}`]?.state !== 'verified') {
-            if (Object.hasOwn(j.createdParentIds, own)) parents.push(j.createdParentIds[own]);
-            if (j.createdTextHashes[own]) hashes.push(j.createdTextHashes[own]);
-          }
-          await this.assertPlain(own, parents, hashes);
-        }
-        for (const n of pg.nodes) {
-          await this.checkSegments(n.text);
-          if (n.remId) {
-            if (!own)
-              throw new TaskError('conflict', 'Existing node requires existing page', n.remId);
-            const r = await this.rem(n.remId);
-            if (!(await this.plain(r)) || (await r.getParentRem())?._id !== own)
-              throw new TaskError(
-                'conflict',
-                'Existing Wiki node must be plain and within exact page',
-                n.remId
-              );
-            await this.allowedPatch(r, n.expectedTextHash!, n.text, j);
-          }
-        }
-        await this.checkSegments(pg.summary);
-      }
     }
+    for (const card of p.newCards ?? []) {
+      if (Array.isArray(card.question)) await this.checkSegments(card.question);
+      for (const line of card.answer) await this.checkSegments(line);
+    }
+    if (p.parentRemId) {
+      const topic = await this.rem(p.parentRemId);
+      if (
+        (await topic.getParentRem())?._id !== dailyRemId ||
+        topic.type !== RemType.DEFAULT_TYPE ||
+        (await topic.isFolder()) ||
+        (await topic.isDocument()) ||
+        (await topic.getCards()).length ||
+        (!explicit && !nativeIds(await topic.getTagRems()).includes(p.tagRemId!))
+      )
+        throw new TaskError(
+          'conflict',
+          explicit
+            ? 'parentRemId must be an existing non-card topic Rem directly under the daily document'
+            : 'parentRemId must be an existing non-card topic Rem directly under the daily document carrying tagRemId',
+          p.parentRemId
+        );
+    }
+    for (const id of p.reusedCardRemIds ?? [])
+      if (!(await (await this.rem(id)).getCards()).length)
+        throw new TaskError('conflict', 'Reused Rem is not a card', id);
     for (const patch of input.answerPatches ?? []) {
       const answer = await this.rem(patch.remId),
         card = await this.rem(patch.cardRemId);
@@ -677,7 +509,7 @@ export class TaskOperations {
           answer._id
         );
       await this.checkSegments(patch.text);
-      await this.allowedPatch(answer, patch.expectedTextHash, patch.text, j);
+      await this.allowedPatch(answer, patch.expectedTextHash, patch.text);
     }
   }
   private async create(
@@ -739,49 +571,6 @@ export class TaskOperations {
     await this.operationKernel?.checkpoint(key, 'applied');
     if (!this.operationKernel) await save();
   }
-  private async createPlain(
-    k: string,
-    parentId: string,
-    text: TextSegment[],
-    j: Journal,
-    save: () => Promise<void>,
-    beforeWrite?: () => Promise<void>
-  ): Promise<PluginRem> {
-    const ids = await this.create(
-      k,
-      j,
-      save,
-      async () => {
-        const r = await this.deps.plugin.rem.createRem();
-        if (!r) throw new Error('SDK did not create Rem');
-        return [r._id];
-      },
-      beforeWrite
-    );
-    const id = ids[0],
-      desired = await this.richText(text, j),
-      desiredHash = await contentHash(desired),
-      parents: Array<string | null> = [parentId],
-      hashes = [desiredHash];
-    if (!j.completed && j.steps[k].state !== 'verified') {
-      if (Object.hasOwn(j.createdParentIds, id)) parents.push(j.createdParentIds[id]);
-      if (j.createdTextHashes[id]) hashes.push(j.createdTextHashes[id]);
-    }
-    const target = await this.rem(parentId),
-      before = await this.assertPlain(id, parents, hashes);
-    if (before.parentId !== parentId)
-      await this.mutate(() => before.rem.setParent(target), beforeWrite);
-    const fresh = await this.assertPlain(id, [parentId], hashes);
-    if (fresh.textHash !== desiredHash)
-      await this.mutate(() => fresh.rem.setText(desired), beforeWrite);
-    const readback = await this.assertPlain(id, [parentId], [desiredHash]);
-    await this.assertReferences(readback.rem, desired);
-    j.steps[k].state = 'verified';
-    j.ids[k] = id;
-    await this.operationKernel?.checkpoint(k, 'verified');
-    if (!this.operationKernel) await save();
-    return readback.rem;
-  }
   private async patch(
     k: string,
     id: string,
@@ -790,25 +579,17 @@ export class TaskOperations {
     j: Journal,
     save: () => Promise<void>,
     parentId: string,
-    plain: boolean,
     beforeWrite?: () => Promise<void>
   ): Promise<void> {
-    const desired = await this.richText(text, j),
+    const desired = await this.richText(text),
       desiredHash = await contentHash(desired),
       hashes =
         j.completed || j.steps[k]?.state === 'verified' ? [desiredHash] : [desiredHash, expected];
-    let rem: PluginRem, actual: string;
-    if (plain) {
-      const current = await this.assertPlain(id, [parentId], hashes);
-      rem = current.rem;
-      actual = current.textHash;
-    } else {
-      rem = await this.rem(id);
-      if ((await rem.getParentRem())?._id !== parentId)
-        throw new TaskError('conflict', 'Answer parent changed', id);
-      actual = await contentHash(rem.text);
-      if (!hashes.includes(actual)) throw new TaskError('conflict', 'Answer text changed', id);
-    }
+    const rem = await this.rem(id);
+    if ((await rem.getParentRem())?._id !== parentId)
+      throw new TaskError('conflict', 'Answer parent changed', id);
+    const actual = await contentHash(rem.text);
+    if (!hashes.includes(actual)) throw new TaskError('conflict', 'Answer text changed', id);
     if (actual !== desiredHash) {
       await this.mutate(() => rem.setText(desired), beforeWrite);
       this.add(j, 'updated', k, id);
@@ -816,8 +597,7 @@ export class TaskOperations {
     const after = await this.rem(id);
     if (
       (await contentHash(after.text)) !== desiredHash ||
-      (await after.getParentRem())?._id !== parentId ||
-      (plain && !(await this.plain(after)))
+      (await after.getParentRem())?._id !== parentId
     )
       throw new TaskError('incomplete', 'Patch readback did not match', id);
     await this.assertReferences(after, desired);
@@ -959,16 +739,7 @@ export class TaskOperations {
       if (j.cardBaselines[card._id] !== before)
         throw new TaskError('conflict', 'Card identity or review facts changed', card._id);
       await save();
-      await this.patch(
-        `patch:${p.key}`,
-        p.remId,
-        p.expectedTextHash,
-        p.text,
-        j,
-        save,
-        p.cardRemId,
-        false
-      );
+      await this.patch(`patch:${p.key}`, p.remId, p.expectedTextHash, p.text, j, save, p.cardRemId);
       await this.assertCardIdentity(card._id, before);
       if (capture) {
         const key = `patch:${p.key}`;
@@ -1283,7 +1054,7 @@ export class TaskOperations {
         const q = cards[i].question;
         await this.createdText(
           bound.cards[i]._id,
-          typeof q === 'string' ? [q] : await this.richText(q, j),
+          typeof q === 'string' ? [q] : await this.richText(q),
           j,
           save
         );
@@ -1291,7 +1062,7 @@ export class TaskOperations {
           const before = await this.cardIdentityHash(bound.cards[i]._id);
           await this.createdText(
             bound.answers[i][n]._id,
-            await this.richText(cards[i].answer[n], j),
+            await this.richText(cards[i].answer[n]),
             j,
             save
           );
@@ -1405,237 +1176,5 @@ export class TaskOperations {
       this.add(j, 'reused', `reuse:${id}`, id);
       await this.facts([id], receipt);
     }
-  }
-  private async indexGraph(index: PluginRem): Promise<{ entries: PluginRem[]; flat: boolean }> {
-    const entries: PluginRem[] = [],
-      seen = new Set([index._id]),
-      queue = [{ rem: index, depth: 0 }];
-    let flat = true;
-    for (let i = 0; i < queue.length; i++) {
-      const { rem, depth } = queue[i],
-        children = await rem.getChildrenRem();
-      nativeIds(children);
-      if (depth > 0 && children.length) flat = false;
-      if (depth >= 100 && children.length) throw new TaskError('incomplete', 'Index depth limit');
-      for (const child of children) {
-        if (seen.has(child._id)) throw new TaskError('incomplete', 'Repeated entity in index');
-        if (entries.length >= 1000) throw new TaskError('incomplete', 'Index scope limit');
-        if ((await child.getParentRem())?._id !== rem._id)
-          throw new TaskError('incomplete', 'Index child/parent edge inconsistent', child._id);
-        seen.add(child._id);
-        entries.push(child);
-        queue.push({ rem: child, depth: depth + 1 });
-      }
-    }
-    return { entries, flat };
-  }
-  private async indexEntries(
-    index: PluginRem,
-    pageId: string,
-    graph?: { entries: PluginRem[]; flat: boolean }
-  ): Promise<PluginRem[]> {
-    const entries: PluginRem[] = [];
-    for (const entry of (graph ?? (await this.indexGraph(index))).entries) {
-      const first = (entry.text ?? []).find((p) => typeof p !== 'string' || p.trim()),
-        owner =
-          first && typeof first === 'object' && 'i' in first && first.i === 'q' && '_id' in first
-            ? first._id
-            : undefined;
-      if (owner === pageId) entries.push(entry);
-      else if (!owner && (await entry.remsBeingReferenced()).some((r) => r._id === pageId))
-        throw new TaskError('conflict', 'Index primary page reference is ambiguous', entry._id);
-    }
-    if (entries.length > 1) throw new TaskError('conflict', 'Duplicate index page owner', pageId);
-    return entries;
-  }
-  private async indexTarget(
-    index: PluginRem,
-    page: WikiPlan['pages'][number],
-    pageId?: string,
-    graph?: { entries: PluginRem[]; flat: boolean }
-  ): Promise<{ entry?: PluginRem; parentId: string }> {
-    graph ??= await this.indexGraph(index);
-    const entry = pageId ? (await this.indexEntries(index, pageId, graph))[0] : undefined,
-      parentId = entry ? (await entry.getParentRem())?._id : undefined;
-    if (page.indexParentRemId !== undefined) {
-      if (
-        page.indexParentRemId !== index._id &&
-        !graph.entries.some((r) => r._id === page.indexParentRemId)
-      )
-        throw new TaskError(
-          'conflict',
-          'Index parent is outside the selected index',
-          page.indexParentRemId
-        );
-      if (entry && parentId !== page.indexParentRemId)
-        throw new TaskError('conflict', 'Existing index entry has a different parent', entry._id);
-    } else if (!entry && !graph.flat)
-      throw new TaskError(
-        'conflict',
-        'Grouped index requires an explicit indexParentRemId for a new entry',
-        pageId
-      );
-    if (entry && !parentId) throw new TaskError('conflict', 'Index entry lost parent', entry._id);
-    return { entry, parentId: page.indexParentRemId ?? parentId ?? index._id };
-  }
-  private async assertIndexParent(parentId: string, indexId: string): Promise<void> {
-    const target = await this.rem(parentId);
-    if (target._id === indexId) return;
-    const parent = await target.getParentRem();
-    if (!parent || !(await this.within(parent, indexId)))
-      throw new TaskError('conflict', 'Index parent moved outside the selected index', parentId);
-  }
-  private async wiki(
-    p: WikiPlan,
-    j: Journal,
-    save: () => Promise<void>,
-    receipt: TaskReceipt
-  ): Promise<void> {
-    for (const pg of p.pages) {
-      const k = `page:${pg.key}`;
-      if (pg.remId) {
-        j.ids[k] = pg.remId;
-        this.add(j, 'reused', pg.key, pg.remId);
-      } else j.ids[k] = (await this.createPlain(k, p.partitionRemId, [pg.title], j, save))._id;
-      await save();
-    }
-    for (const pg of p.pages) {
-      const id = j.ids[`page:${pg.key}`],
-        r = await this.rem(id);
-      for (const alias of pg.aliases ?? []) {
-        if (!(await r.getAliases()).some((a) => same(a.text, [alias]))) {
-          if (j.completed) throw new TaskError('conflict', 'Completed alias changed', id);
-          const current = await this.assertPlain(
-            id,
-            [p.partitionRemId],
-            [await contentHash([pg.title])]
-          );
-          await this.mutate(() => current.rem.getOrCreateAliasWithText([alias]));
-          this.add(j, 'updated', `aliases:${pg.key}`, id);
-        }
-        if (!(await r.getAliases()).some((a) => same(a.text, [alias])))
-          throw new TaskError('incomplete', 'Alias readback mismatch', id);
-      }
-      for (const n of pg.nodes) {
-        const k = `node:${n.key}`;
-        if (n.remId) {
-          await this.patch(k, n.remId, n.expectedTextHash!, n.text, j, save, id, true);
-          j.ids[k] = n.remId;
-        } else j.ids[k] = (await this.createPlain(k, id, n.text, j, save))._id;
-      }
-      const index = await this.rem(p.indexRemId),
-        { entry, parentId } = await this.indexTarget(index, pg, id),
-        beforeWrite = () => this.assertIndexParent(parentId, p.indexRemId),
-        k = `index:${pg.key}`,
-        text: TextSegment[] = [{ remId: id }, ' — ', ...pg.summary];
-      if (j.ids[k] && entry?._id !== j.ids[k])
-        throw new TaskError('conflict', 'Recorded index owner changed', id);
-      if (entry) {
-        j.ids[k] = entry._id;
-        j.textPreconditions[k] ??=
-          j.createdTextHashes[entry._id] ?? (await contentHash(entry.text));
-        await save();
-        await this.patch(
-          k,
-          entry._id,
-          j.textPreconditions[k],
-          text,
-          j,
-          save,
-          parentId,
-          true,
-          beforeWrite
-        );
-      } else j.ids[k] = (await this.createPlain(k, parentId, text, j, save, beforeWrite))._id;
-      if (!(await r.isCollapsed(p.partitionRemId))) {
-        if (j.completed) throw new TaskError('conflict', 'Completed page outline changed', id);
-        const current = await this.assertPlain(
-          id,
-          [p.partitionRemId],
-          [await contentHash([pg.title])]
-        );
-        await this.mutate(() => current.rem.setIsCollapsed(true, p.partitionRemId));
-      }
-      await save();
-    }
-    await this.patchAnswers(p.answerPatches ?? [], j, save, receipt, false);
-    const activity = [...j.created, ...j.updated].some((e) =>
-      /^(page|node|index|aliases):/.test(e.key)
-    );
-    if (activity) {
-      const text: TextSegment[] = [`${j.batchDate} update ${j.batchKey}: `];
-      for (const pg of p.pages) text.push({ remId: j.ids[`page:${pg.key}`] }, ' ');
-      j.ids['log:batch'] = (await this.createPlain('log:batch', p.logRemId, text, j, save))._id;
-    }
-    for (const pg of p.pages) {
-      const id = j.ids[`page:${pg.key}`],
-        { entry, parentId } = await this.indexTarget(await this.rem(p.indexRemId), pg, id),
-        expected = await contentHash(await this.richText([{ remId: id }, ' — ', ...pg.summary], j));
-      if (
-        !entry ||
-        entry._id !== j.ids[`index:${pg.key}`] ||
-        (await contentHash(entry.text)) !== expected ||
-        !(await entry.remsBeingReferenced()).some((r) => r._id === id) ||
-        !(await this.plain(entry))
-      )
-        throw new TaskError('incomplete', 'Index unique owner/text/reference proof failed', id);
-      await this.assertPlain(id, [p.partitionRemId], [await contentHash([pg.title])]);
-      for (const n of pg.nodes)
-        await this.assertPlain(
-          j.ids[`node:${n.key}`],
-          [id],
-          [await contentHash(await this.richText(n.text, j))]
-        );
-      receipt.checks.push({
-        kind: 'wikiIndex',
-        remId: id,
-        status: 'passed',
-        expected: { ownerCount: 1, parentRemId: parentId },
-        actual: { ownerCount: 1, indexRemId: entry._id, parentRemId: parentId },
-      });
-    }
-    const pageIds = p.pages.map((pg) => j.ids[`page:${pg.key}`]);
-    if (!(await (await this.rem(p.wikiRootId)).hasPowerup('u')))
-      throw new TaskError('incomplete', 'Wiki card generation is no longer disabled', p.wikiRootId);
-    receipt.checks.push({
-      kind: 'powerup',
-      remId: p.wikiRootId,
-      status: 'passed',
-      expected: { code: 'u', value: true },
-      actual: true,
-    });
-    const roots = [
-      ...new Set([
-        ...pageIds,
-        ...p.pages.map((pg) => j.ids[`index:${pg.key}`]),
-        ...(j.ids['log:batch'] ? [j.ids['log:batch']] : []),
-      ]),
-    ];
-    // Each affected subtree is complete; the caller owns final whole-Wiki proof.
-    for (let start = 0; start < roots.length; start += 10) {
-      const subtreeRootIds = roots.slice(start, start + 10);
-      const verified = await verifyScope(this.deps.plugin, {
-        schemaVersion: 1,
-        inspect: { schemaVersion: 1, subtreeRootIds },
-        expectations: [
-          ...subtreeRootIds.map((remId) => ({
-            kind: 'zeroCards' as const,
-            remId,
-            noCardStructure: true,
-          })),
-          ...pageIds
-            .filter((id) => subtreeRootIds.includes(id))
-            .flatMap((remId) => [
-              { kind: 'parent' as const, remId, value: p.partitionRemId },
-              { kind: 'remType' as const, remId, value: 'text' },
-            ]),
-        ],
-      });
-      receipt.checks.push(...verified.checks);
-      receipt.errors.push(...verified.errors);
-      if (verified.status !== 'passed')
-        throw new TaskError('incomplete', 'Affected Wiki subtree verification failed');
-    }
-    await this.facts(Object.values(j.ids), receipt);
   }
 }

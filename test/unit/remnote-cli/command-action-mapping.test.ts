@@ -200,28 +200,36 @@ describe('command bridge action mapping', () => {
     });
     outlineSpy.mockRestore();
 
-    const listSpy = await runCommand(['todo', 'list', '--tag-id', 'todo-tag']);
-    expect(listSpy).toHaveBeenCalledWith('list_todos', { tagRemId: 'todo-tag' });
+    const listSpy = await runCommand(['todo', 'list', '--status', 'all']);
+    expect(listSpy).toHaveBeenCalledWith('list_todos', { status: 'all' });
     listSpy.mockRestore();
 
-    const completeSpy = await runCommand([
-      'todo',
-      'complete',
-      'todo-1',
-      '--todo-tag-id',
-      'todo-tag',
-      '--done-tag-id',
-      'done-tag',
-      '--apply',
-    ]);
+    const defaultListSpy = await runCommand(['todo', 'list']);
+    expect(defaultListSpy).toHaveBeenCalledWith('list_todos', { status: 'unfinished' });
+    defaultListSpy.mockRestore();
+
+    const scopedListSpy = await runCommand(['todo', 'list', '--root-id', 'root']);
+    expect(scopedListSpy).toHaveBeenCalledWith('list_todos', {
+      status: 'unfinished',
+      rootRemId: 'root',
+    });
+    scopedListSpy.mockRestore();
+
+    const completeSpy = await runCommand(['todo', 'complete', 'todo-1', '--apply']);
     expect(completeSpy).toHaveBeenCalledWith('update_todo', {
       remId: 'todo-1',
       finished: true,
-      todoTagRemId: 'todo-tag',
-      doneTagRemId: 'done-tag',
       dryRun: false,
     });
     completeSpy.mockRestore();
+
+    const reopenSpy = await runCommand(['todo', 'reopen', 'todo-1']);
+    expect(reopenSpy).toHaveBeenCalledWith('update_todo', {
+      remId: 'todo-1',
+      finished: false,
+      dryRun: true,
+    });
+    reopenSpy.mockRestore();
   });
 
   it('maps sdk capabilities to get_sdk_capabilities', async () => {

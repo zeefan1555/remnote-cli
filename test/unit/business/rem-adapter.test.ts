@@ -793,31 +793,48 @@ describe('RemAdapter', () => {
       ).rejects.toThrow('Write operations are disabled');
     });
 
-    it('lists tagged todos and atomically completes one', async () => {
-      const todoTag = plugin.addTestRem('todo-tag', 'TODO');
-      plugin.addTestRem('done-tag', 'DONE');
+    it('lists native todos, ignores TODO labels, and changes only native status', async () => {
+      const legacyTag = plugin.addTestRem('legacy-tag', 'TODO');
+      const legacyLabel = plugin.addTestRem('legacy-label', 'TODO');
+      legacyLabel.setTagRemsMock([legacyTag]);
       const todo = plugin.addTestRem('todo-1', 'Finish task');
       todo.setTodoMock(true, 'Unfinished');
-      todo.setTagRemsMock([todoTag]);
-      todoTag.setTaggedRemsMock([todo]);
+      todo.setTagRemsMock([legacyTag]);
+      const completed = plugin.addTestRem('todo-2', 'Already done');
+      completed.setTodoMock(true, 'Finished');
 
-      await expect(adapter.listTodos({ tagRemId: 'todo-tag' })).resolves.toEqual({
-        tagRemId: 'todo-tag',
+      await expect(adapter.listTodos({})).resolves.toEqual({
+        status: 'unfinished',
+        scanned: 4,
         todos: [
           {
             remId: 'todo-1',
             title: 'Finish task',
-            isTodo: true,
             todoStatus: 'Unfinished',
           },
         ],
       });
+      await expect(adapter.listTodos({ status: 'all' })).resolves.toMatchObject({
+        status: 'all',
+        scanned: 4,
+        todos: [
+          { remId: 'todo-1', todoStatus: 'Unfinished' },
+          { remId: 'todo-2', todoStatus: 'Finished' },
+        ],
+      });
+
+      await expect(adapter.updateTodo({ remId: 'todo-1', finished: true })).resolves.toMatchObject({
+        dryRun: true,
+        changed: true,
+        todoStatus: 'Unfinished',
+        oldTodoStatus: 'Unfinished',
+        newTodoStatus: 'Finished',
+      });
+      expect(await todo.getTodoStatus()).toBe('Unfinished');
 
       const result = await adapter.updateTodo({
         remId: 'todo-1',
         finished: true,
-        todoTagRemId: 'todo-tag',
-        doneTagRemId: 'done-tag',
         dryRun: false,
       });
       expect(result).toMatchObject({
@@ -825,12 +842,35 @@ describe('RemAdapter', () => {
         changed: true,
         oldTodoStatus: 'Unfinished',
         newTodoStatus: 'Finished',
-        addedTagRemIds: ['done-tag'],
-        removedTagRemIds: ['todo-tag'],
       });
       expect(await todo.getTodoStatus()).toBe('Finished');
-      expect(todo.getTags()).toContain('done-tag');
-      expect(todo.getTags()).not.toContain('todo-tag');
+      expect((await todo.getTagRems()).map((tag) => tag._id)).toEqual(['legacy-tag']);
+      await expect(
+        adapter.updateTodo({ remId: 'legacy-label', finished: true, dryRun: false })
+      ).rejects.toThrow('not a native RemNote TODO');
+    });
+
+    it('scopes native todo discovery to an exact root without date APIs', async () => {
+      const root = plugin.addTestRem('todo-root', 'Root');
+      const inside = plugin.addTestRem('todo-inside', 'Inside');
+      inside.setTodoMock(true, 'Unfinished');
+      await inside.setParent(root);
+
+      await expect(adapter.listTodos({ rootRemId: root._id })).resolves.toEqual({
+        status: 'unfinished',
+        scanned: 2,
+        todos: [
+          {
+            remId: 'todo-inside',
+            title: 'Inside',
+            todoStatus: 'Unfinished',
+            parentRemId: 'todo-root',
+            parentTitle: 'Root',
+          },
+        ],
+      });
+
+      expect(plugin.date.getTodaysDoc).not.toHaveBeenCalled();
     });
   });
 

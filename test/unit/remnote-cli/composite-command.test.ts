@@ -27,14 +27,6 @@ const plans = {
     schemaVersion: 1,
     reusedCardRemIds: ['card'],
   },
-  wiki: {
-    schemaVersion: 1,
-    wikiRootId: 'wiki',
-    partitionRemId: 'part',
-    indexRemId: 'index',
-    logRemId: 'log',
-    pages: [{ key: 'p', title: 'Page', nodes: [], summary: ['Summary'] }],
-  },
 };
 const taskReceipt = {
   schemaVersion: 1,
@@ -81,47 +73,41 @@ describe('four composite commands', () => {
       expect(summary[field]).toEqual(partial[field]);
   });
 
-  it.each(['flashcards', 'wiki'] as const)(
-    'summarizes %s in failure details without losing recovery evidence',
-    async (kind) => {
-      vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans[kind]));
-      const result = {
-        ...taskReceipt,
-        kind,
-        status: 'partial',
-        complete: false,
-        verificationScope: 'affected_objects',
-        checks: [
-          { kind: 'parent', remId: 'r', status: 'passed' },
-          { kind: 'references', remId: 'r', status: 'failed', message: 'Missing target' },
-        ],
-        errors: [{ code: 'incomplete', message: 'Failed proof' }],
-      };
-      vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
+  it('summarizes a failed card apply without losing recovery evidence', async () => {
+    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
+    const result = {
+      ...taskReceipt,
+      status: 'partial',
+      complete: false,
+      checks: [
+        { kind: 'parent', remId: 'r', status: 'passed' },
+        { kind: 'references', remId: 'r', status: 'failed', message: 'Missing target' },
+      ],
+      errors: [{ code: 'incomplete', message: 'Failed proof' }],
+    };
+    vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
 
-      const command = kind === 'flashcards' ? ['card', 'apply'] : ['wiki', 'apply'];
-      const output = await runCliForTest([
-        ...command,
-        '--plan',
-        '-',
-        '--idempotency-key',
-        'batch',
-        '--apply',
-        '--summary',
-      ]);
-      const failure = parseFailure(output.stderr);
-      const details = failure.details as Record<string, unknown>;
+    const output = await runCliForTest([
+      'card',
+      'apply',
+      '--plan',
+      '-',
+      '--idempotency-key',
+      'batch',
+      '--apply',
+      '--summary',
+    ]);
+    const failure = parseFailure(output.stderr);
+    const details = failure.details as Record<string, unknown>;
 
-      expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
-      expect(details.ids).toEqual(result.ids);
-      expect(details.facts).toEqual(result.facts);
-      expect(details.planHash).toBe(result.planHash);
-      expect(details.verificationScope).toBe('affected_objects');
-      expect(details.checks).toEqual([result.checks[1]]);
-      expect((details.counts as { checks: number }).checks).toBe(2);
-      expect(details.errors).toEqual(result.errors);
-    }
-  );
+    expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+    expect(details.ids).toEqual(result.ids);
+    expect(details.facts).toEqual(result.facts);
+    expect(details.planHash).toBe(result.planHash);
+    expect(details.checks).toEqual([result.checks[1]]);
+    expect((details.counts as { checks: number }).checks).toBe(2);
+    expect(details.errors).toEqual(result.errors);
+  });
 
   it('verification summary omits bodies and history', async () => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(
@@ -224,26 +210,27 @@ describe('four composite commands', () => {
     }
   );
 
-  it.each(['flashcards', 'wiki'] as const)(
-    'wraps %s inner plan and defaults preview',
-    async (kind) => {
-      vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans[kind]));
-      const execute = vi
-        .spyOn(DirectClient.prototype, 'execute')
-        .mockResolvedValue({ ...taskReceipt, kind });
+  it('wraps a flashcard inner plan and defaults preview', async () => {
+    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
+    const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(taskReceipt);
 
-      const command = kind === 'flashcards' ? ['card', 'apply'] : ['wiki', 'apply'];
-      const output = await runCliForTest([...command, '--plan', '-', '--idempotency-key', 'batch']);
+    const output = await runCliForTest([
+      'card',
+      'apply',
+      '--plan',
+      '-',
+      '--idempotency-key',
+      'batch',
+    ]);
 
-      expect(execute).toHaveBeenCalledExactlyOnceWith(kind + '_apply', {
-        schemaVersion: 1,
-        plan: plans[kind],
-        idempotencyKey: 'batch',
-        dryRun: true,
-      });
-      expect(parseSuccess(output.stdout)).toEqual({ ...taskReceipt, kind });
-    }
-  );
+    expect(execute).toHaveBeenCalledExactlyOnceWith('flashcards_apply', {
+      schemaVersion: 1,
+      plan: plans.flashcards,
+      idempotencyKey: 'batch',
+      dryRun: true,
+    });
+    expect(parseSuccess(output.stdout)).toEqual(taskReceipt);
+  });
 
   it.each(['preview', 'verified', 'partial', 'unknown', 'incomplete', 'conflict'])(
     'applied receipt %s only succeeds for verified',
@@ -280,13 +267,13 @@ describe('four composite commands', () => {
   );
 
   it('never retries a failed apply', async () => {
-    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.wiki));
+    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
     const execute = vi
       .spyOn(DirectClient.prototype, 'execute')
       .mockRejectedValue(new Error('Outcome unknown'));
 
     const output = await runCliForTest([
-      'wiki',
+      'card',
       'apply',
       '--plan',
       '-',
@@ -308,7 +295,6 @@ describe('four composite commands', () => {
       ['rem', 'context'],
       ['rem', 'verify', 'scope'],
       ['card', 'apply'],
-      ['wiki', 'apply'],
     ]) {
       let leaf = program;
       for (const name of path) leaf = leaf.commands.find((candidate) => candidate.name() === name)!;
@@ -331,16 +317,11 @@ describe('four composite commands', () => {
       'Patch/reuse-only',
       'answerPatches',
       'expectedTextHash',
-      'pageKey',
       'facts',
       'ids',
       'calendar freshness',
       'after midnight',
       'original recorded diary',
-      'full bounded tree',
-      'indexParentRemId',
-      'never moves existing entries',
-      'Foreign or conflicting parents fail before writes',
       'active knowledge base',
       'never narrow away required',
     ])

@@ -30,7 +30,6 @@ import { registerReviewStatsCommand } from './commands/review-stats.js';
 import { registerSdkCommands } from './commands/sdk.js';
 import { registerOutlineCommand } from './commands/outline.js';
 import { registerTodoCommand } from './commands/todo.js';
-import { registerSyncCommands } from './commands/sync.js';
 import { registerContractCommand } from './commands/contract.js';
 import { registerSchemaCommand } from './commands/schema.js';
 import { registerDoctorCommand } from './commands/doctor.js';
@@ -83,9 +82,6 @@ export function createProgram(
   const card = catalog.group(program, 'card', {
     description: 'Apply card tasks and inspect native review facts',
   });
-  const wiki = catalog.group(program, 'wiki', {
-    description: 'Plan and apply Wiki tasks',
-  });
   const table = catalog.group(program, 'table', {
     description: 'Read Advanced Tables',
   });
@@ -105,7 +101,7 @@ export function createProgram(
   registerAssertCommand(program, catalog, rem);
   registerPowerupCommand(program, catalog, rem);
   registerCompositeCommands(program, catalog, rem);
-  registerTaskCommands(program, catalog, card, wiki);
+  registerTaskCommands(program, catalog, card);
   registerReviewStatsCommand(program, catalog, card);
   registerOutlineCommand(program, catalog, rem);
   registerTodoCommand(program, catalog);
@@ -120,7 +116,6 @@ export function createProgram(
   registerSetPropertyCommand(program, catalog, property);
   registerJournalCommand(program, catalog, journal);
   registerReadTableCommand(program, catalog, table);
-  registerSyncCommands(program, catalog);
   registerBatchCommand(program, catalog, version);
   registerStatusCommand(program, catalog);
   registerSchemaCommand(program, catalog);

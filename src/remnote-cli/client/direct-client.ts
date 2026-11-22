@@ -5,14 +5,13 @@ import { RemAdapter } from '../../business/rem-adapter.js';
 import * as schemas from '../../schemas/remnote-schemas.js';
 import { InspectManySchema, VerifyScopeSchema } from '../../schemas/composite-schemas.js';
 import { InspectStateSchema, PowerupGetSchema } from '../../schemas/state-schemas.js';
-import { FlashcardsApplySchema, WikiApplySchema } from '../../schemas/task-schemas.js';
+import { FlashcardsApplySchema } from '../../schemas/task-schemas.js';
 import { resolveManagedImage } from '../../media.js';
 import { Connection } from './connection.js';
 import { remnoteCliStateHome } from './state-home.js';
 import { verifiedCatalog, type CapabilityResult } from './sdk-capabilities.js';
 import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
-import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
 import { ReadSession } from './session.js';
 import { CliFailure, isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
 
@@ -43,7 +42,6 @@ const operations = {
   inspect_state: ['inspectState', InspectStateSchema],
   powerup_get: ['getPowerupSlot', PowerupGetSchema],
   flashcards_apply: ['applyFlashcards', FlashcardsApplySchema],
-  wiki_apply: ['applyWiki', WikiApplySchema],
 } as const;
 const READ_ONLY_ACTIONS = new Set([
   'get_status',
@@ -58,6 +56,7 @@ const READ_ONLY_ACTIONS = new Set([
   'inspect_state',
   'powerup_get',
   'get_media',
+  'list_todos',
 ]);
 const PREVIEWABLE_ACTIONS = new Set([
   'set_outline_collapsed',
@@ -66,7 +65,6 @@ const PREVIEWABLE_ACTIONS = new Set([
   'set_document_status',
   'delete_rem',
   'flashcards_apply',
-  'wiki_apply',
 ]);
 export interface ClientOptions {
   kbId?: string;
@@ -80,7 +78,6 @@ export class DirectClient {
   private adapter?: RemAdapter;
   private catalog?: CapabilityResult;
   private state?: LocalState;
-  private workspace?: SdkWorkspaceBackend;
   private startedAt = performance.now();
   private holds = 0;
   private persist = true;
@@ -118,16 +115,6 @@ export class DirectClient {
     const kbKey = createHash('sha256').update(identity.knowledgeBaseId).digest('hex');
     this.state = new LocalState(join(remnoteCliStateHome(), 'state', kbKey));
     const plugin = remoteSdk(this.connection, catalog, this.options.allowDestructive === true);
-    this.workspace = new SdkWorkspaceBackend(plugin, this.state, async () => {
-      const status = (await this.connection!.request('get_status', {})) as Record<string, unknown>;
-      if (typeof status.knowledgeBaseId !== 'string')
-        throw new Error('Incomplete live workspace status');
-      return {
-        kbId: status.knowledgeBaseId,
-        writable: true,
-        destructive: this.options.allowDestructive === true,
-      };
-    });
     const supportedCapabilities = new Set(
       catalog.capabilities
         .filter((capability) => capability.status === 'supported')
@@ -208,11 +195,6 @@ export class DirectClient {
     }
     // The table is local CLI code, not user-controlled SDK dispatch.
     return Reflect.apply(Reflect.get(this.adapter!, operation![0]), this.adapter!, [input]);
-  }
-  /** Called lazily, only after offline workspace parsing/lint. Shares the batch connection. */
-  async workspaceBackend(): Promise<SdkWorkspaceBackend> {
-    await this.connect();
-    return this.workspace!;
   }
   async close(): Promise<void> {
     if (this.holds > 0) return;

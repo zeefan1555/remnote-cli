@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  FlashcardsApplySchema,
-  FlashcardsPlanSchema,
-  WikiApplySchema,
-  WikiPlanSchema,
-} from '../../src/schemas/task-schemas.js';
+import { FlashcardsApplySchema, FlashcardsPlanSchema } from '../../src/schemas/task-schemas.js';
 const hash = 'a'.repeat(64);
 const card = { key: 'c', question: 'Question?', answer: [['Answer', { remId: 'source' }]] };
 const flash = {
@@ -21,37 +16,15 @@ const patch = {
   expectedTextHash: hash,
   text: ['New'],
 };
-const page = {
-  key: 'p',
-  title: 'Page',
-  nodes: [{ key: 'n', text: [{ pageKey: 'p' }] }],
-  summary: ['Summary'],
-};
-const wiki = {
-  schemaVersion: 1,
-  wikiRootId: 'wiki',
-  partitionRemId: 'part',
-  indexRemId: 'index',
-  logRemId: 'log',
-  pages: [page],
-};
 describe('task plan contract', () => {
   it('defaults to preview and permits only reviewed envelope fields', () => {
     expect(
       FlashcardsApplySchema.parse({ schemaVersion: 1, plan: flash, idempotencyKey: 'batch' }).dryRun
     ).toBe(true);
     expect(
-      WikiApplySchema.parse({
+      FlashcardsApplySchema.safeParse({
         schemaVersion: 1,
-        plan: wiki,
-        idempotencyKey: 'batch',
-        dryRun: false,
-      }).dryRun
-    ).toBe(false);
-    expect(
-      WikiApplySchema.safeParse({
-        schemaVersion: 1,
-        plan: wiki,
+        plan: flash,
         idempotencyKey: 'batch',
         deleteAll: true,
       }).success
@@ -109,26 +82,6 @@ describe('task plan contract', () => {
   ])('rejects unsafe flashcard input %#', (v) =>
     expect(FlashcardsPlanSchema.safeParse({ ...flash, ...v }).success).toBe(false)
   );
-  it.each([
-    { pages: [] },
-    { pages: [{ ...page, indexParentRemId: '' }] },
-    { pages: [{ ...page, indexParentRemId: ' ' }] },
-    { pages: [{ ...page, indexParentRemId: 'x'.repeat(257) }] },
-    { pages: [{ ...page, indexParentRemId: 1 }] },
-    { pages: [{ ...page, aliases: [' '] }] },
-    { pages: [{ ...page, aliases: ['x'.repeat(201)] }] },
-    { pages: [{ ...page, nodes: [{ key: 'n', remId: 'r', text: ['x'] }] }] },
-    { pages: [{ ...page, nodes: [{ key: 'n', text: ['x'], expectedTextHash: hash }] }] },
-    { pages: [{ ...page, summary: [{ pageKey: 'missing' }] }] },
-    { pages: [{ ...page, nodes: [{ key: 'p', text: ['x'] }] }] },
-    { answerPatches: [{ ...patch, key: 'n' }] },
-    { answerPatches: [{ ...patch, text: [{ pageKey: 'missing' }] }] },
-    { pages: [{ ...page, summary: [] }] },
-    { pages: [{ ...page, summary: [{ pageKey: 'p', remId: 'r' }] }] },
-    { pages: [{ ...page, nodes: Array(101).fill({ key: 'n', text: ['x'] }) }] },
-  ])('rejects unsafe Wiki input %#', (v) =>
-    expect(WikiPlanSchema.safeParse({ ...wiki, ...v }).success).toBe(false)
-  );
   it('accepts a TextSegment question and names the fix for literal brackets', () => {
     expect(
       FlashcardsPlanSchema.safeParse({
@@ -170,12 +123,6 @@ describe('task plan contract', () => {
       ],
     };
     expect(FlashcardsPlanSchema.parse(coded)).toMatchObject({ kind: 'create', ...coded });
-    expect(
-      WikiPlanSchema.safeParse({
-        ...wiki,
-        pages: [{ ...page, nodes: [{ key: 'n', text: [{ code: 'nope' }] }] }],
-      }).success
-    ).toBe(false);
   });
   it('supports guarded patches/reuse and exact existing nodes', () => {
     expect(
@@ -184,25 +131,6 @@ describe('task plan contract', () => {
     expect(
       FlashcardsPlanSchema.safeParse({ schemaVersion: 1, reusedCardRemIds: ['r'] }).success
     ).toBe(true);
-    expect(WikiPlanSchema.safeParse({ ...wiki, pages: [], answerPatches: [patch] }).success).toBe(
-      true
-    );
-    expect(
-      WikiPlanSchema.safeParse({
-        ...wiki,
-        pages: [
-          {
-            ...page,
-            remId: 'p',
-            nodes: [{ key: 'n', remId: 'n', text: [''], expectedTextHash: hash }],
-          },
-        ],
-      }).success
-    ).toBe(true);
-  });
-  it('accepts an exact optional Wiki index parent', () => {
-    const plan = { ...wiki, pages: [{ ...page, indexParentRemId: 'section' }] };
-    expect(WikiPlanSchema.parse(plan)).toEqual(plan);
   });
   it('accepts plans beyond the former UTF8 size bound and still bounds the idempotency key', () => {
     expect(
@@ -232,19 +160,6 @@ describe('task plan contract', () => {
       answerPatches: patches,
     };
     expect(FlashcardsPlanSchema.safeParse(p).success).toBe(true);
-  });
-  it('accepts Wiki plans beyond the former page, node, alias and receipt bounds', () => {
-    const pages = Array.from({ length: 11 }, (_, i) => ({
-      ...page,
-      key: `p${i}`,
-      aliases: Array.from({ length: 21 }, (_, j) => `alias-${i}-${j}`),
-      nodes: Array.from({ length: 101 }, (_, j) => ({ key: `n${i}-${j}`, text: ['x'] })),
-    }));
-    const answerPatches = Array.from({ length: 101 }, (_, i) => ({
-      ...patch,
-      key: `patch${i}`,
-    }));
-    expect(WikiPlanSchema.safeParse({ ...wiki, pages, answerPatches }).success).toBe(true);
   });
   it('accepts explicit tags instead of homeRootId/tagRemId and enforces their keys', () => {
     const base = { schemaVersion: 1, dailyRemId: 'day', newCards: [card] };

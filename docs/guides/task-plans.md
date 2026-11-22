@@ -1,10 +1,9 @@
 # Preview-First Task Plans
 
-Flashcard and Wiki task composition runs locally in `remnote-cli` using the plugin's SDK gateway.
+Flashcard task composition runs locally in `remnote-cli` using the plugin's SDK gateway.
 
 ```bash
 remnote-cli card apply --plan /tmp/cards.json --idempotency-key cards-batch-1
-remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-batch-1
 ```
 
 The CLI reads the **inner plan** from a UTF-8 JSON file or stdin (`-`), then wraps it as
@@ -16,7 +15,7 @@ see the [CLI skill](../../skills/remnote/SKILL.md#safety) for authorization and 
 Neither preview nor apply ever looks up dates or creates daily documents. Task setters recheck the active KB and official authorization
 immediately before each SDK mutation after awaited reads. This is not a transaction or rollback guarantee.
 
-Both task commands need the Bridge's separate `KnowledgeBaseInfo: Read` permission for current-KB identity and
+`card apply` needs the Bridge's separate `KnowledgeBaseInfo: Read` permission for current-KB identity and
 journal isolation; `All` content access does not include it. Existing installations require explicit permission
 approval. A denied identity lookup stops preview/apply before any content write; do not bypass KB isolation.
 
@@ -35,7 +34,7 @@ Each variant declares the official SDK capabilities it needs. The live catalog i
 checked once before preview reads and before the first mutation; a missing capability
 returns `missing_capability` without writing.
 
-Flashcard and workspace mutations share `OperationKernel`. It persists `started`
+Flashcard mutations use `OperationKernel`. It persists `started`
 before the native call and records `verified` only after readback. Each task step
 owns one mutation boundary: a created scaffold is `applied` as soon as its exact
 IDs are durably saved, while binding and content writes remain separate. Failure
@@ -52,12 +51,11 @@ after an `applied` mutation is `partial` and can resume under the same key.
 - Question `TextSegments`: combined literal text at most 1000 characters and either nonblank text or a native reference
 - Aliases: nonblank strings, at most 200 characters each
 - `TextSegments`: array of 1–100 entries; each is a string (at most 10000 characters, empty allowed), or exact `{remId}`
-- A flashcard answer line may instead be one code-block segment: `{"code":"line1\nline2","language":"plaintext"}`. `code` is 1–10000 characters and may contain newlines. `language` is optional, defaults to `plaintext`, and matches `^[A-Za-z0-9_+#.-]{1,64}$` (`python`, `c++`, and `c#` are valid). A code segment cannot share its line with other segments. Questions and Wiki text do not accept code segments.
+- A flashcard answer line may instead be one code-block segment: `{"code":"line1\nline2","language":"plaintext"}`. `code` is 1–10000 characters and may contain newlines. `language` is optional, defaults to `plaintext`, and matches `^[A-Za-z0-9_+#.-]{1,64}$` (`python`, `c++`, and `c#` are valid). A code segment cannot share its line with other segments. Questions do not accept code segments.
 - Apply stores that line as one RichText element `{i:"m",text,code:true,language}` with `language` defaulting to `plaintext` (the SDK `richText.code` shape). The identity check and `answerLines.verified` rules are in Receipt and exit status.
-- Wiki text additionally accepts exact `{pageKey}` objects, resolving to a page key declared in the same plan
-- Flashcard text forbids `pageKey`; mixed/extra reference-object fields are invalid
+- Reference objects require exactly one `remId`. Extra fields are invalid.
 - `expectedTextHash`: 64 lowercase SHA-256 hex characters, taken unchanged from the target's current raw-text hash
-- Task plans have no artificial card, answer, patch, page, node, alias or plan-file
+- Task plans have no artificial card, answer, patch, or plan-file
   size ceiling. The executor persists progress, partitions internal scaffold calls,
   and queues transport requests when the live connection reaches in-flight capacity.
 
@@ -143,52 +141,9 @@ the published declaration alone incorrectly suggests numeric zero. Recheck this
 exception on SDK upgrades. Explicit concept, descriptor or portal types still
 fail ordinary-node guards; the CLI never retypes them to resume a task.
 
-## Wiki inner plan
-
-```json
-{"schemaVersion":1,"wikiRootId":"wiki-root","partitionRemId":"partition-rem","indexRemId":"index-rem","logRemId":"log-rem","pages":[{"key":"page-a","title":"Overview","aliases":["Overview alias"],"nodes":[{"key":"node-a","text":["Details: ",{"pageKey":"page-b"}]}],"summary":["Overview summary"]},{"key":"page-b","title":"Details","nodes":[],"summary":["Details summary"]}],"answerPatches":[]}
-```
-
-The four root/partition/index/log IDs and `pages` array are required. Page, node,
-alias and patch counts have no artificial ceiling. At least one page or patch is
-required; patch/reference-only plans use `pages:[]`.
-
-Each page requires `key`, `title`, `nodes`, and `summary` (TextSegments). Node
-counts have no artificial ceiling. Optional page `remId` targets
-an existing page whose title must match; optional `aliases` follows shared bounds. Each node requires `key` and
-`text`. Existing nodes require both `remId` and `expectedTextHash`; new nodes must omit both. No rename, move,
-child-list replacement, or deletion is supported. Known-created/recovered Wiki objects must still be ordinary,
-plain, untagged non-card text before mutation; prior creation metadata is not enough.
-
-Canonical-name/alias duplicate checks cover the selected partition and current plan. Agent-owned semantic/whole-WIKI
-deduplication remains necessary. Existing index entries are searched through the complete bounded entity tree,
-including grouped sections, and retain their parent.
-
-Optional page `indexParentRemId` selects the exact index root or one of its existing descendants for that page's
-index entry. A selector must agree with an existing entry's parent; it never moves the entry or creates a section.
-Without a selector, an existing entry keeps its parent and a new entry goes directly under a structurally flat
-index. If the index contains nested entries, a missing/new entry requires an explicit selector before any writes.
-For example, add `"indexParentRemId":"EXACT_SECTION_ID"` to the page object after reviewing the section ID.
-Foreign/missing targets and parent conflicts fail before writes. Ancestry is rechecked before each index mutation
-and the selected parent is included in final proof. These reads are not an atomic snapshot or rollback guarantee;
-late external changes can leave a partial batch that must be reconciled using its original key and IDs.
-Never flatten, guess a group, or shrink the uniqueness scan. Incomplete bounded traversal is a blocker. Patch/reference-only
-and no-op Wiki work does not write a Wiki log; only actual Wiki page/index changes do.
-
-Wiki receipts declare `verificationScope:"affected_objects"`. Every affected page,
-index entry and log entry subtree is checked completely for cards and card structure;
-aliases, index ownership, text, parents and references retain their existing guards.
-Answer-only plans validate their exact answers/card history/reference targets and Wiki
-prerequisites without traversing unrelated Wiki, index or partition objects.
-`verified`/`complete` certify only this batch, never the whole Wiki. After the last
-Wiki mutation, the caller must run `rem verify scope` with the Wiki root in
-`inspect.subtreeRootIds` and a `zeroCards` expectation with `noCardStructure:true`.
-Any later Wiki mutation invalidates that task-level proof. Pure reuse requires exact
-affected-page/reference proof, not an unrelated root scan. There is no skip-verification flag.
-
 ## Receipt and exit status
 
-Required fields: `schemaVersion:1`, `kind:flashcards|wiki`, `batchKey`, SHA-256 `planHash`, `status`, `complete`, `ids`,
+Required fields: `schemaVersion:1`, `kind:flashcards`, `batchKey`, SHA-256 `planHash`, `status`, `complete`, `ids`,
 `facts`, `created`, `updated`, `reused`, `skipped`, `steps`, `checks`, `readWindow:{startedAt,finishedAt}`, and
 `errors:[{remId?,code,message}]`.
 
@@ -196,17 +151,17 @@ Required fields: `schemaVersion:1`, `kind:flashcards|wiki`, `batchKey`, SHA-256 
 - `created`/`updated`/`reused`/`skipped`: arrays of `{key,remId}`
 - `steps`: `{key,state,remIds,error?}`; state is `started`, `applied`, `verified`, `unknown`, `conflict`, `failed`, or `incomplete`
 - `checks`: `{kind,remId,status:passed|failed|incomplete,expected?,actual?,message?}`
-- `ids`: semantic-key → exact Rem ID mappings; use returned keys such as `daily`, `tag`, `root`,
-  `card:<key>`, `answer:<key>:<zero-based-index>`, `page:<key>`, `node:<key>`, `index:<pageKey>`, and `log:batch`
+- `ids`: mappings from semantic keys to exact Rem IDs. Use returned keys such as `daily`, `tag`, `root`,
+  `card:<key>`, `answer:<key>:<zero-based-index>`
 - `facts`: selected `{remId,textHash,cardIds,reviewHash}` records for owned/changed/reused Rems; both hashes
   are 64-character lowercase SHA-256. No title/text/native review-history body is included
-- `answerLines` is added only when flashcard apply records a new-card or flashcard-patch answer line. Wiki patches do not add it. Each entry is `{key,remId,isCardItem,hasCardStructure,verified,error?}`. Keys are `answer:<cardKey>:<zero-based-index>` or `patch:<patchKey>`. `hasCardStructure` is `hasCardStructure(text, backText, isCardItem)`. `verified` is `false` when the line is recorded and becomes `true` only after the identity check below passes. `error` is present only when that check fails. Preview receipts omit `answerLines`. `--summary` keeps the array, including `verified` and `error`.
+- `answerLines` is added only when flashcard apply records a new-card or flashcard-patch answer line. Each entry is `{key,remId,isCardItem,hasCardStructure,verified,error?}`. Keys are `answer:<cardKey>:<zero-based-index>` or `patch:<patchKey>`. `hasCardStructure` is `hasCardStructure(text, backText, isCardItem)`. `verified` is `false` when the line is recorded and becomes `true` only after the identity check below passes. `error` is present only when that check fails. Preview receipts omit `answerLines`. `--summary` keeps the array, including `verified` and `error`.
 - For each new-card answer line, apply takes `before = contentHash(canonical(cardFacts(cardRem)))` immediately before `createdText` of that answer. For each answer patch, it takes that hash immediately before `patch`. `canonical` sorts object keys recursively and maps arrays in order. `cardFacts` returns `{remId, textHash, parentRemId, children, tags, cards}`. `textHash` is `contentHash` of the card Rem's raw text. `parentRemId` is `(await getParentRem())?._id`. `children` is `nativeIds(getChildrenRem())`. `tags` is `nativeIds(getTagRems()).sort()`. Each `cards` entry from `getCards()` is `{cardId: _id, type, createdAt, repetitionHistory: repetitionHistory ?? [], nextRepetitionTime, lastRepetitionTime, timesWrongInRow}`. `contentHash` is lowercase hex SHA-256 of `JSON.stringify(value ?? null)`, which omits object keys whose values are `undefined`. On an answer patch only, `before` is stored with `cardBaselines[cardRemId] ??=` and a different stored baseline throws TaskError code `conflict`, message `Card identity or review facts changed`, `remId` the card Rem id, before the text write. New cards do not write `cardBaselines`.
 - After `createdText` on a new answer, or after `patch` on an answer patch, apply throws TaskError code `incomplete`, message `Card identity or history changed while writing an answer line`, and `remId` set to the card Rem id, when the hash differs. That throw happens before `noteAnswer`, so that line is not in `answerLines`.
 - `noteAnswer` then appends the line with `verified: false`. A sole code segment must already equal `{i:"m", text: code, code:true, language: language ?? "plaintext"}`; otherwise it throws TaskError code `incomplete`, message `Code-block answer readback mismatch`, `remId` the answer Rem id, and does not append. When `isCardItem()` is false it calls `setIsCardItem(true)` and re-reads. If `isCardItem()` is still false or the text differs, it throws TaskError code `incomplete`, message `Code-block answer is not a card item`, `remId` the answer Rem id, and does not append. Plain text, including a code line patched back to plain text, does not call `setIsCardItem(false)`. The entry copies the re-read `isCardItem` and `hasCardStructure(text, backText, isCardItem)`.
-- Apply then repeats `contentHash(canonical(cardFacts(cardRem)))` against the same `before`. A mismatch sets that entry's `verified` to `false` and `error` to `Card identity or history changed while writing an answer line`, then throws TaskError code `incomplete` with that message and `remId` the card Rem id. A match sets `verified` to `true` and deletes `error`. On a flashcard patch, `facts([cardRemId, answerRemId])` runs only after that match. On new cards, `facts(scaffoldIds)` runs only after every new answer line matches, and after cluster powerup and scope verification. The apply catch sets `status` from the error code: `conflict` stays `conflict`; an unreconciled journal step in `started` or `unknown` becomes `unknown`; otherwise `partial` when `created` or `updated` is non-empty, otherwise `incomplete`. The create step becomes `applied` immediately after all exact scaffold IDs are durably saved. A binder, content or verification failure after that point is therefore `partial`, and replay under the same key resumes without creating the scaffold again. `status` is not `verified` and `complete` is `false`. Wiki answer patches do the post-text comparison only and do not call `noteAnswer`.
+- Apply then repeats `contentHash(canonical(cardFacts(cardRem)))` against the same `before`. A mismatch sets that entry's `verified` to `false` and `error` to `Card identity or history changed while writing an answer line`, then throws TaskError code `incomplete` with that message and `remId` the card Rem id. A match sets `verified` to `true` and deletes `error`. On a flashcard patch, `facts([cardRemId, answerRemId])` runs only after that match. On new cards, `facts(scaffoldIds)` runs only after every new answer line matches, and after cluster powerup and scope verification. The apply catch sets `status` from the error code: `conflict` stays `conflict`; an unreconciled journal step in `started` or `unknown` becomes `unknown`; otherwise `partial` when `created` or `updated` is non-empty, otherwise `incomplete`. The create step becomes `applied` immediately after all exact scaffold IDs are durably saved. A binder, content or verification failure after that point is therefore `partial`, and replay under the same key resumes without creating the scaffold again. `status` is not `verified` and `complete` is `false`.
 
-Facts come from postwrite verification of created trees/pages/answers and exact patched/reused target reads. Use
+Facts come from postwrite verification of created trees and answers plus exact patched or reused target reads. Use
 these observed hashes/card IDs for the next stage without another broad read just to reconstruct the receipt. Never
 guess created-ID ordering or invent absent semantic keys. Receipt hashes do not replace semantic final-text review
 using selected exact IDs. Keep persistent workflow evidence metadata-only, never KB text/titles/aliases/history.
@@ -215,7 +170,7 @@ The CLI emits the complete receipt in JSON and text modes before exit. Zero requ
 and `status:preview` for preview or `status:verified` for apply. All other outcomes are non-success. Applied steps
 alone are not a verified batch. A transport failure can occur before a receipt is returned.
 
-`card apply --summary` and `wiki apply --summary` keep status, scope, IDs,
+`card apply --summary` keeps status, IDs,
 hashes, read window, all identity arrays/steps and errors, add counts, and omit
 passing check detail. Recovery identities are never discarded, even on partial writes.
 Omit the flag for full detail. Summary
@@ -229,4 +184,4 @@ reconciled and resumed under the same key. A creation result without exact IDs i
 never blindly replayed. Do not change a plan under its key or generate a new key to
 bypass partial/unknown/conflict. Private metadata-only idempotency journals live
 under the standard CLI state directory at
-`state/<KB hash>/`; they are durable before writes and are not transactional rollback. Required whole-WIKI/full-card proof scopes stay intact; report incomplete if blocked.
+`state/<KB hash>/`; they are durable before writes and are not transactional rollback. Required full-card proof scopes stay intact; report incomplete if blocked.

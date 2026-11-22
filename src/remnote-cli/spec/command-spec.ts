@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 
 export type CommandRisk = 'read' | 'write' | 'destructive';
 export type BridgeRequirement = 'required' | 'optional' | 'conditional' | 'none';
-export type RootHelpSection = 'knowledge' | 'workflows' | 'diagnostics' | 'raw-sdk';
+export type RootHelpSection = 'knowledge' | 'diagnostics' | 'raw-sdk';
 
 export interface PaginationSpec {
   kind: 'cursor';
@@ -167,7 +167,6 @@ function nestedHelpGroup(parent: Command, use: string): string | undefined {
 export function rootHelpSection(path: string): RootHelpSection {
   const root = path.split(' ', 1)[0];
   if (root === 'sdk') return 'raw-sdk';
-  if (root === 'sync') return 'workflows';
   if (['batch', 'status', 'doctor', 'schema', 'contract'].includes(root)) return 'diagnostics';
   return 'knowledge';
 }
@@ -175,7 +174,6 @@ export function rootHelpSection(path: string): RootHelpSection {
 export function rootHelpLabel(section: RootHelpSection): string {
   return {
     knowledge: 'Knowledge commands:',
-    workflows: 'Workflow commands:',
     diagnostics: 'Diagnostics and tooling:',
     'raw-sdk': 'Raw SDK commands:',
   }[section];

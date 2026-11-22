@@ -74,9 +74,9 @@ describe('command specs', () => {
       risk: 'destructive',
       bridge: 'required',
     });
-    expect(commandSpec(specs, 'sync status')).toMatchObject({
+    expect(commandSpec(specs, 'todo list')).toMatchObject({
       risk: 'read',
-      bridge: 'none',
+      bridge: 'required',
     });
     expect(commandSpec(specs, 'sdk rem')).toMatchObject({
       kind: 'group',
@@ -88,7 +88,7 @@ describe('command specs', () => {
       bridge: 'required',
       dynamic: false,
     });
-    expect(commandSpec(specs, 'sync')).toEqual(
+    expect(commandSpec(specs, 'todo')).toEqual(
       expect.not.objectContaining({ risk: expect.anything(), bridge: expect.anything() })
     );
   });
@@ -137,8 +137,8 @@ describe('command specs', () => {
     expect(value.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: 'rem search', kind: 'action', risk: 'read' }),
-        expect.objectContaining({ path: 'sync', kind: 'group' }),
-        expect.objectContaining({ path: 'sync delete', kind: 'action', risk: 'destructive' }),
+        expect.objectContaining({ path: 'todo', kind: 'group' }),
+        expect.objectContaining({ path: 'todo complete', kind: 'action', risk: 'write' }),
       ])
     );
   });

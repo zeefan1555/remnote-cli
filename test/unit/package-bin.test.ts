@@ -6,21 +6,13 @@ describe('direct CLI package', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
     const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
     expect(pkg.private).toBe(true);
-    expect(pkg.version).toBe('0.29.0');
+    expect(pkg.version).toBe('0.30.0');
     expect(lock.version).toBe(pkg.version);
     expect(lock.packages[''].version).toBe(pkg.version);
     expect(pkg.bin).toEqual({ 'remnote-cli': 'dist/remnote-cli/index.js' });
     expect(lock.packages[''].bin).toEqual(pkg.bin);
     expect(pkg.main).toBe(pkg.bin['remnote-cli']);
-    expect(Object.keys(pkg.dependencies).sort()).toEqual([
-      'commander',
-      'fflate',
-      'mdast-util-from-markdown',
-      'mdast-util-to-markdown',
-      'ws',
-      'yaml',
-      'zod',
-    ]);
+    expect(Object.keys(pkg.dependencies).sort()).toEqual(['commander', 'ws', 'zod']);
     expect(pkg.scripts.build).toContain('tsc');
     expect(pkg.scripts.build).not.toContain('mcpb');
     expect(pkg.scripts['test:bin']).toBe('node scripts/smoke-built-cli.mjs');

@@ -23,7 +23,7 @@ const commonHelp = [
   'Preview and apply never look up dates or create daily documents.',
   'Every SDK mutation rechecks the active knowledge base and official authorization immediately before its call, after awaited reads.',
   'Receipts contain metadata only, including ids mapping semantic keys to exact Rem IDs.',
-  'Use ids such as card:<key>, answer:<key>:<zero-index>, page:<key>, node:<key>, index:<pageKey>, log:batch; never infer IDs from creation order.',
+  'Use ids such as card:<key> and answer:<key>:<zero-index>; never infer IDs from creation order.',
   'facts contains selected {remId,textHash,cardIds,reviewHash} entries without text/history bodies.',
   'Use exact-ID reads for semantic review of final text; receipt hashes do not replace that review.',
   'No deletes, replacements, moves, or rollback guarantee.',
@@ -45,94 +45,69 @@ const help = {
     'No date scalar is supplied. The caller resolves/revalidates the intended date before a new batch and after midnight.',
     'Replay uses the original recorded diary; it never switches an existing batch to a newly resolved date.',
   ],
-  wiki: [
-    'Plan shape:',
-    '  {"schemaVersion":1,"wikiRootId":"WIKI_ID","partitionRemId":"PARTITION_ID","indexRemId":"INDEX_ID","logRemId":"LOG_ID","pages":[{"key":"page-a","title":"Page title","aliases":[],"nodes":[{"key":"node-a","text":["Content."]}],"summary":["Summary."]}],"answerPatches":[]}',
-    'pages and answerPatches are unlimited in count; at least one page/patch is required.',
-    'A page may also contain remId for an existing page; its title must match. aliases is optional (<=20 nonblank strings, <=200 chars).',
-    'nodes is required and has no artificial count limit. Existing nodes add remId and expectedTextHash; new nodes must omit both.',
-    'Known-created Wiki objects must remain ordinary, plain, untagged non-card text before mutation.',
-    'Existing grouped-index entries are traversed through the full bounded tree and keep their parent.',
-    'Optional page indexParentRemId selects the exact index root or existing descendant for its entry; it never moves existing entries.',
-    'A missing/new entry in an index with nested entries requires indexParentRemId. Foreign or conflicting parents fail before writes.',
-    'Index ancestry is rechecked before mutations and the exact parent is verified after writing; incomplete traversal is a blocker.',
-    'summary is required TextSegments. WIKI TextSegments also allow {"pageKey":"page-a"} referring to an input page key.',
-    'verificationScope=affected_objects: verified/complete certify this batch, never the whole WIKI.',
-    'After the last Wiki mutation, run verify scope with the WIKI root and zeroCards for final task acceptance.',
-  ],
 };
 export function registerTaskCommands(
   program: Command,
   catalog: CommandCatalog,
-  card: Command,
-  wiki: Command
+  card: Command
 ): void {
-  for (const [kind, label, parent] of [
-    ['flashcards', 'card', card],
-    ['wiki', 'wiki', wiki],
-  ] as const)
-    catalog
-      .action(parent, 'apply', {
-        description: `Preview a ${label} plan; use --apply to perform guarded writes`,
-        risk: 'write',
-        bridge: 'required',
-      })
-      .requiredOption(
-        '--plan <path|->',
-        'Read the inner schemaVersion=1 JSON plan from a file or stdin'
-      )
-      .requiredOption(
-        '--idempotency-key <key>',
-        'Stable key for this exact plan; never change it to blindly retry'
-      )
-      .option('--apply', 'Apply the plan (default: read-only preview)')
-      .option('--summary', 'Emit IDs, hashes, counts and failures without successful check details')
-      .addHelpText('after', ['', ...help[kind], '', ...commonHelp].join('\n'))
-      .action(
-        async (opts: {
-          plan: string;
-          idempotencyKey: string;
-          apply?: boolean;
-          summary?: boolean;
-        }) => {
-          const format = program.opts().text ? 'text' : 'json';
-          const client = createCommandClient(program);
-          try {
-            const plan: unknown = JSON.parse(
-              await readContentFileOrStdin(opts.plan, undefined, Number.MAX_SAFE_INTEGER)
+  catalog
+    .action(card, 'apply', {
+      description: 'Preview a flashcard plan; use --apply to perform guarded writes',
+      risk: 'write',
+      bridge: 'required',
+    })
+    .requiredOption(
+      '--plan <path|->',
+      'Read the inner schemaVersion=1 JSON plan from a file or stdin'
+    )
+    .requiredOption(
+      '--idempotency-key <key>',
+      'Stable key for this exact plan; never change it to blindly retry'
+    )
+    .option('--apply', 'Apply the plan (default: read-only preview)')
+    .option('--summary', 'Emit IDs, hashes, counts and failures without successful check details')
+    .addHelpText('after', ['', ...help.flashcards, '', ...commonHelp].join('\n'))
+    .action(
+      async (opts: {
+        plan: string;
+        idempotencyKey: string;
+        apply?: boolean;
+        summary?: boolean;
+      }) => {
+        const format = program.opts().text ? 'text' : 'json';
+        const client = createCommandClient(program);
+        try {
+          const plan: unknown = JSON.parse(
+            await readContentFileOrStdin(opts.plan, undefined, Number.MAX_SAFE_INTEGER)
+          );
+          const result = (await client.execute('flashcards_apply', {
+            schemaVersion: 1,
+            plan,
+            idempotencyKey: opts.idempotencyKey,
+            dryRun: !opts.apply,
+          })) as Record<string, unknown>;
+          const output = opts.summary ? summarizeReceipt(result) : result;
+          if (
+            result.complete !== true ||
+            result.status !== (opts.apply ? 'verified' : 'preview') ||
+            !Array.isArray(result.errors) ||
+            result.errors.length > 0
+          )
+            fail(
+              program,
+              new CliFailure('conflict', 'task_receipt_incomplete', 'Task receipt is incomplete', {
+                details: output,
+              })
             );
-            const result = (await client.execute(`${kind}_apply`, {
-              schemaVersion: 1,
-              plan,
-              idempotencyKey: opts.idempotencyKey,
-              dryRun: !opts.apply,
-            })) as Record<string, unknown>;
-            const output = opts.summary ? summarizeReceipt(result) : result;
-            if (
-              result.complete !== true ||
-              result.status !== (opts.apply ? 'verified' : 'preview') ||
-              !Array.isArray(result.errors) ||
-              result.errors.length > 0
-            )
-              fail(
-                program,
-                new CliFailure(
-                  'conflict',
-                  'task_receipt_incomplete',
-                  'Task receipt is incomplete',
-                  {
-                    details: output,
-                  }
-                )
-              );
-            else
-              emit(
-                program,
-                formatResult(output, format, () => JSON.stringify(output, null, 2))
-              );
-          } finally {
-            await client.close();
-          }
+          else
+            emit(
+              program,
+              formatResult(output, format, () => JSON.stringify(output, null, 2))
+            );
+        } finally {
+          await client.close();
         }
-      );
+      }
+    );
 }

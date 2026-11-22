@@ -259,28 +259,19 @@ export async function errorCasesWorkflow(
     }
   }
 
-  for (const kind of ['flashcards', 'wiki'] as const) {
+  {
+    const kind = 'flashcards' as const;
     const start = Date.now();
     const dir = await mkdtemp(join(tmpdir(), 'task-preview-'));
     try {
       const missing = `missing-task-${ctx.runId}`;
-      const plan =
-        kind === 'flashcards'
-          ? {
-              schemaVersion: 1,
-              dailyRemId: missing,
-              homeRootId: missing,
-              tagRemId: missing,
-              newCards: [{ key: 'card', question: 'Preview?', answer: [['No write.']] }],
-            }
-          : {
-              schemaVersion: 1,
-              wikiRootId: missing,
-              partitionRemId: missing,
-              indexRemId: missing,
-              logRemId: missing,
-              pages: [{ key: 'page', title: 'Preview', nodes: [], summary: ['No write.'] }],
-            };
+      const plan = {
+        schemaVersion: 1,
+        dailyRemId: missing,
+        homeRootId: missing,
+        tagRemId: missing,
+        newCards: [{ key: 'card', question: 'Preview?', answer: [['No write.']] }],
+      };
       const path = join(dir, 'plan.json');
       await writeFile(path, JSON.stringify(plan), 'utf8');
       const result = await ctx.cli.runExpectError([
