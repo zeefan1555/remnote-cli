@@ -176,14 +176,16 @@ export async function statusWorkflow(
   {
     const start = Date.now();
     try {
-      const reviewStats = (await ctx.cli.runExpectSuccess(['review-stats', '--today'])) as Record<
-        string,
-        unknown
-      >;
+      const reviewStats = (await ctx.cli.runExpectSuccess([
+        'card',
+        'review-stats',
+        '--today',
+      ])) as Record<string, unknown>;
       assertHasField(reviewStats, 'results', 'today review stats');
       assertTruthy(Array.isArray(reviewStats.results), 'today review stats should be an array');
 
       const outline = (await ctx.cli.runExpectSuccess([
+        'rem',
         'outline',
         'collapse',
         '--today',

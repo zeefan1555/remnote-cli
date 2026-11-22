@@ -154,6 +154,16 @@ function usage(path: string, command: Command): string {
   return [path, args].filter(Boolean).join(' ');
 }
 
+function nestedHelpGroup(parent: Command, use: string): string | undefined {
+  if (pathOf(parent) !== 'rem') return undefined;
+  const name = use.split(' ', 1)[0];
+  if (['read', 'search', 'search-by-tag', 'inspect', 'context'].includes(name))
+    return 'Read commands:';
+  if (['assert', 'verify'].includes(name)) return 'Verify commands:';
+  if (name === 'outline') return 'Structure commands:';
+  return 'Write commands:';
+}
+
 export function rootHelpSection(path: string): RootHelpSection {
   const root = path.split(' ', 1)[0];
   if (root === 'sdk') return 'raw-sdk';
@@ -215,6 +225,8 @@ export class CommandCatalog {
     const command = parent
       .command(use, { hidden: options.hidden === true })
       .description(options.description);
+    const helpGroup = nestedHelpGroup(parent, use);
+    if (helpGroup) command.helpGroup(helpGroup);
     this.entries.set(command, {
       command,
       kind: 'group',
@@ -229,6 +241,12 @@ export class CommandCatalog {
     const command = parent
       .command(use, { hidden: options.hidden === true })
       .description(options.description);
+    const helpGroup = nestedHelpGroup(parent, use);
+    if (helpGroup) command.helpGroup(helpGroup);
+    if (options.bridge !== 'none')
+      command.option('--kb-id <id>', 'Require this exact active knowledge base');
+    if (options.risk === 'destructive')
+      command.option('--allow-destructive', 'Explicitly allow this destructive operation');
     this.entries.set(command, {
       command,
       kind: 'action',

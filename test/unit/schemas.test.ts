@@ -18,6 +18,7 @@ import {
   SdkCallSchema,
   UpdateNoteSchema,
   SetDocumentStatusSchema,
+  DeleteRemSchema,
   InsertChildrenSchema,
   ReplaceChildrenSchema,
   UpdateTagsSchema,
@@ -109,6 +110,21 @@ describe('Outline and todo schemas', () => {
         doneTagRemId: 'same',
       })
     ).toThrow();
+  });
+});
+
+describe('DeleteRemSchema', () => {
+  it('defaults to preview and requires an exact title for apply', () => {
+    expect(DeleteRemSchema.parse({ remId: 'rem-1' })).toEqual({
+      remId: 'rem-1',
+      dryRun: true,
+    });
+    expect(() => DeleteRemSchema.parse({ remId: 'rem-1', dryRun: false })).toThrow(
+      'expectedTitle is required'
+    );
+    expect(
+      DeleteRemSchema.parse({ remId: 'rem-1', dryRun: false, expectedTitle: 'Exact title' })
+    ).toMatchObject({ dryRun: false, expectedTitle: 'Exact title' });
   });
 });
 

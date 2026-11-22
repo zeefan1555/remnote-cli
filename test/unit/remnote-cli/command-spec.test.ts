@@ -38,8 +38,8 @@ describe('command specs', () => {
 
   it('derives stable usage, input fields and output streams from Commander', () => {
     const specs = buildCommandSpecs(program());
-    const search = commandSpec(specs, 'search');
-    expect(search.usage).toBe('search query');
+    const search = commandSpec(specs, 'rem search');
+    expect(search.usage).toBe('rem search query');
     expect(search.input.required).toContain('query');
     expect(search.input.properties.limit).toMatchObject({
       type: 'string',
@@ -62,11 +62,15 @@ describe('command specs', () => {
 
   it('centralizes bridge and risk policy', () => {
     const specs = buildCommandSpecs(program());
-    expect(commandSpec(specs, 'assert')).toMatchObject({
+    expect(commandSpec(specs, 'rem assert')).toMatchObject({
       risk: 'read',
       bridge: 'optional',
     });
-    expect(commandSpec(specs, 'move-note')).toMatchObject({
+    expect(commandSpec(specs, 'rem move')).toMatchObject({
+      risk: 'destructive',
+      bridge: 'required',
+    });
+    expect(commandSpec(specs, 'rem tags update')).toMatchObject({
       risk: 'destructive',
       bridge: 'required',
     });
@@ -89,6 +93,20 @@ describe('command specs', () => {
     );
   });
 
+  it('adds connection and destructive flags only to applicable actions', () => {
+    const specs = buildCommandSpecs(program());
+    const create = commandSpec(specs, 'rem create');
+    const remove = commandSpec(specs, 'rem delete');
+    const schema = commandSpec(specs, 'schema');
+
+    expect(create.input.properties.kbId).toBeDefined();
+    expect(create.input.properties.allowDestructive).toBeUndefined();
+    expect(remove.input.properties.kbId).toBeDefined();
+    expect(remove.input.properties.allowDestructive).toBeDefined();
+    expect(schema.input.properties.kbId).toBeUndefined();
+    expect(schema.input.properties.allowDestructive).toBeUndefined();
+  });
+
   it('rejects a Commander command that bypasses the catalog', () => {
     const cli = program();
     cli.command('unregistered');
@@ -98,10 +116,10 @@ describe('command specs', () => {
   });
 
   it('prints one command schema and rejects an unknown path', async () => {
-    const selected = await runCliForTest(['schema', 'search']);
+    const selected = await runCliForTest(['schema', 'rem.search']);
     const spec = parseSuccess(selected.stdout) as CommandSpec;
     expect(selected.exitCode).toBe(0);
-    expect(spec.path).toBe('search');
+    expect(spec.path).toBe('rem search');
     expect(spec.input.properties.cursor).toBeDefined();
 
     const unknown = await runCliForTest(['schema', 'missing', 'command']);
@@ -118,7 +136,7 @@ describe('command specs', () => {
     expect(value.schemaVersion).toBe(2);
     expect(value.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: 'search', kind: 'action', risk: 'read' }),
+        expect.objectContaining({ path: 'rem search', kind: 'action', risk: 'read' }),
         expect.objectContaining({ path: 'sync', kind: 'group' }),
         expect.objectContaining({ path: 'sync delete', kind: 'action', risk: 'destructive' }),
       ])

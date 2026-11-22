@@ -13,7 +13,7 @@ async function runTextCommand(
 
 describe('parent context text output', () => {
   it('shows parent title and parent remId in search --text output when available', async () => {
-    const { output, executeSpy } = await runTextCommand(['search', 'child'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'search', 'child'], {
       results: [
         {
           remId: 'child-1',
@@ -33,7 +33,7 @@ describe('parent context text output', () => {
   });
 
   it('shows tags in search --text output when available', async () => {
-    const { output, executeSpy } = await runTextCommand(['search', 'child'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'search', 'child'], {
       results: [
         {
           remId: 'child-1',
@@ -52,7 +52,7 @@ describe('parent context text output', () => {
   });
 
   it('shows parent line in read --text output when available', async () => {
-    const { output, executeSpy } = await runTextCommand(['read', 'child-1'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'read', 'child-1'], {
       remId: 'child-1',
       headline: 'Child Note',
       parentRemId: 'parent-1',
@@ -69,7 +69,7 @@ describe('parent context text output', () => {
   });
 
   it('shows tags line in read --text output when available', async () => {
-    const { output, executeSpy } = await runTextCommand(['read', 'child-1'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'read', 'child-1'], {
       remId: 'child-1',
       headline: 'Child Note',
       remType: 'text',

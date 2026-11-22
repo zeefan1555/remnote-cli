@@ -14,7 +14,7 @@ import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
 import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
 import { ReadSession } from './session.js';
-import { isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
+import { CliFailure, isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
@@ -33,6 +33,7 @@ const operations = {
   set_document_status: ['setDocumentStatus', schemas.SetDocumentStatusSchema],
   insert_children: ['insertChildren', schemas.InsertChildrenSchema],
   move_note: ['moveNote', schemas.MoveNoteSchema],
+  delete_rem: ['deleteRem', schemas.DeleteRemSchema],
   replace_children: ['replaceChildren', schemas.ReplaceChildrenSchema],
   update_tags: ['updateTags', schemas.UpdateTagsSchema],
   set_property: ['setProperty', schemas.SetPropertySchema],
@@ -57,6 +58,15 @@ const READ_ONLY_ACTIONS = new Set([
   'inspect_state',
   'powerup_get',
   'get_media',
+]);
+const PREVIEWABLE_ACTIONS = new Set([
+  'set_outline_collapsed',
+  'update_todo',
+  'move_note',
+  'set_document_status',
+  'delete_rem',
+  'flashcards_apply',
+  'wiki_apply',
 ]);
 export interface ClientOptions {
   kbId?: string;
@@ -136,16 +146,22 @@ export class DirectClient {
     this.adapter.importSearchSnapshots(await this.state.getLocal('search-snapshots'));
   }
   async execute(action: string, payload: Record<string, unknown>): Promise<unknown> {
-    const taskPreview =
-      (action === 'flashcards_apply' || action === 'wiki_apply') && payload.dryRun !== false;
+    const preview = PREVIEWABLE_ACTIONS.has(action) && payload.dryRun !== false;
     try {
       return await this.executeAction(action, payload);
     } catch (error) {
-      if (!READ_ONLY_ACTIONS.has(action) && !taskPreview && isWriteUncertainty(error))
+      if (preview && isWriteUncertainty(error))
+        throw new CliFailure(
+          'unavailable',
+          'bridge_unavailable',
+          'Bridge connection failed during a read-only preview; no write was attempted.',
+          { cause: error }
+        );
+      if (!READ_ONLY_ACTIONS.has(action) && !preview && isWriteUncertainty(error))
         throw unknownOutcomeFailure(error);
       throw error;
     } finally {
-      if (!READ_ONLY_ACTIONS.has(action) && !taskPreview) this.readSession.invalidateAll();
+      if (!READ_ONLY_ACTIONS.has(action) && !preview) this.readSession.invalidateAll();
     }
   }
 

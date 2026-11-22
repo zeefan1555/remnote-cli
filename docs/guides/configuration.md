@@ -15,7 +15,7 @@ forge request headers.
 
 ## CLI Options
 
-- `--kb-id ID`: require this exact active knowledge base for the invocation.
+- `--kb-id ID`: available on live leaf commands and requires this exact active knowledge base.
 - `--allow-destructive`: authorize a destructive SDK operation; official RemNote
   scopes remain the native permission boundary.
 - `--verbose`: emit connection, SDK-call and command durations to stderr.

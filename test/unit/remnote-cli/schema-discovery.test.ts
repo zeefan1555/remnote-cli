@@ -59,7 +59,7 @@ describe('schema and completion discovery', () => {
   it('returns root, group and partial method candidates from the same catalog', async () => {
     const root = parseSuccess((await runCliForTest(['completion'])).stdout) as CompletionOutput;
     expect(root.candidates.map(({ name }) => name)).toEqual(
-      expect.arrayContaining(['sdk', 'search', 'sync'])
+      expect.arrayContaining(['sdk', 'rem', 'sync'])
     );
     expect(root.candidates.map(({ name }) => name)).not.toContain('completion');
 

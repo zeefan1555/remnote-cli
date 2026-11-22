@@ -27,7 +27,7 @@ describe('command text output', () => {
   const TEST_CLI_VERSION = '1.2.3-test';
 
   it('formats create results with created Rem IDs', async () => {
-    const { output, executeSpy } = await runTextCommand(['create', 'Inbox'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'create', 'Inbox'], {
       remIds: ['rem-1', 'rem-2'],
       titles: ['Inbox', ''],
     });
@@ -38,7 +38,7 @@ describe('command text output', () => {
   });
 
   it('formats empty create results', async () => {
-    const { output, executeSpy } = await runTextCommand(['create', 'Inbox'], { remIds: [] });
+    const { output, executeSpy } = await runTextCommand(['rem', 'create', 'Inbox'], { remIds: [] });
 
     expect(output).toBe('No Rems created.');
     executeSpy.mockRestore();
@@ -46,7 +46,7 @@ describe('command text output', () => {
 
   it('formats update results with and without created Rems', async () => {
     const withRems = await runTextCommand(
-      ['insert-children', 'rem-1', '--content', 'Body', '--position', 'last'],
+      ['rem', 'children', 'insert', 'rem-1', '--content', 'Body', '--position', 'last'],
       {
         remIds: ['child-1'],
         titles: ['Child'],
@@ -55,7 +55,7 @@ describe('command text output', () => {
     expect(withRems.output).toBe('Updated/Created: Child (ID: child-1)');
     withRems.executeSpy.mockRestore();
 
-    const withoutRems = await runTextCommand(['update', 'rem-1', '--title', 'Renamed'], {
+    const withoutRems = await runTextCommand(['rem', 'update', 'rem-1', '--title', 'Renamed'], {
       remIds: [],
     });
     expect(withoutRems.output).toBe('Updated note rem-1 (no Rems created)');
@@ -64,7 +64,7 @@ describe('command text output', () => {
 
   it('formats split write results with created Rems', async () => {
     const insertResult = await runTextCommand(
-      ['insert-children', 'rem-1', '--content', 'Body', '--position', 'first'],
+      ['rem', 'children', 'insert', 'rem-1', '--content', 'Body', '--position', 'first'],
       {
         remIds: ['child-1'],
         titles: ['Child'],
@@ -73,24 +73,30 @@ describe('command text output', () => {
     expect(insertResult.output).toBe('Updated/Created: Child (ID: child-1)');
     insertResult.executeSpy.mockRestore();
 
-    const replaceResult = await runTextCommand(['replace-children', 'rem-1', '--content', 'Body'], {
-      remIds: ['child-1'],
-      titles: ['Child'],
-    });
+    const replaceResult = await runTextCommand(
+      ['rem', 'children', 'replace', 'rem-1', '--content', 'Body'],
+      {
+        remIds: ['child-1'],
+        titles: ['Child'],
+      }
+    );
     expect(replaceResult.output).toBe('Updated/Created: Child (ID: child-1)');
     replaceResult.executeSpy.mockRestore();
 
-    const tagResult = await runTextCommand(['update-tags', 'rem-1', '--add-tag-ids', 'tag-1'], {
-      remIds: ['rem-1'],
-      titles: [''],
-    });
+    const tagResult = await runTextCommand(
+      ['rem', 'tags', 'update', 'rem-1', '--add-tag-ids', 'tag-1'],
+      {
+        remIds: ['rem-1'],
+        titles: [''],
+      }
+    );
     expect(tagResult.output).toBe('Updated/Created: (untitled) (ID: rem-1)');
     tagResult.executeSpy.mockRestore();
   });
 
   it('formats document-status results', async () => {
     const { output, executeSpy } = await runTextCommand(
-      ['set-document-status', 'rem-1', '--document'],
+      ['rem', 'document', 'status', 'rem-1', '--document'],
       {
         remId: 'rem-1',
         title: 'Project Plan',
@@ -110,7 +116,7 @@ describe('command text output', () => {
 
   it('formats applied document-status results', async () => {
     const updated = await runTextCommand(
-      ['set-document-status', 'rem-1', '--document', '--apply'],
+      ['rem', 'document', 'status', 'rem-1', '--document', '--apply'],
       {
         remId: 'rem-1',
         title: 'Project Plan',
@@ -127,7 +133,7 @@ describe('command text output', () => {
     updated.executeSpy.mockRestore();
 
     const unchanged = await runTextCommand(
-      ['set-document-status', 'rem-1', '--document', '--apply'],
+      ['rem', 'document', 'status', 'rem-1', '--document', '--apply'],
       {
         remId: 'rem-1',
         title: 'Project Plan',
@@ -145,14 +151,14 @@ describe('command text output', () => {
   });
 
   it('formats journal results with and without created Rems', async () => {
-    const withRems = await runTextCommand(['journal', 'Entry'], {
+    const withRems = await runTextCommand(['journal', 'append', 'Entry'], {
       remIds: ['journal-1'],
       titles: ['Daily note'],
     });
     expect(withRems.output).toBe('Journal entry added: Daily note (ID: journal-1)');
     withRems.executeSpy.mockRestore();
 
-    const withoutRems = await runTextCommand(['journal', 'Entry'], { remIds: [] });
+    const withoutRems = await runTextCommand(['journal', 'append', 'Entry'], { remIds: [] });
     expect(withoutRems.output).toBe('No journal entry Rems created.');
     withoutRems.executeSpy.mockRestore();
   });
@@ -175,7 +181,7 @@ describe('command text output', () => {
   });
 
   it('formats table results with columns and rows', async () => {
-    const { output, executeSpy } = await runTextCommand(['read-table', '--title', 'Projects'], {
+    const { output, executeSpy } = await runTextCommand(['table', 'read', '--title', 'Projects'], {
       tableName: 'Projects',
       tableId: 'table-1',
       columns: [
@@ -196,25 +202,28 @@ describe('command text output', () => {
   });
 
   it('formats review statistics without inventing a mastery score', async () => {
-    const { output, executeSpy } = await runTextCommand(['review-stats', 'rem-1', 'rem-2'], {
-      results: [
-        {
-          remId: 'rem-1',
-          cards: [
-            {
-              cardId: 'card-1',
-              type: 'forward',
-              createdAt: 100,
-              repetitionHistory: [{ date: 200, score: 1 }],
-              lastRepetitionTime: 200,
-              nextRepetitionTime: 300,
-              timesWrongInRow: 0,
-            },
-          ],
-        },
-        { remId: 'rem-2', cards: [] },
-      ],
-    });
+    const { output, executeSpy } = await runTextCommand(
+      ['card', 'review-stats', 'rem-1', 'rem-2'],
+      {
+        results: [
+          {
+            remId: 'rem-1',
+            cards: [
+              {
+                cardId: 'card-1',
+                type: 'forward',
+                createdAt: 100,
+                repetitionHistory: [{ date: 200, score: 1 }],
+                lastRepetitionTime: 200,
+                nextRepetitionTime: 300,
+                timesWrongInRow: 0,
+              },
+            ],
+          },
+          { remId: 'rem-2', cards: [] },
+        ],
+      }
+    );
 
     expect(output).toContain('Rem rem-1: card card-1 (forward)');
     expect(output).toContain('repetitions: 1');
@@ -225,7 +234,7 @@ describe('command text output', () => {
   });
 
   it('formats outline and todo workflow results', async () => {
-    const outline = await runTextCommand(['outline', 'collapse', '--today'], {
+    const outline = await runTextCommand(['rem', 'outline', 'collapse', '--today'], {
       rootRemId: 'daily-1',
       rootTitle: 'Today',
       collapsed: true,
@@ -336,7 +345,7 @@ describe('command text output', () => {
   });
 
   it('formats search results with aliases and parent title without parent ID', async () => {
-    const { output, executeSpy } = await runTextCommand(['search', 'plan'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'search', 'plan'], {
       results: [
         {
           remId: 'rem-1',
@@ -355,7 +364,7 @@ describe('command text output', () => {
 
   it('formats card search review counts', async () => {
     const { output, executeSpy } = await runTextCommand(
-      ['search', 'TQQQ', '--cards-only', '--include-review-stats'],
+      ['rem', 'search', 'TQQQ', '--cards-only', '--include-review-stats'],
       {
         results: [
           {
@@ -379,7 +388,7 @@ describe('command text output', () => {
   });
 
   it('formats search paging metadata in text output', async () => {
-    const { output, executeSpy } = await runTextCommand(['search', 'plan'], {
+    const { output, executeSpy } = await runTextCommand(['rem', 'search', 'plan'], {
       results: [
         {
           remId: 'rem-1',

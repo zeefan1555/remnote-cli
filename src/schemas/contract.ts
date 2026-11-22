@@ -65,6 +65,9 @@ export function buildCliContract(commands: CommandSpec[] = []) {
     protocolVersion: PROTOCOL_VERSION,
     sdkFacts: {
       schemaVersion: localSdkCapabilities().catalogSchemaVersion,
+      sdkVersion: localSdkCapabilities().sdkVersion,
+      catalogHash: localSdkCapabilities().sdkCatalogHash,
+      capabilities: localSdkCapabilities().capabilities.length,
     },
     bridgeActions: Object.values(REMOTE_ACTION_NAMES),
     plans: planSchemas,

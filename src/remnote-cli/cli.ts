@@ -16,6 +16,7 @@ import { registerUpdateCommand } from './commands/update.js';
 import {
   registerInsertChildrenCommand,
   registerMoveNoteCommand,
+  registerDeleteCommand,
   registerReplaceChildrenCommand,
   registerSetDocumentStatusCommand,
   registerSetPropertyCommand,
@@ -61,34 +62,64 @@ export function createProgram(
     .version(version)
     .option('--json', 'JSON output (default)')
     .option('--text', 'Human-readable output')
-    .option('--kb-id <id>', 'Require this exact active knowledge base')
-    .option('--allow-destructive', 'Explicitly allow destructive SDK operations')
     .option('--verbose', 'Enable verbose stderr logging')
     .helpCommand('help [command]', 'display help for command');
 
-  registerCreateCommand(program, catalog);
-  registerSearchCommand(program, catalog);
-  registerSearchByTagCommand(program, catalog);
-  registerListChildrenCommand(program, catalog);
-  registerReadCommand(program, catalog);
-  registerInspectCommand(program, catalog);
-  registerAssertCommand(program, catalog);
-  registerPowerupCommand(program, catalog);
-  registerCompositeCommands(program, catalog);
-  registerTaskCommands(program, catalog);
-  registerReviewStatsCommand(program, catalog);
-  registerOutlineCommand(program, catalog);
+  const rem = catalog.group(program, 'rem', {
+    description: 'Inspect and modify RemNote Rems',
+  });
+  const children = catalog.group(rem, 'children', {
+    description: 'Read or replace direct children',
+  });
+  const tags = catalog.group(rem, 'tags', {
+    description: 'Update exact tag associations',
+  });
+  const property = catalog.group(rem, 'property', {
+    description: 'Set or clear tag and table properties',
+  });
+  const document = catalog.group(rem, 'document', {
+    description: 'Change document status',
+  });
+  const card = catalog.group(program, 'card', {
+    description: 'Apply card tasks and inspect native review facts',
+  });
+  const wiki = catalog.group(program, 'wiki', {
+    description: 'Plan and apply Wiki tasks',
+  });
+  const table = catalog.group(program, 'table', {
+    description: 'Read Advanced Tables',
+  });
+  const media = catalog.group(program, 'media', {
+    description: 'Read RemNote-managed media',
+  });
+  const journal = catalog.group(program, 'journal', {
+    description: 'Append to the daily journal',
+  });
+
+  registerCreateCommand(program, catalog, rem);
+  registerSearchCommand(program, catalog, rem);
+  registerSearchByTagCommand(program, catalog, rem);
+  registerListChildrenCommand(program, catalog, children);
+  registerReadCommand(program, catalog, rem);
+  registerInspectCommand(program, catalog, rem);
+  registerAssertCommand(program, catalog, rem);
+  registerPowerupCommand(program, catalog, rem);
+  registerCompositeCommands(program, catalog, rem);
+  registerTaskCommands(program, catalog, card, wiki);
+  registerReviewStatsCommand(program, catalog, card);
+  registerOutlineCommand(program, catalog, rem);
   registerTodoCommand(program, catalog);
-  registerGetMediaCommand(program, catalog);
-  registerUpdateCommand(program, catalog);
-  registerInsertChildrenCommand(program, catalog);
-  registerMoveNoteCommand(program, catalog);
-  registerSetDocumentStatusCommand(program, catalog);
-  registerReplaceChildrenCommand(program, catalog);
-  registerUpdateTagsCommand(program, catalog);
-  registerSetPropertyCommand(program, catalog);
-  registerJournalCommand(program, catalog);
-  registerReadTableCommand(program, catalog);
+  registerGetMediaCommand(program, catalog, media);
+  registerUpdateCommand(program, catalog, rem);
+  registerInsertChildrenCommand(program, catalog, children);
+  registerMoveNoteCommand(program, catalog, rem);
+  registerDeleteCommand(program, catalog, rem);
+  registerSetDocumentStatusCommand(program, catalog, document);
+  registerReplaceChildrenCommand(program, catalog, children);
+  registerUpdateTagsCommand(program, catalog, tags);
+  registerSetPropertyCommand(program, catalog, property);
+  registerJournalCommand(program, catalog, journal);
+  registerReadTableCommand(program, catalog, table);
   registerSyncCommands(program, catalog);
   registerBatchCommand(program, catalog, version);
   registerStatusCommand(program, catalog);

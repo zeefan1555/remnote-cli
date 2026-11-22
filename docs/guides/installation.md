@@ -32,7 +32,7 @@ deleting its source repository. Daily use after registration is simply:
 ```bash
 remnote-cli --version
 remnote-cli status --text
-remnote-cli read REM_ID --content-mode structured --depth 1
+remnote-cli rem read REM_ID --content-mode structured --depth 1
 ```
 
 The integration wrapper is for development suites, not a daily command launcher.

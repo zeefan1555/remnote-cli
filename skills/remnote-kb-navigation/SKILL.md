@@ -26,7 +26,7 @@ Use this skill to orient quickly in a user's whole RemNote knowledge base.
 ## Navigation rules
 
 1. Use JSON output (default). Do not use `--text` for navigation.
-2. Use ID-first traversal via `read`.
+2. Use ID-first traversal via `rem read`.
 3. Start shallow (`--depth 1`) for orientation.
 4. Use high child limit for full branch listings: `--child-limit 500`.
 5. Keep operations read-only unless write confirmation policy allows mutating commands.
@@ -42,9 +42,9 @@ Add as many branches as needed for the user's real top-level structure.
 ## Recommended workflow
 
 1. Read root for global orientation:
-   - `remnote-cli read TEMPLATE_ROOT_ID --include-content structured --depth 1 --child-limit 500`
+   - `remnote-cli rem read TEMPLATE_ROOT_ID --include-content structured --depth 1 --child-limit 500`
 2. Pick the best top-level branch ID from the map.
 3. Read that branch shallowly first:
-   - `remnote-cli read <branch-id> --depth 1 --child-limit 500`
+   - `remnote-cli rem read <branch-id> --depth 1 --child-limit 500`
 4. Descend deeper only in the selected subtree.
 5. If multiple branches seem relevant, read 2-3 candidate branches shallowly, then ask a focused clarification.

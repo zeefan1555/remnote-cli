@@ -30,7 +30,7 @@ describe('automatic search pagination', () => {
         return { results: [{ remId: 'b' }], hasMore: false };
       });
 
-    const result = await runCliForTest(['search', 'term', '--all', '--limit', '1']);
+    const result = await runCliForTest(['rem', 'search', 'term', '--all', '--limit', '1']);
     const output = parseSuccess(result.stdout) as PagedOutput;
 
     expect(result.exitCode).toBe(0);
@@ -57,7 +57,7 @@ describe('automatic search pagination', () => {
         return { results: [{ remId: 'b' }], hasMore: false };
       });
 
-    const result = await runCliForTest(['search-by-tag', '--tag-id', 'tag', '--all']);
+    const result = await runCliForTest(['rem', 'search-by-tag', '--tag-id', 'tag', '--all']);
     const output = parseSuccess(result.stdout) as PagedOutput;
 
     expect(execute).toHaveBeenNthCalledWith(2, 'search_by_tag', {
@@ -77,7 +77,15 @@ describe('automatic search pagination', () => {
         return { children: [{ remId: 'b' }], hasMore: false };
       });
 
-    const result = await runCliForTest(['list-children', 'parent', '--all', '--limit', '1']);
+    const result = await runCliForTest([
+      'rem',
+      'children',
+      'list',
+      'parent',
+      '--all',
+      '--limit',
+      '1',
+    ]);
     const output = parseSuccess(result.stdout) as PagedOutput;
 
     expect(execute).toHaveBeenCalledTimes(2);
@@ -87,7 +95,14 @@ describe('automatic search pagination', () => {
 
   it('rejects all for several list-children parents before dispatch', async () => {
     const execute = vi.spyOn(DirectClient.prototype, 'execute');
-    const result = await runCliForTest(['list-children', 'parent-a', 'parent-b', '--all']);
+    const result = await runCliForTest([
+      'rem',
+      'children',
+      'list',
+      'parent-a',
+      'parent-b',
+      '--all',
+    ]);
 
     expect(result.exitCode).toBe(EXIT.USAGE);
     expect(parseFailure(result.stderr).message).toContain('page one parent');
@@ -96,7 +111,7 @@ describe('automatic search pagination', () => {
 
   it('requires all when max-pages is set', async () => {
     const execute = vi.spyOn(DirectClient.prototype, 'execute');
-    const result = await runCliForTest(['search', 'term', '--max-pages', '2']);
+    const result = await runCliForTest(['rem', 'search', 'term', '--max-pages', '2']);
 
     expect(result.exitCode).toBe(EXIT.USAGE);
     expect(parseFailure(result.stderr).message).toContain('--max-pages requires --all');
@@ -110,7 +125,7 @@ describe('automatic search pagination', () => {
       nextCursor: payload.cursor === undefined ? 'p2' : 'p3',
     }));
 
-    const result = await runCliForTest(['search', 'term', '--all', '--max-pages', '2']);
+    const result = await runCliForTest(['rem', 'search', 'term', '--all', '--max-pages', '2']);
     const output = parseSuccess(result.stdout) as PagedOutput;
 
     expect(output.hasMore).toBe(true);

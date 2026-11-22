@@ -1,7 +1,7 @@
 # State verification
 
-`inspect` and `assert` check Rem state from JSON. They are generic: rules name paths and
-comparisons, not a flashcard checklist. `context` and `verify scope` remain the bounded
+`rem inspect` and `rem assert` check Rem state from JSON. They are generic: rules name paths and
+comparisons, not a flashcard checklist. `rem context` and `rem verify scope` remain the bounded
 task-receipt tools.
 
 Offline unit tests cover the element summary, field filtering, and rule results. A live
@@ -14,7 +14,7 @@ A code block stored on an answer is one rich-text element `{i:"m", code:true, la
 on `backText`. Detect it from that element. `rem.isCode` stays false for this shape.
 
 ```bash
-remnote-cli inspect ANSWER_ID --fields elements,backText,markdown,isCardItem,hasCardStructure
+remnote-cli rem inspect ANSWER_ID --fields elements,backText,markdown,isCardItem,hasCardStructure
 ```
 
 ```json
@@ -84,9 +84,9 @@ Search portals and tables that carry powerup `sp` expose `portal`. `query` is sl
 `portalType: null` and does not mark the read incomplete.
 
 ```bash
-remnote-cli inspect PORTAL_ID --fields portal
-remnote-cli powerup get --rem PORTAL_ID --powerup sp --slot q
-remnote-cli powerup get --rem PORTAL_ID --powerup sp --slot f
+remnote-cli rem inspect PORTAL_ID --fields portal
+remnote-cli rem powerup get --rem PORTAL_ID --powerup sp --slot q
+remnote-cli rem powerup get --rem PORTAL_ID --powerup sp --slot f
 ```
 
 ```json
@@ -123,9 +123,9 @@ lives on the portal Rem, not on a separate powerup Rem lookup.
 Save the hash, do the other work, then compare:
 
 ```bash
-remnote-cli inspect CARD_REM --fields cards > before.json
+remnote-cli rem inspect CARD_REM --fields cards > before.json
 # read cards[0].hash into card.hash, then later:
-remnote-cli assert --file unchanged.json --strict
+remnote-cli rem assert --file unchanged.json --strict
 ```
 
 ```json

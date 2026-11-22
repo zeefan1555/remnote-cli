@@ -10,7 +10,7 @@
 
 ## How to get to it (user POV)
 
-- `remnote-cli --version`、`remnote-cli --help`、`remnote-cli flashcards --help`
+- `remnote-cli --version`、`remnote-cli --help`、`remnote-cli card --help`、`remnote-cli schema rem.search`、`remnote-cli sdk rem --help`
 
 ## Driving it with verify.sh
 
@@ -20,7 +20,7 @@ Preconditions:
 
 - **构建。** `verify.sh build`，日志末尾 tsc 无错误、退出码 0。
 - **单测。** `verify.sh unit`，日志含 `Test Files  N passed`。
-- **帮助。** `verify.sh cli`，日志含版本号、`Direct RemNote SDK automation`、`Preview a flashcards plan`。
+- **帮助。** `verify.sh cli`，日志含版本号、`Direct RemNote SDK automation`、根 help 分区、`rem search` schema 和离线 SDK help。
 
 ## Gotchas
 

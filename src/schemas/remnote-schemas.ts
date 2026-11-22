@@ -452,6 +452,26 @@ export const SetDocumentStatusSchema = z
   })
   .strict();
 
+export const DeleteRemSchema = z
+  .object({
+    remId: z.string().min(1).describe('Exact Rem ID to delete with all descendants'),
+    dryRun: z.boolean().default(true).describe('Preview the deletion without mutating RemNote'),
+    expectedTitle: z
+      .string()
+      .optional()
+      .describe('Require this exact current title before deletion'),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.dryRun && value.expectedTitle === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'expectedTitle is required for rem delete --apply',
+        path: ['expectedTitle'],
+      });
+    }
+  });
+
 export const InsertChildrenSchema = z
   .object({
     parentRemId: z.string().describe('Parent Rem ID that will receive the new children'),

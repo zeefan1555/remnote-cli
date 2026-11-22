@@ -5,8 +5,12 @@ import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { validateNotFlag } from './arg-utils.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerUpdateCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'update <rem-id>', {
+export function registerUpdateCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'update <rem-id>', {
     description: 'Update note metadata',
     risk: 'write',
     bridge: 'required',
@@ -29,7 +33,7 @@ export function registerUpdateCommand(program: Command, catalog: CommandCatalog)
           (!opts.removeAliases || opts.removeAliases.length === 0)
         ) {
           throw new Error(
-            'Provide --title, --add-aliases, or --remove-aliases for update. Use insert-children, replace-children, or update-tags for other writes.'
+            'Provide --title, --add-aliases, or --remove-aliases for update. Use rem children insert, rem children replace, or rem tags update for other writes.'
           );
         }
 

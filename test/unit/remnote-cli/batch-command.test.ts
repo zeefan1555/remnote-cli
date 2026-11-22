@@ -41,12 +41,13 @@ async function batchFile(contents: string): Promise<string> {
 
 describe('batch input', () => {
   it('accepts a JSON array, a commands object, and JSONL', () => {
-    expect(parseBatchInput('[{"argv":["read","a"]}]')).toEqual([{ argv: ['read', 'a'] }]);
-    expect(parseBatchInput('{"commands":[{"argv":["status"]}]}')).toEqual([{ argv: ['status'] }]);
-    expect(parseBatchInput('{"argv":["read","a"]}\n{"argv":["read","b"]}\n')).toEqual([
-      { argv: ['read', 'a'] },
-      { argv: ['read', 'b'] },
+    expect(parseBatchInput('[{"argv":["rem", "read","a"]}]')).toEqual([
+      { argv: ['rem', 'read', 'a'] },
     ]);
+    expect(parseBatchInput('{"commands":[{"argv":["status"]}]}')).toEqual([{ argv: ['status'] }]);
+    expect(parseBatchInput('{"argv":["rem", "read","a"]}\n{"argv":["rem", "read","b"]}\n')).toEqual(
+      [{ argv: ['rem', 'read', 'a'] }, { argv: ['rem', 'read', 'b'] }]
+    );
     expect(() => parseBatchInput('')).toThrow(/empty/);
     expect(() => parseBatchInput('{"argv":[]}')).toThrow(/argv/);
   });
@@ -84,8 +85,8 @@ describe('batch command', () => {
     const close = vi.spyOn(DirectClient.prototype, 'close');
     const path = await batchFile(
       [
-        '{"argv":["read","a","--content-mode","none"]}',
-        '{"argv":["read","missing"]}',
+        '{"argv":["rem", "read","a","--content-mode","none"]}',
+        '{"argv":["rem", "read","missing"]}',
         '{"argv":["status"]}',
       ].join('\n')
     );
@@ -145,10 +146,10 @@ describe('batch command', () => {
     wire.plugin = plugin;
     const path = await batchFile(
       [
-        '{"argv":["read","a","--content-mode","none"]}',
-        '{"argv":["read","a","b","--content-mode","none"]}',
-        '{"argv":["list-children","parent","--limit","10"]}',
-        '{"argv":["list-children","parent","other","--limit","10"]}',
+        '{"argv":["rem", "read","a","--content-mode","none"]}',
+        '{"argv":["rem", "read","a","b","--content-mode","none"]}',
+        '{"argv":["rem", "children", "list","parent","--limit","10"]}',
+        '{"argv":["rem", "children", "list","parent","other","--limit","10"]}',
       ].join('\n')
     );
     const output = (await runBatch(['--file', path])) as {
@@ -179,9 +180,9 @@ describe('batch command', () => {
       [
         '{"argv":["--version"]}',
         '{"argv":["--help"]}',
-        '{"argv":["read","--help"]}',
-        '{"argv":["read","--depth"]}',
-        '{"argv":["flashcards"]}',
+        '{"argv":["rem", "read","--help"]}',
+        '{"argv":["rem", "read","--depth"]}',
+        '{"argv":["card"]}',
         '{"argv":["status"]}',
       ].join('\n')
     );
@@ -205,7 +206,7 @@ describe('batch command', () => {
     expect(output.results[3]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
     expect(output.results[3].error?.message).toMatch(/argument missing/);
     expect(output.results[4]).toMatchObject({ ok: true, exitCode: 0 });
-    expect(String(output.results[4].result)).toMatch(/Plan and apply flashcards tasks/);
+    expect(String(output.results[4].result)).toMatch(/Apply card tasks/);
     expect(output.results[5]).toMatchObject({ ok: true, exitCode: 0, result: { ok: true } });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalled();

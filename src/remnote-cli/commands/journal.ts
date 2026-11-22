@@ -6,8 +6,12 @@ import { resolveJournalContent } from './content-input.js';
 import { checkPayloadForFlags, validateNotFlag } from './arg-utils.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerJournalCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'journal [content]', {
+export function registerJournalCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'append [content]', {
     description: "Append to today's journal; new non-leaf Rems are collapsed automatically",
     risk: 'write',
     bridge: 'required',

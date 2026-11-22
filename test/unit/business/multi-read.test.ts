@@ -63,7 +63,7 @@ describe('multi-id reads', () => {
       },
     });
     vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
-    const output = await runCliForTest(['read', 'a', 'b']);
+    const output = await runCliForTest(['rem', 'read', 'a', 'b']);
     expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
     const failure = parseFailure(output.stderr);
     expect(failure.type).toBe('not_found');

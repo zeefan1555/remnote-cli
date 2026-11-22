@@ -14,8 +14,8 @@ This template must be customized per user before use.
 ## Suggested discovery commands
 
 ```bash
-remnote-cli read <root-rem-id> --include-content structured --depth 1 --child-limit 500
-remnote-cli read <branch-rem-id> --depth 1 --child-limit 500
+remnote-cli rem read <root-rem-id> --include-content structured --depth 1 --child-limit 500
+remnote-cli rem read <branch-rem-id> --depth 1 --child-limit 500
 ```
 
 ## Acceptance checklist

@@ -40,6 +40,7 @@ describe('command bridge action mapping', () => {
 
   it('maps create command to create_note', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'create',
       'Test Title',
       '--content',
@@ -58,7 +59,7 @@ describe('command bridge action mapping', () => {
 
   it('maps create --content-file to create_note content payload', async () => {
     const filePath = await createTempContentFile('Body from file');
-    const executeSpy = await runCommand(['create', 'Title', '--content-file', filePath]);
+    const executeSpy = await runCommand(['rem', 'create', 'Title', '--content-file', filePath]);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       title: 'Title',
       content: 'Body from file',
@@ -67,7 +68,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create command with title positional and --content opt', async () => {
-    const executeSpy = await runCommand(['create', 'Title', '--content', 'Body']);
+    const executeSpy = await runCommand(['rem', 'create', 'Title', '--content', 'Body']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       title: 'Title',
       content: 'Body',
@@ -76,7 +77,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create command with title positional and --content opt', async () => {
-    const executeSpy = await runCommand(['create', 'Title', '--content', 'Body']);
+    const executeSpy = await runCommand(['rem', 'create', 'Title', '--content', 'Body']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       title: 'Title',
       content: 'Body',
@@ -85,7 +86,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create --as-document to create_note asDocument payload', async () => {
-    const executeSpy = await runCommand(['create', 'Title', '--as-document']);
+    const executeSpy = await runCommand(['rem', 'create', 'Title', '--as-document']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       title: 'Title',
       asDocument: true,
@@ -95,6 +96,7 @@ describe('command bridge action mapping', () => {
 
   it('maps create --aliases to create_note aliases', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'create',
       'Original Title',
       '--aliases',
@@ -109,7 +111,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create command with title-only positional args', async () => {
-    const executeSpy = await runCommand(['create', 'Title']);
+    const executeSpy = await runCommand(['rem', 'create', 'Title']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       title: 'Title',
     });
@@ -117,7 +119,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create command with --title flag', async () => {
-    const executeSpy = await runCommand(['create', '--title', 'Flag Title']);
+    const executeSpy = await runCommand(['rem', 'create', '--title', 'Flag Title']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       title: 'Flag Title',
     });
@@ -125,7 +127,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create command with content-only (--content)', async () => {
-    const executeSpy = await runCommand(['create', '--content', 'Body']);
+    const executeSpy = await runCommand(['rem', 'create', '--content', 'Body']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {
       content: 'Body',
     });
@@ -133,25 +135,32 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps create command with no args (bridge-side error)', async () => {
-    const executeSpy = await runCommand(['create']);
+    const executeSpy = await runCommand(['rem', 'create']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {});
     executeSpy.mockRestore();
   });
 
   it('maps create command with no args (bridge-side error)', async () => {
-    const executeSpy = await runCommand(['create']);
+    const executeSpy = await runCommand(['rem', 'create']);
     expect(executeSpy).toHaveBeenCalledWith('create_note', {});
     executeSpy.mockRestore();
   });
 
   it('maps read command to read_note', async () => {
-    const executeSpy = await runCommand(['read', 'abc123', '--depth', '2']);
+    const executeSpy = await runCommand(['rem', 'read', 'abc123', '--depth', '2']);
     expect(executeSpy).toHaveBeenCalledWith('read_note', { remId: 'abc123', depth: 2 });
     executeSpy.mockRestore();
   });
 
   it('maps several read ids to one read_note call keyed by remIds', async () => {
-    const executeSpy = await runCommand(['read', 'abc123', 'def456', '--content-mode', 'none']);
+    const executeSpy = await runCommand([
+      'rem',
+      'read',
+      'abc123',
+      'def456',
+      '--content-mode',
+      'none',
+    ]);
     expect(executeSpy).toHaveBeenCalledWith('read_note', {
       remIds: ['abc123', 'def456'],
       depth: 5,
@@ -161,7 +170,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps review-stats command to get_review_stats', async () => {
-    const executeSpy = await runCommand(['review-stats', 'rem-1', 'rem-2']);
+    const executeSpy = await runCommand(['card', 'review-stats', 'rem-1', 'rem-2']);
     expect(executeSpy).toHaveBeenCalledWith('get_review_stats', {
       remIds: ['rem-1', 'rem-2'],
     });
@@ -169,21 +178,21 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps review-stats scope selectors', async () => {
-    const todaySpy = await runCommand(['review-stats', '--today']);
+    const todaySpy = await runCommand(['card', 'review-stats', '--today']);
     expect(todaySpy).toHaveBeenCalledWith('get_review_stats', { today: true });
     todaySpy.mockRestore();
 
-    const rootSpy = await runCommand(['review-stats', '--root-id', 'root-1']);
+    const rootSpy = await runCommand(['card', 'review-stats', '--root-id', 'root-1']);
     expect(rootSpy).toHaveBeenCalledWith('get_review_stats', { rootRemId: 'root-1' });
     rootSpy.mockRestore();
 
-    const tagSpy = await runCommand(['review-stats', '--tag-id', 'tag-1']);
+    const tagSpy = await runCommand(['card', 'review-stats', '--tag-id', 'tag-1']);
     expect(tagSpy).toHaveBeenCalledWith('get_review_stats', { tagRemId: 'tag-1' });
     tagSpy.mockRestore();
   });
 
   it('maps outline and todo workflow commands', async () => {
-    const outlineSpy = await runCommand(['outline', 'collapse', '--today', '--apply']);
+    const outlineSpy = await runCommand(['rem', 'outline', 'collapse', '--today', '--apply']);
     expect(outlineSpy).toHaveBeenCalledWith('set_outline_collapsed', {
       collapsed: true,
       dryRun: false,
@@ -475,7 +484,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('passes through structured read content mode', async () => {
-    const executeSpy = await runCommand(['read', 'abc123', '--content-mode', 'structured']);
+    const executeSpy = await runCommand(['rem', 'read', 'abc123', '--content-mode', 'structured']);
     expect(executeSpy).toHaveBeenCalledWith('read_note', {
       remId: 'abc123',
       depth: 5,
@@ -485,7 +494,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('requests media metadata from read', async () => {
-    const executeSpy = await runCommand(['read', 'abc123', '--include-media-metadata']);
+    const executeSpy = await runCommand(['rem', 'read', 'abc123', '--include-media-metadata']);
     expect(executeSpy).toHaveBeenCalledWith('read_note', {
       remId: 'abc123',
       depth: 5,
@@ -501,7 +510,8 @@ describe('command bridge action mapping', () => {
     const data = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
     const executeSpy = await runCommand(
       [
-        'get-media',
+        'media',
+        'get',
         'abc123',
         '--field',
         'text',
@@ -528,6 +538,7 @@ describe('command bridge action mapping', () => {
 
   it('maps search command to search with content rendering options', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'search',
       'ml',
       '--content-mode',
@@ -545,7 +556,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('passes through search parent-id option', async () => {
-    const executeSpy = await runCommand(['search', 'ml', '--parent-id', 'parentRemId123']);
+    const executeSpy = await runCommand(['rem', 'search', 'ml', '--parent-id', 'parentRemId123']);
     expect(executeSpy).toHaveBeenCalledWith('search', {
       query: 'ml',
       limit: 50,
@@ -556,6 +567,7 @@ describe('command bridge action mapping', () => {
 
   it('passes through card filtering and review facts options', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'search',
       'TQQQ',
       '--cards-only',
@@ -571,7 +583,13 @@ describe('command bridge action mapping', () => {
   });
 
   it('passes through structured search content mode', async () => {
-    const executeSpy = await runCommand(['search', 'folders', '--content-mode', 'structured']);
+    const executeSpy = await runCommand([
+      'rem',
+      'search',
+      'folders',
+      '--content-mode',
+      'structured',
+    ]);
     expect(executeSpy).toHaveBeenCalledWith('search', {
       query: 'folders',
       limit: 50,
@@ -581,7 +599,13 @@ describe('command bridge action mapping', () => {
   });
 
   it('passes through search cursor', async () => {
-    const executeSpy = await runCommand(['search', 'folders', '--cursor', 'search:v1:id:2:hash']);
+    const executeSpy = await runCommand([
+      'rem',
+      'search',
+      'folders',
+      '--cursor',
+      'search:v1:id:2:hash',
+    ]);
     expect(executeSpy).toHaveBeenCalledWith('search', {
       query: 'folders',
       limit: 50,
@@ -592,6 +616,7 @@ describe('command bridge action mapping', () => {
 
   it('maps search-by-tag command to search_by_tag with content rendering options', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'search-by-tag',
       '--tag-id',
       'daily-tag-rem-id',
@@ -611,6 +636,7 @@ describe('command bridge action mapping', () => {
 
   it('passes through structured search-by-tag content mode', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'search-by-tag',
       '--tag-id',
       'project-tag-rem-id',
@@ -627,6 +653,7 @@ describe('command bridge action mapping', () => {
 
   it('passes through tagged search-by-tag result mode', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'search-by-tag',
       '--tag-id',
       'project-tag-rem-id',
@@ -643,6 +670,7 @@ describe('command bridge action mapping', () => {
 
   it('passes through search-by-tag cursor', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'search-by-tag',
       '--tag-id',
       'project-tag-rem-id',
@@ -659,7 +687,9 @@ describe('command bridge action mapping', () => {
 
   it('maps list-children command to list_children with traversal options', async () => {
     const executeSpy = await runCommand([
-      'list-children',
+      'rem',
+      'children',
+      'list',
       'parent123',
       '--limit',
       '25',
@@ -678,7 +708,15 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps several list-children parents to one list_children call', async () => {
-    const executeSpy = await runCommand(['list-children', 'parent-a', 'parent-b', '--limit', '10']);
+    const executeSpy = await runCommand([
+      'rem',
+      'children',
+      'list',
+      'parent-a',
+      'parent-b',
+      '--limit',
+      '10',
+    ]);
     expect(executeSpy).toHaveBeenCalledWith('list_children', {
       parentRemIds: ['parent-a', 'parent-b'],
       limit: 10,
@@ -688,7 +726,9 @@ describe('command bridge action mapping', () => {
 
   it('maps list-children cursor pagination', async () => {
     const executeSpy = await runCommand([
-      'list-children',
+      'rem',
+      'children',
+      'list',
       'parent123',
       '--cursor',
       'list_children:v1:parent123:50:hash',
@@ -702,7 +742,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps update command with --title flag', async () => {
-    const executeSpy = await runCommand(['update', 'abc123', '--title', 'New Title']);
+    const executeSpy = await runCommand(['rem', 'update', 'abc123', '--title', 'New Title']);
     expect(executeSpy).toHaveBeenCalledWith('update_note', {
       remId: 'abc123',
       title: 'New Title',
@@ -712,6 +752,7 @@ describe('command bridge action mapping', () => {
 
   it('maps update alias flags without requiring a title', async () => {
     const executeSpy = await runCommand([
+      'rem',
       'update',
       'abc123',
       '--add-aliases',
@@ -730,7 +771,9 @@ describe('command bridge action mapping', () => {
 
   it('maps insert-children to insert_children payload', async () => {
     const executeSpy = await runCommand([
-      'insert-children',
+      'rem',
+      'children',
+      'insert',
       'parent123',
       '--content',
       'Inserted content',
@@ -748,7 +791,9 @@ describe('command bridge action mapping', () => {
   it('maps insert-children --content-file before sibling to insert_children payload', async () => {
     const filePath = await createTempContentFile('Insert from file');
     const executeSpy = await runCommand([
-      'insert-children',
+      'rem',
+      'children',
+      'insert',
       'parent123',
       '--content-file',
       filePath,
@@ -769,7 +814,9 @@ describe('command bridge action mapping', () => {
   it('maps replace-children --content-file to replace_children payload', async () => {
     const filePath = await createTempContentFile('Replace from file');
     const executeSpy = await runCommand([
-      'replace-children',
+      'rem',
+      'children',
+      'replace',
       'parent123',
       '--content-file',
       filePath,
@@ -783,13 +830,16 @@ describe('command bridge action mapping', () => {
 
   it('maps update-tags to update_tags payload', async () => {
     const executeSpy = await runCommand([
-      'update-tags',
+      'rem',
+      'tags',
+      'update',
       'abc123',
       '--add-tag-ids',
       'tag1',
       'tag2',
       '--remove-tag-ids',
       'tag3',
+      '--allow-destructive',
     ]);
     expect(executeSpy).toHaveBeenCalledWith('update_tags', {
       remId: 'abc123',
@@ -800,7 +850,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('keeps help as literal journal content', async () => {
-    const executeSpy = await runCommand(['journal', '--content', 'help']);
+    const executeSpy = await runCommand(['journal', 'append', '--content', 'help']);
     expect(executeSpy).toHaveBeenCalledWith(
       'append_journal',
       expect.objectContaining({ content: 'help' })
@@ -810,7 +860,9 @@ describe('command bridge action mapping', () => {
 
   it('maps set-property --value to set_property payload', async () => {
     const executeSpy = await runCommand([
-      'set-property',
+      'rem',
+      'property',
+      'set',
       'abc123',
       '--tag-id',
       'tag1',
@@ -830,7 +882,9 @@ describe('command bridge action mapping', () => {
 
   it('maps set-property --rem-reference-id to set_property payload', async () => {
     const executeSpy = await runCommand([
-      'set-property',
+      'rem',
+      'property',
+      'set',
       'abc123',
       '--tag-id',
       'tag1',
@@ -850,7 +904,9 @@ describe('command bridge action mapping', () => {
 
   it('maps set-property --clear to set_property payload', async () => {
     const executeSpy = await runCommand([
-      'set-property',
+      'rem',
+      'property',
+      'set',
       'abc123',
       '--tag-id',
       'tag1',
@@ -876,7 +932,9 @@ describe('command bridge action mapping', () => {
     try {
       const output = await runCliForTest([
         '--text',
-        'set-property',
+        'rem',
+        'property',
+        'set',
         'abc123',
         '--tag-id',
         'tag1',
@@ -897,7 +955,9 @@ describe('command bridge action mapping', () => {
 
     try {
       const output = await runCliForTest([
-        'set-property',
+        'rem',
+        'property',
+        'set',
         'abc123',
         '--tag-id',
         'tag1',
@@ -920,7 +980,9 @@ describe('command bridge action mapping', () => {
 
     try {
       const output = await runCliForTest([
-        'set-property',
+        'rem',
+        'property',
+        'set',
         'abc123',
         '--tag-id',
         'tag1',
@@ -943,7 +1005,8 @@ describe('command bridge action mapping', () => {
 
   it('maps move-note to dry-run move_note by default', async () => {
     const executeSpy = await runCommand([
-      'move-note',
+      'rem',
+      'move',
       'rem123',
       '--new-parent-rem-id',
       'parent456',
@@ -962,9 +1025,32 @@ describe('command bridge action mapping', () => {
     executeSpy.mockRestore();
   });
 
+  it('maps rem delete preview and guarded apply', async () => {
+    const preview = await runCommand(['rem', 'delete', 'rem-1']);
+    expect(preview).toHaveBeenCalledWith('delete_rem', { remId: 'rem-1', dryRun: true });
+    preview.mockRestore();
+
+    const apply = await runCommand([
+      'rem',
+      'delete',
+      'rem-1',
+      '--apply',
+      '--expected-title',
+      'Expected title',
+      '--allow-destructive',
+    ]);
+    expect(apply).toHaveBeenCalledWith('delete_rem', {
+      remId: 'rem-1',
+      dryRun: false,
+      expectedTitle: 'Expected title',
+    });
+    apply.mockRestore();
+  });
+
   it('maps move-note --apply with sibling position', async () => {
     const executeSpy = await runCommand([
-      'move-note',
+      'rem',
+      'move',
       'rem123',
       '--new-parent-rem-id',
       'parent456',
@@ -986,7 +1072,9 @@ describe('command bridge action mapping', () => {
 
   it('maps set-document-status to dry-run set_document_status by default', async () => {
     const executeSpy = await runCommand([
-      'set-document-status',
+      'rem',
+      'document',
+      'status',
       'rem123',
       '--document',
       '--expected-old-rem-type',
@@ -1003,7 +1091,9 @@ describe('command bridge action mapping', () => {
 
   it('maps set-document-status --apply with --no-document', async () => {
     const executeSpy = await runCommand([
-      'set-document-status',
+      'rem',
+      'document',
+      'status',
       'rem123',
       '--no-document',
       '--apply',
@@ -1020,7 +1110,7 @@ describe('command bridge action mapping', () => {
     const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
 
     try {
-      const output = await runCliForTest(['set-document-status', 'rem123']);
+      const output = await runCliForTest(['rem', 'document', 'status', 'rem123']);
 
       expect(executeSpy).not.toHaveBeenCalled();
       expect(output.stderr).toContain('Provide --document or --no-document');
@@ -1033,6 +1123,7 @@ describe('command bridge action mapping', () => {
   it('maps journal command with positional content', async () => {
     const executeSpy = await runCommand([
       'journal',
+      'append',
       'Positional Entry',
       '--no-timestamp',
       '--tag-ids',
@@ -1047,7 +1138,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps journal --content to append_journal', async () => {
-    const executeSpy = await runCommand(['journal', '--content', 'Entry from flag']);
+    const executeSpy = await runCommand(['journal', 'append', '--content', 'Entry from flag']);
     expect(executeSpy).toHaveBeenCalledWith('append_journal', {
       content: 'Entry from flag',
       timestamp: true,
@@ -1057,7 +1148,7 @@ describe('command bridge action mapping', () => {
 
   it('maps journal --content-file to append_journal', async () => {
     const filePath = await createTempContentFile('Journal from file');
-    const executeSpy = await runCommand(['journal', '--content-file', filePath]);
+    const executeSpy = await runCommand(['journal', 'append', '--content-file', filePath]);
     expect(executeSpy).toHaveBeenCalledWith('append_journal', {
       content: 'Journal from file',
       timestamp: true,
@@ -1066,7 +1157,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps read-table command to read_table', async () => {
-    const executeSpy = await runCommand(['read-table', '--title', 'My Table']);
+    const executeSpy = await runCommand(['table', 'read', '--title', 'My Table']);
     expect(executeSpy).toHaveBeenCalledWith('read_table', {
       tableTitle: 'My Table',
       limit: 50,
@@ -1076,7 +1167,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps read-table command with --limit option', async () => {
-    const executeSpy = await runCommand(['read-table', '--title', 'My Table', '--limit', '20']);
+    const executeSpy = await runCommand(['table', 'read', '--title', 'My Table', '--limit', '20']);
     expect(executeSpy).toHaveBeenCalledWith('read_table', {
       tableTitle: 'My Table',
       limit: 20,
@@ -1086,7 +1177,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps read-table command with --offset option', async () => {
-    const executeSpy = await runCommand(['read-table', '--title', 'My Table', '--offset', '10']);
+    const executeSpy = await runCommand(['table', 'read', '--title', 'My Table', '--offset', '10']);
     expect(executeSpy).toHaveBeenCalledWith('read_table', {
       tableTitle: 'My Table',
       limit: 50,
@@ -1097,7 +1188,8 @@ describe('command bridge action mapping', () => {
 
   it('maps read-table command with --properties filter', async () => {
     const executeSpy = await runCommand([
-      'read-table',
+      'table',
+      'read',
       '--title',
       'My Table',
       '--properties',
@@ -1113,7 +1205,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('maps read-table command with Rem ID as table identifier', async () => {
-    const executeSpy = await runCommand(['read-table', '--rem-id', 'abc123-rem-id']);
+    const executeSpy = await runCommand(['table', 'read', '--rem-id', 'abc123-rem-id']);
     expect(executeSpy).toHaveBeenCalledWith('read_table', {
       tableRemId: 'abc123-rem-id',
       limit: 50,
@@ -1124,7 +1216,8 @@ describe('command bridge action mapping', () => {
 
   it('maps read-table command with all options combined', async () => {
     const executeSpy = await runCommand([
-      'read-table',
+      'table',
+      'read',
       '--title',
       'Table',
       '--limit',

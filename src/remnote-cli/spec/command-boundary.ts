@@ -2,6 +2,33 @@ import type { Command } from 'commander';
 import { CliFailure } from '../output/errors.js';
 import { rootHelpLabel, rootHelpSection } from './command-spec.js';
 
+const LEGACY_PATHS = [
+  ['create', 'rem create'],
+  ['read', 'rem read'],
+  ['update', 'rem update'],
+  ['search', 'rem search'],
+  ['search-by-tag', 'rem search-by-tag'],
+  ['list-children', 'rem children list'],
+  ['inspect', 'rem inspect'],
+  ['assert', 'rem assert'],
+  ['powerup get', 'rem powerup get'],
+  ['context', 'rem context'],
+  ['verify scope', 'rem verify scope'],
+  ['flashcards apply', 'card apply'],
+  ['review-stats', 'card review-stats'],
+  ['outline collapse', 'rem outline collapse'],
+  ['outline expand', 'rem outline expand'],
+  ['get-media', 'media get'],
+  ['insert-children', 'rem children insert'],
+  ['move-note', 'rem move'],
+  ['set-document-status', 'rem document status'],
+  ['replace-children', 'rem children replace'],
+  ['update-tags', 'rem tags update'],
+  ['set-property', 'rem property set'],
+  ['journal', 'journal append'],
+  ['read-table', 'table read'],
+] as const;
+
 function commandPath(command: Command): string {
   const parts: string[] = [];
   let current: Command | null = command;
@@ -56,6 +83,24 @@ function hasDescendantOption(command: Command, token: string): boolean {
   );
 }
 
+function descendantOptionOwners(command: Command, token: string): string[] {
+  const name = token.replace(/^-+/, '').split('=', 1)[0];
+  const output: string[] = [];
+  const visit = (parent: Command): void => {
+    for (const child of parent.commands) {
+      if (
+        child.options.some(
+          (option) => option.long?.replace(/^--/, '') === name || option.short === `-${name}`
+        )
+      )
+        output.push(commandPath(child));
+      visit(child);
+    }
+  };
+  visit(command);
+  return output;
+}
+
 function editDistance(left: string, right: string): number {
   const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let i = 1; i <= left.length; i++) {
@@ -81,6 +126,13 @@ function suggestions(command: Command, value: string): string[] {
     .sort((left, right) => left.distance - right.distance || left.name.localeCompare(right.name))
     .slice(0, 6)
     .map((candidate) => candidate.name);
+}
+
+function legacySuggestions(command: Command, value: string): string[] {
+  if (command.parent) return [];
+  return LEGACY_PATHS.filter(([legacy]) => legacy.startsWith(value))
+    .map(([, replacement]) => replacement)
+    .slice(0, 6);
 }
 
 function usage(command: Command): string {
@@ -125,10 +177,13 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
       }
       if (isKnownShortFlagCluster(command, token)) continue;
       if (command.commands.length > 0 && hasDescendantOption(command, token)) {
+        const candidates = descendantOptionOwners(command, token).slice(0, 6);
+        const suffix = candidates.length > 0 ? `; did you mean ${candidates.join(', ')}?` : '';
         return groupFailure(
           command,
           'missing_subcommand',
-          `missing subcommand for ${commandPath(command) || 'remnote-cli'}; ${token.split('=', 1)[0]} belongs to a subcommand`
+          `missing subcommand for ${commandPath(command) || 'remnote-cli'}; ${token.split('=', 1)[0]} belongs to a subcommand${suffix}`,
+          candidates
         );
       }
       if (command.commands.length > 0) {
@@ -143,7 +198,8 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
     const child = command.commands.find((candidate) => candidate.name() === token);
     if (!child) {
       if (command.commands.length > 0) {
-        const candidates = suggestions(command, token);
+        const legacy = legacySuggestions(command, token);
+        const candidates = legacy.length > 0 ? legacy : suggestions(command, token);
         const suffix = candidates.length > 0 ? `; did you mean ${candidates.join(', ')}?` : '';
         return groupFailure(
           command,

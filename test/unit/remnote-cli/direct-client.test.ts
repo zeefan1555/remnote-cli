@@ -26,6 +26,8 @@ vi.mock('../../../src/remnote-cli/client/remote-sdk.js', () => ({ remoteSdk: () 
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { ReadSession } from '../../../src/remnote-cli/client/session.js';
 import { LocalState } from '../../../src/remnote-cli/client/local-state.js';
+import { createProgram, runProgram } from '../../../src/remnote-cli/cli.js';
+import { createBufferedRuntime } from '../../../src/remnote-cli/output/runtime.js';
 
 let directory: string, client: DirectClient;
 beforeEach(async () => {
@@ -92,6 +94,62 @@ describe('local business dispatch', () => {
     expect(invalidate).not.toHaveBeenCalled();
     await client.execute('create_note', { title: 'Invalidate' });
     expect(invalidate).toHaveBeenCalledOnce();
+  });
+
+  it('classifies a failed destructive removal as an unknown write outcome', async () => {
+    client = new DirectClient({ allowDestructive: true, persist: false });
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const rem = plugin.addTestRem('delete_unknown', 'Delete unknown');
+    vi.spyOn(plugin.rem, 'findOne').mockResolvedValueOnce(rem);
+    vi.spyOn(rem, 'remove').mockRejectedValueOnce(new Error('Native removal failed'));
+
+    await expect(
+      client.execute('delete_rem', {
+        remId: rem._id,
+        dryRun: false,
+        expectedTitle: 'Delete unknown',
+      })
+    ).rejects.toMatchObject({
+      type: 'unknown_outcome',
+      subtype: 'write_response_lost',
+    });
+  });
+
+  it('does not classify a delete preview connection failure as a write outcome', async () => {
+    wire.open.mockRejectedValueOnce(
+      new Error('Connection lost; write outcome unknown. Do not blindly replay.')
+    );
+
+    const error = await client
+      .execute('delete_rem', { remId: 'preview-rem', dryRun: true })
+      .catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as { type?: string }).type).not.toBe('unknown_outcome');
+  });
+
+  it('keeps a delete preview transport failure unavailable at the CLI boundary', async () => {
+    wire.open.mockRejectedValueOnce(
+      new Error('Connection lost; write outcome unknown. Do not blindly replay.')
+    );
+    const runtime = createBufferedRuntime();
+    const program = createProgram('test', runtime);
+
+    const exitCode = await runProgram(
+      program,
+      ['node', 'remnote-cli', 'rem', 'delete', 'preview-rem'],
+      runtime
+    );
+    expect(exitCode).toBe(3);
+    const failure = JSON.parse(runtime.stderr());
+    expect(failure).toMatchObject({
+      ok: false,
+      error: {
+        type: 'unavailable',
+        subtype: 'bridge_unavailable',
+        message: 'Bridge connection failed during a read-only preview; no write was attempted.',
+      },
+    });
+    expect(JSON.stringify(failure)).not.toContain('write outcome unknown');
   });
 
   it('rejects catalog drift', async () => {

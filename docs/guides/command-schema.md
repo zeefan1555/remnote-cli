@@ -20,8 +20,8 @@ requirement, dynamic SDK marker and cursor pagination metadata when applicable.
 ## Inspect one command
 
 ```bash
-remnote-cli schema search
-remnote-cli schema powerup get
+remnote-cli schema rem.search
+remnote-cli schema rem.powerup.get
 remnote-cli schema sdk rem
 remnote-cli schema sdk.rem.object-get-children-rem
 remnote-cli schema sdk.rem --tree

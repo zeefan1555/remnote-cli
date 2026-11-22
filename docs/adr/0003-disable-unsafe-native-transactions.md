@@ -19,12 +19,12 @@ offline. It is not native rollback acceptance and does not patch the SDK.
 
 Supersede only the native begin/end transaction mechanism in ADR 0001. Do not
 open native transactions over the bridge. Reject remaining transaction-dependent
-commands (`update`, `replace`, property writes and TODO apply) before their callback
+commands (`rem update`, `rem children replace`, `rem property set` and TODO apply) before their callback
 or any mutation runs; do not silently execute those callbacks non-atomically.
 In particular, destructive replacement must not become a partially committed
 operation merely to restore connectivity.
 
-Additive `create`, `journal` and `insert` use explicit sequential writes instead.
+Additive `rem create`, `journal append` and `rem children insert` use explicit sequential writes instead.
 Write a private metadata-only recovery journal before the first SDK mutation,
 including daily-document lookup which can create a document. Save known parent,
 created Rem IDs immediately when returned, before follow-up mutations.

@@ -32,6 +32,7 @@ async function assertJournalReadback(
   label: string
 ): Promise<void> {
   const reread = (await ctx.cli.runExpectSuccess([
+    'rem',
     'read',
     remId,
     '--content-mode',
@@ -55,6 +56,7 @@ async function assertJournalInlineRef(
   label: string
 ): Promise<void> {
   const reread = await ctx.cli.runExpectSuccess([
+    'rem',
     'read',
     remId,
     '--content-mode',
@@ -81,10 +83,12 @@ export async function journalWorkflow(
       const result = (await withTempContentFile(
         expectedEntry,
         async (contentPath) =>
-          (await ctx.cli.runExpectSuccess(['journal', '--content-file', contentPath])) as Record<
-            string,
-            unknown
-          >
+          (await ctx.cli.runExpectSuccess([
+            'journal',
+            'append',
+            '--content-file',
+            contentPath,
+          ])) as Record<string, unknown>
       )) as Record<string, unknown>;
       assertHasField(result, 'remIds', 'journal append with timestamp');
       state.journalEntryAId = (result.remIds as string[])[0];
@@ -121,6 +125,7 @@ export async function journalWorkflow(
         async (contentPath) =>
           (await ctx.cli.runExpectSuccess([
             'journal',
+            'append',
             '--content-file',
             contentPath,
             '--no-timestamp',
@@ -167,10 +172,12 @@ export async function journalWorkflow(
       const result = (await withTempContentFile(
         `${expectedEntry}\n\n## Section\n- Item 1\n- Item 2`,
         async (contentPath) =>
-          (await ctx.cli.runExpectSuccess(['journal', '--content-file', contentPath])) as Record<
-            string,
-            unknown
-          >
+          (await ctx.cli.runExpectSuccess([
+            'journal',
+            'append',
+            '--content-file',
+            contentPath,
+          ])) as Record<string, unknown>
       )) as Record<string, unknown>;
       assertHasField(result, 'remIds', 'journal append with markdown');
       state.journalEntryCId = (result.remIds as string[])[0];

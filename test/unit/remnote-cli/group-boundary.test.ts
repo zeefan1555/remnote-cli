@@ -3,22 +3,11 @@ import { EXIT } from '../../../src/remnote-cli/output/errors.js';
 import { parseFailure, runCliForTest } from '../../helpers/run-cli.js';
 
 describe('command group boundaries', () => {
-  it.each([[], ['--text'], ['--kb-id', 'kb']])(
-    'shows root help for command-less invocation %j',
-    async (...args) => {
-      const result = await runCliForTest(args);
-      expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe('');
-      expect(result.stdout).toContain('Usage: remnote-cli');
-    }
-  );
-
-  it('lets Commander report a missing root option value', async () => {
-    const result = await runCliForTest(['--kb-id']);
-    expect(result.exitCode).toBe(EXIT.USAGE);
-    expect(parseFailure(result.stderr)).toMatchObject({
-      subtype: 'commander.optionMissingArgument',
-    });
+  it.each([[], ['--text']])('shows root help for command-less invocation %j', async (...args) => {
+    const result = await runCliForTest(args);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('Usage: remnote-cli');
   });
 
   it('accepts combined short flags without rejecting them as a group flag', async () => {
@@ -28,15 +17,25 @@ describe('command group boundaries', () => {
     expect(result.stdout.trim()).toBe('0.1.0-test');
   });
 
-  it.each(['powerup', 'flashcards', 'wiki', 'outline', 'todo', 'verify', 'sync', 'sdk'])(
-    'shows help for bare group %s',
-    async (group) => {
-      const result = await runCliForTest([group]);
-      expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe('');
-      expect(result.stdout).toContain(`Usage: remnote-cli ${group}`);
-    }
-  );
+  it.each([
+    [['rem']],
+    [['card']],
+    [['wiki']],
+    [['table']],
+    [['todo']],
+    [['media']],
+    [['journal']],
+    [['sync']],
+    [['sdk']],
+    [['rem', 'powerup']],
+    [['rem', 'outline']],
+    [['rem', 'verify']],
+  ])('shows help for bare group %j', async (group) => {
+    const result = await runCliForTest(group);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain(`Usage: remnote-cli ${group.join(' ')}`);
+  });
 
   it('treats global output flags on a bare group as a successful help request', async () => {
     const result = await runCliForTest(['sync', '--text']);
@@ -47,13 +46,9 @@ describe('command group boundaries', () => {
   it.each([
     { name: 'root help', args: ['help'] },
     { name: 'targeted root help', args: ['help', 'todo'] },
-    { name: 'group help', args: ['flashcards', 'help'] },
-    { name: 'global flag before group help', args: ['--text', 'flashcards', 'help'] },
-    {
-      name: 'valued global flag before group help',
-      args: ['--kb-id', 'synthetic', 'flashcards', 'help'],
-    },
-    { name: 'global flag after group help', args: ['flashcards', '--text', 'help'] },
+    { name: 'group help', args: ['card', 'help'] },
+    { name: 'global flag before group help', args: ['--text', 'card', 'help'] },
+    { name: 'global flag after group help', args: ['card', '--text', 'help'] },
   ])('delegates $name to Commander', async ({ args }) => {
     const result = await runCliForTest(args);
     expect(result.exitCode).toBe(0);
@@ -75,12 +70,37 @@ describe('command group boundaries', () => {
     });
   });
 
+  it.each([
+    [['create'], 'rem create'],
+    [['flashcards', 'apply'], 'card apply'],
+    [['read-table', '--rem-id', 'table'], 'table read'],
+  ])('rejects legacy path %j with replacement %s', async (args, replacement) => {
+    const result = await runCliForTest(args);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({
+      subtype: 'unknown_subcommand',
+      details: { suggestions: expect.arrayContaining([replacement]) },
+    });
+  });
+
   it('reports a leaf-only flag without a subcommand', async () => {
     const result = await runCliForTest(['sync', '--plan-hash', 'hash']);
     expect(result.exitCode).toBe(EXIT.USAGE);
     expect(parseFailure(result.stderr)).toMatchObject({
       subtype: 'missing_subcommand',
       details: { commandPath: 'sync' },
+    });
+  });
+
+  it('names the action that owns a legacy leaf flag', async () => {
+    const result = await runCliForTest(['journal', '--content', 'Legacy entry']);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({
+      subtype: 'missing_subcommand',
+      details: {
+        commandPath: 'journal',
+        suggestions: ['journal append'],
+      },
     });
   });
 

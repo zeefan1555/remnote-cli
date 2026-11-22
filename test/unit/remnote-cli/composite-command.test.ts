@@ -99,9 +99,9 @@ describe('four composite commands', () => {
       };
       vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
 
+      const command = kind === 'flashcards' ? ['card', 'apply'] : ['wiki', 'apply'];
       const output = await runCliForTest([
-        kind,
-        'apply',
+        ...command,
         '--plan',
         '-',
         '--idempotency-key',
@@ -146,7 +146,7 @@ describe('four composite commands', () => {
     };
     vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
 
-    const output = await runCliForTest(['verify', 'scope', '--expect', '-', '--summary']);
+    const output = await runCliForTest(['rem', 'verify', 'scope', '--expect', '-', '--summary']);
     const data = parseSuccess(output.stdout) as {
       objects: unknown[];
       scopes: unknown[];
@@ -163,7 +163,7 @@ describe('four composite commands', () => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(inspect));
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(receipt);
 
-    const output = await runCliForTest(['context', '--request', path]);
+    const output = await runCliForTest(['rem', 'context', '--request', path]);
 
     expect(readContentFileOrStdin).toHaveBeenCalledWith(path);
     expect(execute).toHaveBeenCalledExactlyOnceWith('inspect_many', {
@@ -186,7 +186,7 @@ describe('four composite commands', () => {
       );
       vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ...receipt, status });
 
-      const output = await runCliForTest(['verify', 'scope', '--expect', '-']);
+      const output = await runCliForTest(['rem', 'verify', 'scope', '--expect', '-']);
 
       if (status === 'passed') {
         expect(output.exitCode).toBe(0);
@@ -204,7 +204,7 @@ describe('four composite commands', () => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(inspect));
       vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ...receipt, ...value });
 
-      const output = await runCliForTest(['context', '--request', '-']);
+      const output = await runCliForTest(['rem', 'context', '--request', '-']);
 
       expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
       expect(parseFailure(output.stderr).subtype).toBe('receipt_incomplete');
@@ -217,7 +217,7 @@ describe('four composite commands', () => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(input);
       const execute = vi.spyOn(DirectClient.prototype, 'execute');
 
-      const output = await runCliForTest(['context', '--request', '-']);
+      const output = await runCliForTest(['rem', 'context', '--request', '-']);
 
       expect(execute).not.toHaveBeenCalled();
       expect(output.exitCode).toBe(EXIT.USAGE);
@@ -232,14 +232,8 @@ describe('four composite commands', () => {
         .spyOn(DirectClient.prototype, 'execute')
         .mockResolvedValue({ ...taskReceipt, kind });
 
-      const output = await runCliForTest([
-        kind,
-        'apply',
-        '--plan',
-        '-',
-        '--idempotency-key',
-        'batch',
-      ]);
+      const command = kind === 'flashcards' ? ['card', 'apply'] : ['wiki', 'apply'];
+      const output = await runCliForTest([...command, '--plan', '-', '--idempotency-key', 'batch']);
 
       expect(execute).toHaveBeenCalledExactlyOnceWith(kind + '_apply', {
         schemaVersion: 1,
@@ -260,7 +254,7 @@ describe('four composite commands', () => {
         .mockResolvedValue({ ...taskReceipt, status });
 
       const output = await runCliForTest([
-        'flashcards',
+        'card',
         'apply',
         '--plan',
         '-',
@@ -309,9 +303,15 @@ describe('four composite commands', () => {
   it('leaf helps expose examples, checks, schemas and safety boundaries', () => {
     const program = createProgram('test');
     const output: string[] = [];
-    for (const name of ['context', 'verify', 'flashcards', 'wiki']) {
-      const command = program.commands.find((candidate) => candidate.name() === name)!;
-      const leaf = command.commands[0] ?? command;
+    for (const path of [
+      ['rem', 'create'],
+      ['rem', 'context'],
+      ['rem', 'verify', 'scope'],
+      ['card', 'apply'],
+      ['wiki', 'apply'],
+    ]) {
+      let leaf = program;
+      for (const name of path) leaf = leaf.commands.find((candidate) => candidate.name() === name)!;
       leaf.configureOutput({ writeOut: (text) => output.push(text) });
       leaf.outputHelp();
     }

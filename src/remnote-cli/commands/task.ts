@@ -61,18 +61,22 @@ const help = {
     'After the last Wiki mutation, run verify scope with the WIKI root and zeroCards for final task acceptance.',
   ],
 };
-export function registerTaskCommands(program: Command, catalog: CommandCatalog): void {
-  for (const kind of ['flashcards', 'wiki'] as const)
+export function registerTaskCommands(
+  program: Command,
+  catalog: CommandCatalog,
+  card: Command,
+  wiki: Command
+): void {
+  for (const [kind, label, parent] of [
+    ['flashcards', 'card', card],
+    ['wiki', 'wiki', wiki],
+  ] as const)
     catalog
-      .action(
-        catalog.group(program, kind, { description: `Plan and apply ${kind} tasks` }),
-        'apply',
-        {
-          description: `Preview a ${kind} plan; use --apply to perform guarded writes`,
-          risk: 'write',
-          bridge: 'required',
-        }
-      )
+      .action(parent, 'apply', {
+        description: `Preview a ${label} plan; use --apply to perform guarded writes`,
+        risk: 'write',
+        bridge: 'required',
+      })
       .requiredOption(
         '--plan <path|->',
         'Read the inner schemaVersion=1 JSON plan from a file or stdin'

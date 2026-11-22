@@ -17,7 +17,7 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
   const run = vi.spyOn(cli, 'run').mockImplementation(async (args) => {
     let json: unknown;
     let exitCode = 0;
-    switch (args[0]) {
+    switch (args[0] === 'rem' ? `rem:${args[1]}` : args[0]) {
       case 'status':
         json = {
           connected: true,
@@ -30,22 +30,24 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
           cliVersion: '0.24.0',
         };
         break;
-      case 'search':
+      case 'rem:search': {
+        const title = args[2];
         json = {
           results: [
             {
-              title: args[1],
-              remId: args[1] === 'HOME' ? 'home' : 'tag',
-              remType: args[1] === 'HOME' ? 'folder' : 'concept',
+              title,
+              remId: title === 'HOME' ? 'home' : 'tag',
+              remType: title === 'HOME' ? 'folder' : 'concept',
             },
-            { title: args[1], remId: 'unrelated-same-title', remType: 'text' },
+            { title, remId: 'unrelated-same-title', remType: 'text' },
           ],
         };
         break;
+      }
       case 'sdk':
         json = args[1] === 'app' ? { value: 'app' } : { value: { id: 'daily' } };
         break;
-      case 'context':
+      case 'rem:context':
         json = {
           complete: true,
           errors: [],
@@ -56,7 +58,7 @@ it('stops after a partial apply, preserving the exact plan/key without replaying
           ],
         };
         break;
-      case 'flashcards':
+      case 'card':
         if (args.includes('--apply')) {
           json = { status: 'partial', complete: false, errors: [{ code: 'deadline' }] };
           exitCode = 1;

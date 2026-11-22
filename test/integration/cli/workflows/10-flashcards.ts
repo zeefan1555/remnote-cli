@@ -66,14 +66,14 @@ export async function flashcardsWorkflow(
 
   async function inspect(name: string, remIds: string[]): Promise<InspectedRem[]> {
     const request = await jsonFile(`${name}.json`, { schemaVersion: 1, remIds });
-    const result = await run(['context', '--request', request]);
+    const result = await run(['rem', 'context', '--request', request]);
     assert.equal(result.complete, true);
     assert.deepEqual(result.errors, []);
     return result.objects as InspectedRem[];
   }
 
   async function findExact(title: string, remType: 'folder' | 'concept'): Promise<string> {
-    const result = await run(['search', title, '--limit', '150', '--content-mode', 'none']);
+    const result = await run(['rem', 'search', title, '--limit', '150', '--content-mode', 'none']);
     assert.ok(Array.isArray(result.results));
     assert.ok(result.results.length < 150, 'Search limit reached; exact match may be ambiguous');
     const matches = (
@@ -157,7 +157,7 @@ export async function flashcardsWorkflow(
     });
     const planPath = await jsonFile('plan.json', plan);
     await jsonFile('batch.json', { idempotencyKey: key, resolvedAt: date.toISOString(), planPath });
-    const args = ['flashcards', 'apply', '--plan', planPath, '--idempotency-key', key];
+    const args = ['card', 'apply', '--plan', planPath, '--idempotency-key', key];
     const preview = await run(args);
     assert.equal(preview.status, 'preview');
     assert.equal(preview.complete, true);
@@ -210,7 +210,7 @@ export async function flashcardsWorkflow(
         { kind: 'cardRemIds', remId: ids.root, value: cardIds },
       ],
     });
-    const verified = await run(['verify', 'scope', '--expect', expectation]);
+    const verified = await run(['rem', 'verify', 'scope', '--expect', expectation]);
     assert.equal(verified.status, 'passed');
     const objects = new Map((verified.objects as InspectedRem[]).map((rem) => [rem.remId, rem]));
     assert.deepEqual(objects.get(ids.root)?.text, [plan.title]);

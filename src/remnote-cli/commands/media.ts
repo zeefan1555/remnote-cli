@@ -26,9 +26,13 @@ function requireMediaResult(value: unknown): MediaResult {
   return value as MediaResult;
 }
 
-export function registerGetMediaCommand(program: Command, catalog: CommandCatalog): void {
+export function registerGetMediaCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   catalog
-    .action(program, 'get-media <rem-id>', {
+    .action(parent, 'get <rem-id>', {
       description: 'Save one RemNote-managed image returned by read --include-media-metadata',
       risk: 'write',
       bridge: 'required',

@@ -153,6 +153,7 @@ async function resolveExpectedSearchByTagTarget(
   taggedRemId: string
 ): Promise<ExpectedTagTarget> {
   const tagged = (await ctx.cli.runExpectSuccess([
+    'rem',
     'read',
     taggedRemId,
     '--content-mode',
@@ -168,6 +169,7 @@ async function resolveExpectedSearchByTagTarget(
 
   while (currentParentId) {
     const parent = (await ctx.cli.runExpectSuccess([
+      'rem',
       'read',
       currentParentId,
       '--content-mode',
@@ -251,24 +253,27 @@ export async function createSearchWorkflow(
     const start = Date.now();
     try {
       if (!state.searchByTagTagRemId) {
-        const result = (await ctx.cli.runExpectSuccess(['create', state.searchByTagTag])) as Record<
-          string,
-          unknown
-        >;
+        const result = (await ctx.cli.runExpectSuccess([
+          'rem',
+          'create',
+          state.searchByTagTag,
+        ])) as Record<string, unknown>;
         assertHasField(result, 'remIds', 'create search tag rem');
         assertIsArray(result.remIds, 'search tag remIds');
         state.searchByTagTagRemId = (result.remIds as string[])[0];
       }
 
-      const mdTagResult = (await ctx.cli.runExpectSuccess(['create', mdTreeRootOnlyTag])) as Record<
-        string,
-        unknown
-      >;
+      const mdTagResult = (await ctx.cli.runExpectSuccess([
+        'rem',
+        'create',
+        mdTreeRootOnlyTag,
+      ])) as Record<string, unknown>;
       assertHasField(mdTagResult, 'remIds', 'create markdown tree tag rem');
       assertIsArray(mdTagResult.remIds, 'markdown tree tag remIds');
       mdTreeRootOnlyTagRemId = (mdTagResult.remIds as string[])[0];
 
       const tagPagingResult = (await ctx.cli.runExpectSuccess([
+        'rem',
         'create',
         tagPagingToken,
       ])) as Record<string, unknown>;
@@ -295,6 +300,7 @@ export async function createSearchWorkflow(
       const originalAlias = `Pôvodný názov ${ctx.runId}`;
       const unicodeAlias = `한국어 ${ctx.runId}`;
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'create',
         title,
         '--parent-id',
@@ -309,6 +315,7 @@ export async function createSearchWorkflow(
       assertIsArray(result.remIds, 'remIds should be an array');
       state.noteAId = (result.remIds as string[])[0];
       const reread = (await ctx.cli.runExpectSuccess([
+        'rem',
         'read',
         state.noteAId,
         '--content-mode',
@@ -339,6 +346,7 @@ export async function createSearchWorkflow(
     try {
       const result = (await withTempContentFile('This is test content', async (contentPath) => {
         return (await ctx.cli.runExpectSuccess([
+          'rem',
           'create',
           `[CLI-TEST] Rich Note ${ctx.runId}`,
           '--parent-id',
@@ -368,6 +376,7 @@ export async function createSearchWorkflow(
     const start = Date.now();
     try {
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'create',
         `[CLI-TEST] Flashcard Note ${ctx.runId}`,
         '--content',
@@ -382,6 +391,7 @@ export async function createSearchWorkflow(
       state.noteCId = (result.remIds as string[])[0];
 
       const reviewStats = (await ctx.cli.runExpectSuccess([
+        'card',
         'review-stats',
         ...(result.remIds as string[]),
       ])) as Record<string, unknown>;
@@ -415,6 +425,7 @@ export async function createSearchWorkflow(
         `Created content exact ref [[id:${state.noteAId}]]`,
         async (contentPath) =>
           (await ctx.cli.runExpectSuccess([
+            'rem',
             'create',
             '--title',
             `[CLI-TEST] Exact Ref Create ${ctx.runId} [[id:${state.noteAId}]]`,
@@ -430,6 +441,7 @@ export async function createSearchWorkflow(
       assertTruthy(typeof createdRemId === 'string', 'exact reference note remId');
 
       const reread = await ctx.cli.runExpectSuccess([
+        'rem',
         'read',
         createdRemId,
         '--content-mode',
@@ -490,6 +502,7 @@ export async function createSearchWorkflow(
 
       const result = (await withTempContentFile(markdownContent, async (contentPath) => {
         return (await ctx.cli.runExpectSuccess([
+          'rem',
           'create',
           '--parent-id',
           state.integrationParentRemId as string,
@@ -527,6 +540,7 @@ export async function createSearchWorkflow(
     try {
       for (let i = 1; i <= 5; i += 1) {
         const result = (await ctx.cli.runExpectSuccess([
+          'rem',
           'create',
           `[CLI-TEST] ${pagingSearchToken} item ${i}`,
           '--parent-id',
@@ -562,6 +576,7 @@ export async function createSearchWorkflow(
     const start = Date.now();
     try {
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search',
         simpleSearchToken,
         '--limit',
@@ -594,6 +609,7 @@ export async function createSearchWorkflow(
     const start = Date.now();
     try {
       const scopedResult = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search',
         simpleSearchToken,
         '--parent-id',
@@ -611,6 +627,7 @@ export async function createSearchWorkflow(
 
       assertTruthy(typeof state.noteBId === 'string', 'rich note remId should be recorded');
       const nonScopedResult = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search',
         simpleSearchToken,
         '--parent-id',
@@ -650,6 +667,7 @@ export async function createSearchWorkflow(
     try {
       assertEqual(pagingNoteIds.length, 5, 'paging fixture note count');
       const firstPage = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search',
         pagingSearchToken,
         '--parent-id',
@@ -667,6 +685,7 @@ export async function createSearchWorkflow(
       assertEqual(firstPage.truncated as boolean, false, 'first page truncated');
       assertTruthy(typeof state.noteBId === 'string', 'rich note remId should be recorded');
       const mismatchedCursorResult = await ctx.cli.runExpectError([
+        'rem',
         'search',
         pagingSearchToken,
         '--parent-id',
@@ -695,6 +714,7 @@ export async function createSearchWorkflow(
       let lastPage = firstPage;
       for (let page = 2; page <= 4 && cursor; page += 1) {
         const nextPage = (await ctx.cli.runExpectSuccess([
+          'rem',
           'search',
           pagingSearchToken,
           '--parent-id',
@@ -751,6 +771,7 @@ export async function createSearchWorkflow(
       assertTruthy(tagPagingRemId, 'search-by-tag paging tag Rem ID should be recorded');
       assertEqual(tagPagingNoteIds.length, 5, 'search-by-tag paging fixture note count');
       const firstPage = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search-by-tag',
         '--tag-id',
         tagPagingRemId as string,
@@ -779,6 +800,7 @@ export async function createSearchWorkflow(
       let lastPage = firstPage;
       for (let page = 2; page <= 4 && cursor; page += 1) {
         const nextPage = (await ctx.cli.runExpectSuccess([
+          'rem',
           'search-by-tag',
           '--tag-id',
           tagPagingRemId as string,
@@ -837,6 +859,7 @@ export async function createSearchWorkflow(
     let debugResults: Array<Record<string, unknown>> | null = null;
     try {
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search',
         query,
         '--content-mode',
@@ -890,6 +913,7 @@ export async function createSearchWorkflow(
       );
       assertTruthy(mdTreeRootOnlyTagRemId, 'markdown tree root-only tag Rem ID should be recorded');
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search-by-tag',
         '--tag-id',
         mdTreeRootOnlyTagRemId as string,
@@ -964,6 +988,7 @@ export async function createSearchWorkflow(
         'searchByTagTagRemId should be recorded'
       );
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'search-by-tag',
         '--tag-id',
         state.searchByTagTagRemId as string,

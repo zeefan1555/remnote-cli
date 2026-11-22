@@ -117,9 +117,8 @@ export function registerSchemaCommand(program: Command, catalog: CommandCatalog)
         '',
         'Examples:',
         '  remnote-cli schema',
-        '  remnote-cli schema search',
-        '  remnote-cli schema powerup.get',
-        '  remnote-cli schema powerup get',
+        '  remnote-cli schema rem.search',
+        '  remnote-cli schema rem.powerup.get',
         '  remnote-cli schema sdk --tree',
       ].join('\n')
     )

@@ -61,7 +61,7 @@ export async function readTableWorkflow(
   {
     const start = Date.now();
     try {
-      const result = await ctx.cli.run(['read-table', '--title', tableName]);
+      const result = await ctx.cli.run(['table', 'read', '--title', tableName]);
 
       if (result.exitCode !== 0) {
         throw new Error(
@@ -146,7 +146,7 @@ export async function readTableWorkflow(
   {
     const start = Date.now();
     try {
-      const result = await ctx.cli.run(['read-table', '--rem-id', tableRemId]);
+      const result = await ctx.cli.run(['table', 'read', '--rem-id', tableRemId]);
 
       if (result.exitCode !== 0) {
         throw new Error(
@@ -192,7 +192,8 @@ export async function readTableWorkflow(
         (column) => column.propertyId === fixture.numericPropertyRemId
       )!;
       const result = await ctx.cli.run([
-        'read-table',
+        'table',
+        'read',
         '--title',
         tableName,
         '--properties',
@@ -239,7 +240,7 @@ export async function readTableWorkflow(
   {
     const start = Date.now();
     try {
-      const result = await ctx.cli.run(['read-table', '--title', tableName, '--limit', '1']);
+      const result = await ctx.cli.run(['table', 'read', '--title', tableName, '--limit', '1']);
 
       if (result.exitCode !== 0) {
         throw new Error(
@@ -275,7 +276,7 @@ export async function readTableWorkflow(
   {
     const start = Date.now();
     try {
-      const result = await ctx.cli.run(['read-table', '--title', tableName, '--offset', '1']);
+      const result = await ctx.cli.run(['table', 'read', '--title', tableName, '--offset', '1']);
 
       if (result.exitCode !== 0) {
         throw new Error(
@@ -314,7 +315,8 @@ export async function readTableWorkflow(
     const start = Date.now();
     try {
       const result = await ctx.cli.runExpectError([
-        'read-table',
+        'table',
+        'read',
         '--title',
         'Non-Existent-Table-xyz-123',
       ]);

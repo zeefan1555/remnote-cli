@@ -6,8 +6,12 @@ import { resolveOptionalInlineOrFileContent } from './content-input.js';
 import { checkPayloadForFlags, validateNotFlag } from './arg-utils.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerCreateCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'create [title]', {
+export function registerCreateCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'create [title]', {
     description: 'Create a note; newly created non-leaf Rems are collapsed automatically',
     risk: 'write',
     bridge: 'required',

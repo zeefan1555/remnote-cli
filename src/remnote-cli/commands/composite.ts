@@ -7,7 +7,11 @@ import { formatResult } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { summarizeReceipt } from '../output/receipt-summary.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
-export function registerCompositeCommands(program: Command, catalog: CommandCatalog): void {
+export function registerCompositeCommands(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   async function execute(
     action: 'inspect_many' | 'verify_scope',
     path: string,
@@ -42,7 +46,7 @@ export function registerCompositeCommands(program: Command, catalog: CommandCata
     }
   }
   catalog
-    .action(program, 'context', {
+    .action(parent, 'context', {
       description: 'Read one bounded, structured context receipt without modifying RemNote',
       risk: 'read',
       bridge: 'required',
@@ -63,7 +67,7 @@ export function registerCompositeCommands(program: Command, catalog: CommandCata
       ].join('\n')
     )
     .action(async (opts: { request: string }) => execute('inspect_many', opts.request));
-  const verify = catalog.group(program, 'verify', {
+  const verify = catalog.group(parent, 'verify', {
     description: 'Verify explicit expectations against fresh read-only evidence',
   });
   catalog

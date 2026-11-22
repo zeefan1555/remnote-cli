@@ -196,6 +196,21 @@ export interface MoveNoteParams {
   ancestorDepth?: number;
 }
 
+export interface DeleteRemParams {
+  remId: string;
+  dryRun?: boolean;
+  expectedTitle?: string;
+}
+
+export interface DeleteRemResult {
+  remId: string;
+  title: string;
+  dryRun: boolean;
+  changed: boolean;
+  verified: boolean;
+  scope: 'rem-and-descendants';
+}
+
 export interface ReadTableParams {
   tableRemId?: string;
   tableTitle?: string;
@@ -2443,14 +2458,15 @@ export class RemAdapter {
     return await this.plugin.app.transaction(fn);
   }
 
-  private async runAdditive<T>(
+  private async runJournaledWrite<T>(
+    kind: 'additive' | 'destructive',
     operation: string,
     input: unknown,
     fn: (remember: (remIds: string[]) => Promise<void>) => Promise<T>,
     beforeMutation?: () => void
   ): Promise<T> {
     this.assertWriteEnabled(beforeMutation);
-    const key = `additive:${randomUUID()}`;
+    const key = `${kind}:${randomUUID()}`;
     const entry = {
       schemaVersion: 1,
       operation,
@@ -2474,8 +2490,12 @@ export class RemAdapter {
     } catch (error) {
       entry.state = 'unknown';
       await save().catch(() => {});
+      const outcome =
+        kind === 'destructive'
+          ? 'Write outcome unknown; destructive write may have partially completed or completed before the error'
+          : 'Additive writes may be partial';
       throw new Error(
-        `${error instanceof Error ? error.message : String(error)}. Additive writes may be partial; no rollback or retry was attempted. Recovery key: ${key}; known Rem IDs: ${entry.remIds.join(', ') || 'none returned'}. Read back before retry.`,
+        `${error instanceof Error ? error.message : String(error)}. ${outcome}; no rollback or retry was attempted. Recovery key: ${key}; known Rem IDs: ${entry.remIds.join(', ') || 'none returned'}. Read back before retry.`,
         { cause: error }
       );
     }
@@ -3229,7 +3249,8 @@ export class RemAdapter {
         }
       }
 
-      return await this.runAdditive(
+      return await this.runJournaledWrite(
+        'additive',
         'create_note',
         params,
         async (remember) => {
@@ -3285,7 +3306,8 @@ export class RemAdapter {
       }
 
       const preparedContent = await this.prepareMarkdownIdReferenceTokens(normalizedContent);
-      return await this.runAdditive(
+      return await this.runJournaledWrite(
+        'additive',
         'create_note',
         params,
         async (remember) => {
@@ -3363,7 +3385,7 @@ export class RemAdapter {
     const titles: string[] = [];
     let journalRootRem: PluginRem | undefined;
 
-    return await this.runAdditive('append_journal', params, async (remember) => {
+    return await this.runJournaledWrite('additive', 'append_journal', params, async (remember) => {
       this.assertWriteEnabled();
       const dailyDoc = await this.plugin.date.getDailyDoc(today);
       if (!dailyDoc) throw new Error('Failed to access daily document');
@@ -3682,6 +3704,58 @@ export class RemAdapter {
     return { results };
   }
 
+  async deleteRem(params: DeleteRemParams): Promise<DeleteRemResult> {
+    const remId = this.requireString(params.remId, 'remId');
+    const dryRun = params.dryRun !== false;
+    const expectedTitle =
+      params.expectedTitle === undefined
+        ? undefined
+        : this.requireString(params.expectedTitle, 'expectedTitle');
+
+    const rem = await this.plugin.rem.findOne(remId);
+    if (!rem) throw new Error(`Note not found: ${remId}`);
+    const { title } = await this.getTitleAndDetail(rem);
+    if (expectedTitle !== undefined && title !== expectedTitle) {
+      throw new Error(
+        `Current title does not match expectedTitle: expected ${expectedTitle}, got ${title}`
+      );
+    }
+
+    if (dryRun) {
+      return {
+        remId,
+        title,
+        dryRun: true,
+        changed: false,
+        verified: false,
+        scope: 'rem-and-descendants',
+      };
+    }
+
+    if (!this.settings.acceptWriteOperations) {
+      throw new Error('Write operations are disabled in Automation Bridge settings');
+    }
+    if (!this.settings.acceptReplaceOperation) {
+      throw new Error('Destructive operation requires --allow-destructive');
+    }
+
+    return await this.runJournaledWrite('destructive', 'delete_rem', params, async (remember) => {
+      await remember([remId]);
+      await rem.remove();
+      if (await this.plugin.rem.findOne(remId)) {
+        throw new Error(`Deleted Rem is still present: ${remId}`);
+      }
+      return {
+        remId,
+        title,
+        dryRun: false,
+        changed: true,
+        verified: true,
+        scope: 'rem-and-descendants' as const,
+      };
+    });
+  }
+
   async moveNote(params: MoveNoteParams): Promise<MoveNoteResult> {
     if (!this.settings.acceptWriteOperations) {
       throw new Error('Write operations are disabled in Automation Bridge settings');
@@ -3983,43 +4057,48 @@ export class RemAdapter {
       });
 
       this.logDiagnosticTrace(trace, 'write:start');
-      const result = await this.runAdditive('insert_children', params, async (remember) => {
-        await remember([safeParams.parentRemId]);
-        this.logDiagnosticTrace(trace, 'write:entered');
-        const createdRems = await this.createRemsFromPreparedMarkdown(
-          preparedContent,
-          safeParams.parentRemId,
-          positionAmongstSiblings,
-          trace,
-          undefined,
-          remember
-        );
-        this.logDiagnosticTrace(trace, 'write:created_rems', {
-          createdRemCount: createdRems.length,
-        });
+      const result = await this.runJournaledWrite(
+        'additive',
+        'insert_children',
+        params,
+        async (remember) => {
+          await remember([safeParams.parentRemId]);
+          this.logDiagnosticTrace(trace, 'write:entered');
+          const createdRems = await this.createRemsFromPreparedMarkdown(
+            preparedContent,
+            safeParams.parentRemId,
+            positionAmongstSiblings,
+            trace,
+            undefined,
+            remember
+          );
+          this.logDiagnosticTrace(trace, 'write:created_rems', {
+            createdRemCount: createdRems.length,
+          });
 
-        if (createdRems.length === 0) {
+          if (createdRems.length === 0) {
+            this.logDiagnosticTrace(trace, 'write:callback_done', {
+              createdRemCount: createdRems.length,
+              resultRemCount: 0,
+            });
+            return { titles: [], remIds: [] };
+          }
+
+          this.logDiagnosticTrace(trace, 'extract_results:start', {
+            createdRemCount: createdRems.length,
+          });
+          const extractedResult = await this.extractRemResults(createdRems);
+          this.logDiagnosticTrace(trace, 'extract_results:done', {
+            remIds: extractedResult.remIds,
+            titleCount: extractedResult.titles.length,
+          });
           this.logDiagnosticTrace(trace, 'write:callback_done', {
             createdRemCount: createdRems.length,
-            resultRemCount: 0,
+            resultRemCount: extractedResult.remIds.length,
           });
-          return { titles: [], remIds: [] };
+          return extractedResult;
         }
-
-        this.logDiagnosticTrace(trace, 'extract_results:start', {
-          createdRemCount: createdRems.length,
-        });
-        const extractedResult = await this.extractRemResults(createdRems);
-        this.logDiagnosticTrace(trace, 'extract_results:done', {
-          remIds: extractedResult.remIds,
-          titleCount: extractedResult.titles.length,
-        });
-        this.logDiagnosticTrace(trace, 'write:callback_done', {
-          createdRemCount: createdRems.length,
-          resultRemCount: extractedResult.remIds.length,
-        });
-        return extractedResult;
-      });
+      );
       this.logDiagnosticTrace(trace, 'write:done', {
         remIds: result.remIds,
         titleCount: result.titles.length,
@@ -4091,6 +4170,9 @@ export class RemAdapter {
 
     if (!addTagRemIds.length && !removeTagRemIds.length) {
       throw new Error('update_tags requires addTagRemIds or removeTagRemIds');
+    }
+    if (removeTagRemIds.length > 0 && !this.settings.acceptReplaceOperation) {
+      throw new Error('Destructive operation requires --allow-destructive');
     }
 
     const rem = await this.plugin.rem.findOne(remId);

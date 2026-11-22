@@ -1,14 +1,14 @@
 # Pagination
 
-`search`, `search-by-tag` and single-parent `list-children` support automatic
+`rem search`, `rem search-by-tag` and single-parent `rem children list` support automatic
 cursor pagination.
 
 ## Complete snapshots
 
 ```bash
-remnote-cli search "project plan" --all
-remnote-cli search-by-tag --tag-id TAG_ID --all
-remnote-cli list-children PARENT_ID --all
+remnote-cli rem search "project plan" --all
+remnote-cli rem search-by-tag --tag-id TAG_ID --all
+remnote-cli rem children list PARENT_ID --all
 ```
 
 `--all` follows every page by default. It does not impose a hidden page or item
@@ -17,7 +17,7 @@ limit.
 ## Explicit bounds
 
 ```bash
-remnote-cli search "project plan" --all --max-pages 20 --page-delay 100
+remnote-cli rem search "project plan" --all --max-pages 20 --page-delay 100
 ```
 
 `--max-pages` is an operator-selected safety bound and requires `--all`.
@@ -52,5 +52,5 @@ Pagination fails as a conflict when:
 The raw one-page mode also reports `paging.complete`. Reuse `--cursor` with
 the same query and scope to continue manually.
 
-Several-parent `list-children` keeps its raw multi-result shape because each parent
+Several-parent `rem children list` keeps its raw multi-result shape because each parent
 has an independent cursor.
