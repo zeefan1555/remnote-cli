@@ -63,6 +63,12 @@ function toKebabCase(value: string): string {
     .toLowerCase();
 }
 
+function capabilitySlug(value: string): string {
+  return toKebabCase(value)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 export function navigationCapability(capability: Capability): NavigationCapability {
   if (capability.target === 'rem')
     return { ...capability, group: 'rem', command: `object-${toKebabCase(capability.method)}` };
@@ -88,10 +94,21 @@ export function navigationCapability(capability: Capability): NavigationCapabili
 }
 
 export function navigationCatalog(result: CapabilityResult): NavigationCatalog {
-  const capabilities = result.capabilities.map(navigationCapability);
-  const keys = capabilities.map((capability) => `${capability.group}:${capability.command}`);
-  if (new Set(keys).size !== keys.length)
-    throw new Error('SDK capability navigation contains duplicate paths');
+  const initial = result.capabilities.map(navigationCapability);
+  const counts = new Map<string, number>();
+  for (const capability of initial) {
+    const key = `${capability.group}:${capability.command}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const capabilities = initial.map((capability) => {
+    const key = `${capability.group}:${capability.command}`;
+    return counts.get(key) === 1
+      ? capability
+      : {
+          ...capability,
+          command: `${capability.command}--${capabilitySlug(capability.id)}`,
+        };
+  });
   return { ...result, capabilities };
 }
 

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  navigationCatalog,
   localSdkCapabilities,
   localSdkNavigation,
   navigationCapability,
+  type CapabilityResult,
 } from '../../../src/remnote-cli/client/sdk-capabilities.js';
 
 describe('SDK navigation', () => {
@@ -63,5 +65,59 @@ describe('SDK navigation', () => {
         mode: 'read',
       })
     ).toMatchObject({ group: 'app', command: 'plugin-track' });
+  });
+
+  it('disambiguates future duplicate navigation paths by capability ID', () => {
+    const result: CapabilityResult = {
+      catalogSchemaVersion: 1,
+      sdkVersion: 'future',
+      sdkCatalogHash: 'a'.repeat(64),
+      capabilities: [
+        {
+          id: 'namespace:app.getPlatform',
+          target: 'namespace',
+          namespace: 'app',
+          method: 'getPlatform',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+        {
+          id: 'namespace:app.pluginTrack',
+          target: 'namespace',
+          namespace: 'app',
+          method: 'pluginTrack',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+        {
+          id: 'namespace:plugin.track',
+          target: 'namespace',
+          namespace: 'plugin',
+          method: 'track',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+      ],
+    };
+
+    const navigation = navigationCatalog(result);
+    const paths = navigation.capabilities.map(({ group, command }) => `${group}:${command}`);
+    expect(new Set(paths).size).toBe(paths.length);
+    expect(navigation.capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'namespace:app.getPlatform', command: 'get-platform' }),
+        expect.objectContaining({
+          id: 'namespace:app.pluginTrack',
+          command: 'plugin-track--namespace-app-plugin-track',
+        }),
+        expect.objectContaining({
+          id: 'namespace:plugin.track',
+          command: 'plugin-track--namespace-plugin-track',
+        }),
+      ])
+    );
   });
 });

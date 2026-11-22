@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { EXIT } from '../../../src/remnote-cli/output/errors.js';
-import { runCliForTest } from '../../helpers/run-cli.js';
+import { parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 const tempDirs: string[] = [];
 
@@ -232,6 +232,58 @@ describe('command bridge action mapping', () => {
     };
     const executeSpy = await runCommand(['sdk', 'capabilities', '--group', 'rem'], result);
     expect(executeSpy).toHaveBeenCalledWith('get_sdk_capabilities', {});
+    executeSpy.mockRestore();
+  });
+
+  it('lists live capabilities when future navigation names collide', async () => {
+    const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
+      catalogSchemaVersion: 1,
+      sdkVersion: 'future',
+      capabilities: [
+        {
+          id: 'namespace:app.getPlatform',
+          target: 'namespace',
+          namespace: 'app',
+          method: 'getPlatform',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+        {
+          id: 'namespace:app.pluginTrack',
+          target: 'namespace',
+          namespace: 'app',
+          method: 'pluginTrack',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+        {
+          id: 'namespace:plugin.track',
+          target: 'namespace',
+          namespace: 'plugin',
+          method: 'track',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+      ],
+    });
+
+    const result = await runCliForTest(['sdk', 'capabilities']);
+    const data = parseSuccess(result.stdout) as {
+      capabilities: Array<{ group: string; command: string }>;
+    };
+    const paths = data.capabilities.map(({ group, command }) => `${group}:${command}`);
+    expect(result.exitCode).toBe(0);
+    expect(new Set(paths).size).toBe(paths.length);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        'app:get-platform',
+        'app:plugin-track--namespace-app-plugin-track',
+        'app:plugin-track--namespace-plugin-track',
+      ])
+    );
     executeSpy.mockRestore();
   });
 
