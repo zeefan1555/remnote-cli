@@ -128,6 +128,13 @@ export function registerSchemaCommand(program: Command, catalog: CommandCatalog)
       const specs = buildCommandSpecs(program);
       const parts = normalizePath(pathParts);
       const selected = parts.length > 0 ? commandSpecAt(specs, parts.join(' ')) : undefined;
+      if (options.tree && selected?.kind === 'action') {
+        throw new CliFailure(
+          'usage',
+          'tree_requires_group',
+          `--tree requires a command group, not action ${selected.path}`
+        );
+      }
       const value = options.tree
         ? {
             schemaVersion: 2,
@@ -169,12 +176,14 @@ export function registerSchemaCommand(program: Command, catalog: CommandCatalog)
       const specs = buildCommandSpecs(program);
       const parts = normalizePath(pathParts);
       const candidates = completionCandidates(specs, parts);
+      const exact = specs.find((spec) => spec.path === parts.join(' '));
+      const responsePath = exact?.kind === 'group' ? exact.path : parts.slice(0, -1).join(' ');
       emit(
         program,
         formatResult(
           {
             schemaVersion: 1,
-            path: parts.slice(0, -1).join(' '),
+            path: responsePath,
             candidates,
           },
           format,

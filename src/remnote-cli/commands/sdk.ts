@@ -184,13 +184,16 @@ function registerMethod(
   catalog: CommandCatalog,
   capability: NavigationCapability
 ): void {
-  const command = catalog
-    .action(groupCommand, capability.command, {
-      description: `${capability.summary ?? capability.id} [${capability.status}/${capability.mode}]`,
-      risk: riskFor(capability),
-      bridge: 'required',
-    })
-    .option('--target-id <id>', 'Target Rem or Card ID')
+  const command = catalog.action(groupCommand, capability.command, {
+    description: `${capability.summary ?? capability.id} [${capability.status}/${capability.mode}]`,
+    risk: riskFor(capability),
+    bridge: 'required',
+  });
+  const withTarget =
+    capability.target === 'rem' || capability.target === 'card'
+      ? command.requiredOption('--target-id <id>', 'Target Rem or Card ID')
+      : command.option('--target-id <id>', 'Target Rem or Card ID');
+  withTarget
     .option('--args-json <json-array>', 'Positional arguments as a JSON array')
     .option('--args-file <path|->', 'Read positional JSON arguments from a file or stdin')
     .addHelpText('after', ['', capabilityHelp(capability)].join('\n'));

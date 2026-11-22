@@ -15,6 +15,9 @@ describe('schema and completion discovery', () => {
     const dottedValue = parseSuccess(dotted.stdout) as { path: string; kind: string };
     const spacesValue = parseSuccess(spaces.stdout) as { path: string; kind: string };
     expect(dottedValue).toMatchObject({ path: 'sdk rem object-get-children-rem', kind: 'action' });
+    expect(dottedValue).toMatchObject({
+      input: { required: expect.arrayContaining(['targetId']) },
+    });
     expect(spacesValue).toEqual(dottedValue);
   });
 
@@ -33,6 +36,26 @@ describe('schema and completion discovery', () => {
     );
   });
 
+  it('rejects a tree request for an action instead of returning the root tree', async () => {
+    const result = await runCliForTest(['schema', 'sdk.rem.object-get-children-rem', '--tree']);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({ subtype: 'tree_requires_group' });
+  });
+
+  it('requires a target for a concrete Rem or Card method', async () => {
+    const result = await runCliForTest([
+      'sdk',
+      'rem',
+      'object-get-children-rem',
+      '--args-json',
+      '[]',
+    ]);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({
+      subtype: 'commander.missingMandatoryOptionValue',
+    });
+  });
+
   it('returns root, group and partial method candidates from the same catalog', async () => {
     const root = parseSuccess((await runCliForTest(['completion'])).stdout) as CompletionOutput;
     expect(root.candidates.map(({ name }) => name)).toEqual(
@@ -46,6 +69,11 @@ describe('schema and completion discovery', () => {
     expect(group.candidates.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['call', 'capabilities', 'rem'])
     );
+    expect(group.path).toBe('sdk');
+    const nestedGroup = parseSuccess(
+      (await runCliForTest(['completion', 'sdk', 'rem'])).stdout
+    ) as CompletionOutput;
+    expect(nestedGroup.path).toBe('sdk rem');
 
     const methods = parseSuccess(
       (await runCliForTest(['completion', 'sdk', 'rem', 'object-get'])).stdout
