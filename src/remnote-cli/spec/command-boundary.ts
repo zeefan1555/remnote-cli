@@ -168,6 +168,7 @@ export function rootHelpRequested(program: Command, argv: string[]): boolean {
     if (token === '--version' || token === '-V') return false;
     if (token.startsWith('-')) {
       if (isKnownShortFlagCluster(program, token)) {
+        if (token.includes('V')) return false;
         if (token.includes('h')) return true;
         continue;
       }

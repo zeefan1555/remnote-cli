@@ -25,7 +25,7 @@ describe('command group boundaries', () => {
     const result = await runCliForTest(['-Vh']);
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
-    expect(result.stdout).toContain('Usage: remnote-cli');
+    expect(result.stdout.trim()).toBe('0.1.0-test');
   });
 
   it.each(['powerup', 'flashcards', 'wiki', 'outline', 'todo', 'verify', 'sync', 'sdk'])(
