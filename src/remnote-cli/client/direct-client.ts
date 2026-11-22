@@ -59,6 +59,15 @@ const READ_ONLY_ACTIONS = new Set([
   'powerup_get',
   'get_media',
 ]);
+const PREVIEWABLE_ACTIONS = new Set([
+  'set_outline_collapsed',
+  'update_todo',
+  'move_note',
+  'set_document_status',
+  'delete_rem',
+  'flashcards_apply',
+  'wiki_apply',
+]);
 export interface ClientOptions {
   kbId?: string;
   allowDestructive?: boolean;
@@ -137,16 +146,15 @@ export class DirectClient {
     this.adapter.importSearchSnapshots(await this.state.getLocal('search-snapshots'));
   }
   async execute(action: string, payload: Record<string, unknown>): Promise<unknown> {
-    const taskPreview =
-      (action === 'flashcards_apply' || action === 'wiki_apply') && payload.dryRun !== false;
+    const preview = PREVIEWABLE_ACTIONS.has(action) && payload.dryRun !== false;
     try {
       return await this.executeAction(action, payload);
     } catch (error) {
-      if (!READ_ONLY_ACTIONS.has(action) && !taskPreview && isWriteUncertainty(error))
+      if (!READ_ONLY_ACTIONS.has(action) && !preview && isWriteUncertainty(error))
         throw unknownOutcomeFailure(error);
       throw error;
     } finally {
-      if (!READ_ONLY_ACTIONS.has(action) && !taskPreview) this.readSession.invalidateAll();
+      if (!READ_ONLY_ACTIONS.has(action) && !preview) this.readSession.invalidateAll();
     }
   }
 

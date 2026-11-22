@@ -215,7 +215,7 @@ The CLI emits the complete receipt in JSON and text modes before exit. Zero requ
 and `status:preview` for preview or `status:verified` for apply. All other outcomes are non-success. Applied steps
 alone are not a verified batch. A transport failure can occur before a receipt is returned.
 
-`flashcards apply --summary` and `wiki apply --summary` keep status, scope, IDs,
+`card apply --summary` and `wiki apply --summary` keep status, scope, IDs,
 hashes, read window, all identity arrays/steps and errors, add counts, and omit
 passing check detail. Recovery identities are never discarded, even on partial writes.
 Omit the flag for full detail. Summary

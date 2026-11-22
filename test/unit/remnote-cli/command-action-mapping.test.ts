@@ -850,7 +850,7 @@ describe('command bridge action mapping', () => {
   });
 
   it('keeps help as literal journal content', async () => {
-    const executeSpy = await runCommand(['journal', '--content', 'help']);
+    const executeSpy = await runCommand(['journal', 'append', '--content', 'help']);
     expect(executeSpy).toHaveBeenCalledWith(
       'append_journal',
       expect.objectContaining({ content: 'help' })

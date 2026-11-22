@@ -113,6 +113,18 @@ describe('local business dispatch', () => {
     });
   });
 
+  it('does not classify a delete preview connection failure as a write outcome', async () => {
+    wire.open.mockRejectedValueOnce(
+      new Error('Connection lost; write outcome unknown. Do not blindly replay.')
+    );
+
+    const error = await client
+      .execute('delete_rem', { remId: 'preview-rem', dryRun: true })
+      .catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as { type?: string }).type).not.toBe('unknown_outcome');
+  });
+
   it('rejects catalog drift', async () => {
     wire.open.mockResolvedValue({ sdkVersion: 'different', sdkCatalogHash: 'f'.repeat(64) });
     await expect(client.execute('get_status', {})).rejects.toThrow('catalog changed');

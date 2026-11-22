@@ -66,7 +66,7 @@ const schemaPatterns = Array.from(legacyPaths, ([path, replacement]) => ({
 const inlinePatterns = Array.from(legacyPaths, ([path, replacement]) => ({
   path,
   replacement,
-  regex: new RegExp('`' + path.replace(/ /g, '\\s+') + '`', 'g'),
+  regex: new RegExp('`' + path.replace(/ /g, '\\s+') + '(?=\\s|`|$)', 'g'),
 })).filter(({ path }) => path.includes('-') || path.includes(' '));
 
 async function files(directory) {
