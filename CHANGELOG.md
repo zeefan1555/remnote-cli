@@ -74,6 +74,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Add a version 2 command output envelope, structured error types, stable exit
   codes and a dedicated `unknown_outcome` exit. JSON errors go to stderr and
   text output strips terminal control characters.
+- Add offline `schema` command discovery. Every Commander path must have one
+  risk and Bridge policy, and the generated contract now includes the command
+  summary.
 
 ### Changed
 

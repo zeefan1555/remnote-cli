@@ -47,6 +47,20 @@ commands for stable-key replay. See [ADR 0003](../adr/0003-disable-unsafe-native
 See [Output and errors](output-and-errors.md) for the error types and batch
 behavior.
 
+## Offline discovery
+
+Use `contract` for protocol and plan contracts. Use `schema` for command
+arguments, options, defaults, risk and Bridge requirements.
+
+```bash
+remnote-cli contract
+remnote-cli schema
+remnote-cli schema search
+remnote-cli schema powerup get
+```
+
+See [Command schema](command-schema.md).
+
 ### Argument Quoting and Shifting
 
 CLI environments (especially Windows shells) can sometimes "swallow" empty strings or misinterpret arguments if quoting is missing. This can lead to **argument shifting**, where a flag (like `--content`) is incorrectly interpreted as the _value_ for a preceding option (like `--title`).

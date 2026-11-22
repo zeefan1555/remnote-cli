@@ -10,6 +10,7 @@ import { PROTOCOL_VERSION } from '../remnote-cli/client/connection.js';
 import { REMOTE_ACTION_NAMES } from '../remnote-cli/client/remote-actions.js';
 import { FlashcardsApplySchema, WikiApplySchema } from './task-schemas.js';
 import { CLI_ERROR_TYPES, EXIT } from '../remnote-cli/output/errors.js';
+import type { CommandSpec } from '../remnote-cli/spec/command-spec.js';
 
 export const CONTRACT_SCHEMA_NAMES = ['flashcards', 'wiki', 'workspace'] as const;
 export type ContractSchemaName = (typeof CONTRACT_SCHEMA_NAMES)[number];
@@ -57,7 +58,7 @@ const requiredCapabilities = {
   },
 };
 
-export function buildCliContract() {
+export function buildCliContract(commands: CommandSpec[] = []) {
   return {
     schemaVersion: 1,
     protocolVersion: PROTOCOL_VERSION,
@@ -80,6 +81,13 @@ export function buildCliContract() {
       unknownOutcome: EXIT.UNKNOWN_OUTCOME,
       unsupported: EXIT.UNSUPPORTED,
     },
+    commands: commands.map((command) => ({
+      path: command.path,
+      risk: command.risk,
+      bridge: command.bridge,
+      dynamic: command.dynamic,
+      ...(command.pagination === undefined ? {} : { pagination: command.pagination }),
+    })),
     workspace: {
       requiresBridge: {
         plan: false,

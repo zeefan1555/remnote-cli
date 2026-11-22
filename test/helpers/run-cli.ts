@@ -36,6 +36,8 @@ export function parseSuccess(stdout: string): unknown {
 export function parseFailure(stdout: string): {
   type: string;
   subtype: string;
+  message: string;
+  retryable: boolean;
   details?: unknown;
 } {
   const value: unknown = JSON.parse(stdout);
@@ -52,12 +54,18 @@ export function parseFailure(stdout: string): {
     !('type' in value.error) ||
     typeof value.error.type !== 'string' ||
     !('subtype' in value.error) ||
-    typeof value.error.subtype !== 'string'
+    typeof value.error.subtype !== 'string' ||
+    !('message' in value.error) ||
+    typeof value.error.message !== 'string' ||
+    !('retryable' in value.error) ||
+    typeof value.error.retryable !== 'boolean'
   )
     throw new Error('Expected a failed CLI envelope');
   return {
     type: value.error.type,
     subtype: value.error.subtype,
+    message: value.error.message,
+    retryable: value.error.retryable,
     ...('details' in value.error ? { details: value.error.details } : {}),
   };
 }

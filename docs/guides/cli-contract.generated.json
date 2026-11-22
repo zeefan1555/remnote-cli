@@ -796,6 +796,473 @@
     "unknownOutcome": 5,
     "unsupported": 6
   },
+  "commands": [
+    {
+      "path": "assert",
+      "risk": "read",
+      "bridge": "optional",
+      "dynamic": false
+    },
+    {
+      "path": "batch",
+      "risk": "destructive",
+      "bridge": "conditional",
+      "dynamic": false
+    },
+    {
+      "path": "context",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "contract",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "create",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "flashcards",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "flashcards apply",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "get-media",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "insert-children",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "inspect",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "journal",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "list-children",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false,
+      "pagination": {
+        "kind": "cursor",
+        "automatic": false,
+        "arguments": [
+          "all",
+          "max-pages",
+          "page-delay"
+        ]
+      }
+    },
+    {
+      "path": "move-note",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "outline",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "outline collapse",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "outline expand",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "powerup",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "powerup get",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "read",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "read-table",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "replace-children",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "review-stats",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "schema",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sdk",
+      "risk": "destructive",
+      "bridge": "none",
+      "dynamic": true
+    },
+    {
+      "path": "sdk app",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk capabilities",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk card",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk date",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk editor",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk event",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk focus",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk kb",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk messaging",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk powerup",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk queue",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk reader",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk rem",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk rich-text",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk scheduler",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk search",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk settings",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk storage",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk widget",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "sdk window",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": true
+    },
+    {
+      "path": "search",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false,
+      "pagination": {
+        "kind": "cursor",
+        "automatic": false,
+        "arguments": [
+          "all",
+          "max-pages",
+          "page-delay"
+        ]
+      }
+    },
+    {
+      "path": "search-by-tag",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false,
+      "pagination": {
+        "kind": "cursor",
+        "automatic": false,
+        "arguments": [
+          "all",
+          "max-pages",
+          "page-delay"
+        ]
+      }
+    },
+    {
+      "path": "set-document-status",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "set-property",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "status",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync apply",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync delete",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync diff",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync format",
+      "risk": "write",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync import",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync lint",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync plan",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync read",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync recover",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync relocate",
+      "risk": "write",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync resume",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sync save",
+      "risk": "write",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "sync status",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "todo",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "todo complete",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "todo list",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "todo reopen",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "update",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "update-tags",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "verify",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "verify scope",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "wiki",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
+      "path": "wiki apply",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    }
+  ],
   "workspace": {
     "requiresBridge": {
       "plan": false,
