@@ -1,4 +1,6 @@
-import type { PluginCardType, ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
+import type { ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
+import { snapshotCardIdentity, type InspectedRawCard } from './card-identity.js';
+export type { InspectedRawCard } from './card-identity.js';
 import { hasCardStructure } from './card-structure.js';
 import { contentHash } from './content-hash.js';
 import { plainText } from './plain-text.js';
@@ -129,17 +131,6 @@ export interface InspectedCard {
   nextRepetition: number | null;
   historyLength: number;
   hash: string;
-}
-
-export interface InspectedRawCard {
-  id: string;
-  remId: string;
-  type: PluginCardType;
-  createdAt: number | null;
-  repetitionHistory: unknown[] | null;
-  nextRepetitionTime: number | null;
-  lastRepetitionTime: number | null;
-  timesWrongInRow: number | null;
 }
 
 export interface InspectedTag extends InspectPathNode {
@@ -286,42 +277,6 @@ function requireRemArray(value: unknown, label: string): LoadedRem[] {
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== 'boolean') throw new Error(`SDK ${label} did not return a boolean`);
   return value;
-}
-
-function rawCard(card: LoadedCard, remId: string): InspectedRawCard {
-  if (!card || typeof card._id !== 'string' || !card._id || card.remId !== remId)
-    throw new Error('SDK raw card identity/owner malformed');
-  const type = card.type;
-  if (
-    type !== 'forward' &&
-    type !== 'backward' &&
-    !(
-      type &&
-      typeof type === 'object' &&
-      'clozeId' in type &&
-      typeof type.clozeId === 'string' &&
-      Object.keys(type).length === 1
-    )
-  )
-    throw new Error('SDK raw card type malformed');
-  if (card.repetitionHistory != null && !Array.isArray(card.repetitionHistory))
-    throw new Error('SDK raw card history malformed');
-  const number = (value: unknown): number | null => {
-    if (value == null) return null;
-    if (typeof value !== 'number' || !Number.isFinite(value))
-      throw new Error('SDK raw card timestamp/count malformed');
-    return value;
-  };
-  return {
-    id: card._id,
-    remId: card.remId,
-    type: type as PluginCardType,
-    createdAt: number(card.createdAt),
-    repetitionHistory: card.repetitionHistory ?? null,
-    nextRepetitionTime: number(card.nextRepetitionTime),
-    lastRepetitionTime: number(card.lastRepetitionTime),
-    timesWrongInRow: number(card.timesWrongInRow),
-  };
 }
 
 /**
@@ -661,7 +616,7 @@ export async function inspectState(
             const cards = await gate(() => rem.getCards());
             if (!Array.isArray(cards)) throw new Error('SDK cards malformed');
             if (fields.has('rawCards')) {
-              const rawCards = cards.map((card) => rawCard(card, rem._id));
+              const rawCards = cards.map((card) => snapshotCardIdentity(card, rem._id));
               if (new Set(rawCards.map((card) => card.id)).size !== rawCards.length)
                 throw new Error('SDK raw card identities duplicated');
               out.rawCards = rawCards;

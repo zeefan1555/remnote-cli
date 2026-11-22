@@ -206,10 +206,39 @@ See [Read receipts](docs/guides/read-receipts.md) for request fields and receipt
 ```bash
 remnote-cli rem inspect REM_ID --fields markdown,tags,cards,children
 remnote-cli rem inspect REM_ID --fields elements,isCardItem,hasCardStructure
+remnote-cli rem inspect CARD_REM_ID --fields cards,rawCards
 remnote-cli rem inspect REM_ID --expect /tmp/rules.json --strict
 ```
 
 Rules can compare exact fields, counts, hashes, and nested values. Without `--strict`, rule failures still appear in the result but do not change the exit code. Use [state verification](docs/guides/state-verification.md) to author reusable rules.
+
+### Replace existing Rem text
+
+`rem update --content` replaces only the target Rem's own text. It preserves children.
+Use `rem update-answer` for an existing card-item directly under an exact card-generating
+parent Rem. `--card-id` means that parent Rem ID, not a generated CardID.
+
+```bash
+remnote-cli rem update QUESTION_REM_ID --content "New question" --expected-text-hash CURRENT_RAW_TEXT_HASH
+remnote-cli rem update-answer ANSWER_REM_ID --card-id QUESTION_REM_ID --content "See [[id:SOURCE_REM_ID]]" --expected-text-hash CURRENT_ANSWER_TEXT_HASH
+remnote-cli rem update QUESTION_REM_ID --content - --expected-text-hash CURRENT_RAW_TEXT_HASH
+```
+
+Both content commands require a 64-character lowercase SHA-256 hash of the current
+raw rich text. Obtain `textHash` from `rem context --request` with the target in `remIds`.
+Do not use the displayed title, Markdown, or `rem inspect`'s `cards[].hash` as the text hash.
+Content accepts Markdown and the same `[[id:<remId>]]` native references as `rem create`.
+`--content -` reads UTF-8 stdin. `--title` and `--content` are mutually exclusive.
+
+Each content update uses one text setter without an outer transaction, then verifies
+raw text, parent, children, card-item status, CardIDs, creation time, scheduling, and
+available review history. The receipt contains exact IDs, hashes, `rawCards`, and
+verification facts. Missing SDK history remains `null`, not an invented empty history.
+`rem inspect --fields cards,rawCards` already reads these review facts. No new card
+inspection command is needed. Reads and the write are not atomic. A failed or lost
+write/readback reports `unknown_outcome`. Inspect the exact IDs before another write.
+Metadata-only title and alias updates keep their existing behavior. `card apply`
+remains available during the caller migration.
 
 ## Work with native TODOs
 
@@ -317,7 +346,10 @@ If a command reports a knowledge-base mismatch, read the target from the live `s
 
 If a command reports `CLI port occupied`, run queued commands with `batch` or wait for the active command to finish. Do not stop an unknown process that uses the local listener.
 
-If `rem update`, `rem children replace`, `rem property set`, or a TODO state change fails before mutation, the installed SDK does not provide a safe abort path for that operation. Use a supported preview or follow the command help. Do not retry a partial batch.
+Metadata-only `rem update`, `rem children replace`, and `rem property set` retain the
+native transaction restriction. Content updates and native TODO status changes use
+one SDK setter and exact readback instead. No command has a safe native abort path.
+Use a supported preview or follow command help. Do not retry a partial batch.
 
 For detailed diagnosis, see [troubleshooting](docs/guides/remnote-cli-troubleshooting.md).
 

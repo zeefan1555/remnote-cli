@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MockRemNotePlugin } from '../../helpers/business-mocks.js';
+import { MockCard, MockRemNotePlugin } from '../../helpers/business-mocks.js';
+import { contentHash } from '../../../src/business/content-hash.js';
 const wire = vi.hoisted(() => ({
   open: vi.fn(),
   request: vi.fn(),
@@ -61,6 +62,94 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('local business dispatch', () => {
+  it('runs question and answer content updates through schema dispatch and existing inspect facts', async () => {
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const question = plugin.addTestRem('question', 'Old question');
+    const answer = plugin.addTestRem('answer', 'Old answer');
+    await answer.setParent(question);
+    answer.setIsCardItemMock(true);
+    question.setCardsMock([
+      new MockCard(
+        'card-1',
+        'question',
+        'forward',
+        1,
+        [{ score: 1, time: 20 }] as never,
+        40,
+        0,
+        20
+      ),
+    ]);
+    const before = await client.execute('inspect_state', {
+      remIds: ['question'],
+      fields: ['cards', 'rawCards'],
+    });
+    const questionResult = await client.execute('update_note', {
+      remId: 'question',
+      content: 'New question',
+      expectedTextHash: await contentHash(question.text),
+    });
+    const answerResult = await client.execute('update_answer', {
+      remId: 'answer',
+      cardId: 'question',
+      content: 'New answer',
+      expectedTextHash: await contentHash(answer.text),
+    });
+    const after = await client.execute('inspect_state', {
+      remIds: ['question'],
+      fields: ['cards', 'rawCards'],
+    });
+    expect(before).toEqual(after);
+    expect(questionResult).toMatchObject({ status: 'verified', cardIds: ['card-1'] });
+    expect(answerResult).toMatchObject({
+      status: 'verified',
+      cardIds: ['card-1'],
+      isCardItem: true,
+    });
+    expect(after).toMatchObject({
+      complete: true,
+      rems: [
+        {
+          rawCards: [
+            {
+              id: 'card-1',
+              remId: 'question',
+              createdAt: 1,
+              nextRepetitionTime: 40,
+              lastRepetitionTime: 20,
+              timesWrongInRow: 0,
+              repetitionHistory: [{ score: 1, time: 20 }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(wire.open).toHaveBeenCalledOnce();
+  });
+
+  it('rejects missing or malformed content hashes before any bridge connection', async () => {
+    await expect(
+      client.execute('update_note', { remId: 'question', content: 'New' })
+    ).rejects.toThrow();
+    await expect(
+      client.execute('update_answer', {
+        remId: 'answer',
+        cardId: 'question',
+        content: 'New',
+        expectedTextHash: 'A'.repeat(64),
+      })
+    ).rejects.toThrow();
+    expect(wire.open).not.toHaveBeenCalled();
+  });
+
+  it('keeps metadata-only title and alias updates on their existing transaction path', async () => {
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const rem = plugin.addTestRem('metadata', 'Old');
+    await client.execute('update_note', { remId: 'metadata', title: 'New', addAliases: ['Alias'] });
+    expect(rem.text).toEqual(['New']);
+    expect(await rem.getAliases()).toHaveLength(1);
+    expect(plugin.app.transaction).toHaveBeenCalledOnce();
+  });
   it('uses one command connection for status, workflows and low-level calls', async () => {
     expect(await client.execute('get_status', {})).toMatchObject({
       connected: true,

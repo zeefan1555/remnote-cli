@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add `rem update --content <text|-> --expected-text-hash <sha256>` for own-text
+  replacement without replacing children.
+- Add `rem update-answer` with an exact parent card Rem ID, content, and current
+  raw text hash. It requires an existing direct card-item child.
+- Verify text, parent, children, card-item, CardIDs, creation time, scheduling,
+  and available history after one text write. Report unverified writes as unknown
+  outcomes without replay. Reuse the existing `rem inspect --fields cards,rawCards`
+  facts and shared card snapshot. Keep metadata updates and `card apply` intact.
+
 ## [0.30.1] - 2026-11-23
 
 ### Fixed

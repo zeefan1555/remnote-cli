@@ -680,6 +680,14 @@
       "dynamic": false
     },
     {
+      "path": "rem update-answer",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
       "path": "rem verify",
       "kind": "group",
       "helpSection": "knowledge"

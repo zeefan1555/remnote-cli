@@ -15,9 +15,11 @@ knowledge base. See [configuration](configuration.md) for permissions and state 
 
 ### Native Transaction Restriction
 
-SDK 0.0.46 cannot safely abort a native transaction. `rem update`, `rem children
+SDK 0.0.46 cannot safely abort a native transaction. Metadata-only `rem update`, `rem children
 replace`, and `rem property set` fail before mutation. Native TODO status changes
 use their single SDK setter and exact readback, without an outer transaction.
+`rem update --content` and `rem update-answer` also use one text setter and exact
+readback without an outer transaction. These content updates are not atomic.
 `rem create`, `journal append` and `rem children insert` perform sequential additive writes with
 private recovery journals, not atomic transactions. A failure can leave partial
 content: retain the reported key/IDs and read back before retrying. Use the task
@@ -325,7 +327,9 @@ remnote-cli rem inspect --from-file ids.txt --descendants 1 --expect rules.json 
 
 `id` is always returned. Field names: `type`, `text`, `backText`, `elements`, `markdown`,
 `isCardItem`, `hasCardStructure`, `practiceDirection`, `enablePractice`, `cards`, `tags`,
-`parent`, `children`, `aliases`, `sources`, `portal`.
+`parent`, `children`, `aliases`, `sources`, `portal`, `rawCards`, `isDocument`, `isFolder`,
+`isTable`, `isProperty`, `isPowerup`, `isPowerupSlot`, `isPowerupProperty`,
+`isPowerupEnum`, `isPowerupPropertyListItem`.
 
 `elements.text` and `elements.backText` each have `counts` and `items`. A code block is a
 rich-text element with `code: true` and an optional `language`. `rem.isCode` is a different
@@ -337,6 +341,11 @@ several items (a code span can also be bold and a cloze).
 include the tag itself. `cards[]` has `id`, `type`, `due`, `nextRepetition` (the same
 timestamp), `historyLength`, and `hash`. The hash covers card id, rem id, type, and
 repetition history, so a due-date-only change does not change it.
+
+`rawCards[]` has `id`, `remId`, `type`, `createdAt`, `repetitionHistory`,
+`nextRepetitionTime`, `lastRepetitionTime`, and `timesWrongInRow`. Unavailable facts
+are `null`. Request `--fields cards,rawCards` to read the same review facts protected
+by content updates. `cards[].hash` is not a Rem text hash.
 
 `portal` is present for a portal Rem or a Rem carrying powerup `sp`. `query` is slot `q`
 and `filter` is slot `f` (search-portal queries and table filters). A recognized
@@ -549,7 +558,7 @@ remnote-cli table read --title "Projects" --properties "Status,Owner" --text
 
 ## rem update
 
-Update note metadata.
+Update note metadata or replace only its own text. Children are preserved.
 
 ```bash
 remnote-cli rem update <rem-id> [options]
@@ -558,11 +567,30 @@ remnote-cli rem update <rem-id> [options]
 | Option                       | Default | Description                                                  |
 | ---------------------------- | ------- | ------------------------------------------------------------ |
 | `--title <text>`             | none    | Replace title/headline; supports `[[id:<remId>]]`             |
+| `--content <text\|->`        | none    | Replace own text with Markdown/native references; `-` reads UTF-8 stdin |
+| `--expected-text-hash <sha256>` | none | Required with content; SHA-256 of current raw rich text, 64 lowercase hex characters |
 | `--add-aliases <text...>`    | none    | Add real aliases if not already present                       |
 | `--remove-aliases <text...>` | none    | Remove aliases by exact whitespace-normalized, case-sensitive match |
 
 At least one update option is required. Alias additions/removals are idempotent, and the same normalized alias cannot
 be requested in both operations.
+
+`--title` and `--content` are mutually exclusive. `--expected-text-hash` is valid
+only with `--content`. Obtain the target's `textHash` through `rem context --request`
+with that Rem in `remIds`. Hash the raw rich text, not the rendered title or Markdown.
+
+Content updates compare that hash before writing, parse Markdown and native
+`[[id:<remId>]]` references as `rem create` does, call the text setter once, and
+read back exact raw text, parent, children, and card-item status. If the target is
+a card or a card-item answer, they also preserve CardIDs, creation time, scheduling,
+and available review history. Missing history remains `null` in `rawCards`.
+
+The success receipt has `status: "verified"`, `remId`, optional `cardRemId`,
+`parentRemId`, `beforeTextHash`, `textHash`, `isCardItem`, `childrenRemIds`,
+`cardIds`, `rawCards`, and `verification`. It also keeps the existing `titles` and
+`remIds` fields. A pre-write conflict makes no write. A write or readback failure
+reports `unknown_outcome` with exact IDs. It never retries or rolls back the setter.
+Inspect before another write. Native compare-and-swap and transactions are unavailable.
 
 Use the dedicated commands below for child content and tag writes.
 
@@ -572,7 +600,27 @@ Examples:
 remnote-cli rem update abc123def --title "Updated Title"
 remnote-cli rem update abc123def --title "See also [[id:<target-rem-id>]]"
 remnote-cli rem update abc123def --add-aliases "Original Title" --remove-aliases "Old Title"
+remnote-cli rem update QUESTION_REM_ID --content "New question" --expected-text-hash CURRENT_RAW_TEXT_HASH
 ```
+
+## rem update-answer
+
+Replace an existing card-item answer's own text and preserve its card facts.
+
+```bash
+remnote-cli rem update-answer <answer-rem-id> --card-id <card-rem-id> --content <text|-> --expected-text-hash <sha256>
+```
+
+All three options are required. `--card-id` is the exact card-generating parent Rem
+ID, not a generated CardID. The answer must be its direct child, already be a
+card-item, and the parent must generate at least one card. No card is created or
+converted. `--content -` reads UTF-8 stdin. Content uses the same Markdown and
+`[[id:<remId>]]` conventions as `rem create`.
+
+Hash validation, write/readback checks, receipt facts, and unknown-outcome handling
+match `rem update --content`. `rem inspect --fields cards,rawCards` reads the
+protected CardIDs, types, creation time, scheduling, and available history.
+`card apply` retains its existing plan and replay behavior during migration.
 
 ## rem document status
 
