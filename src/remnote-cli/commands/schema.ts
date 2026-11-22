@@ -33,6 +33,7 @@ export function registerSchemaCommand(program: Command, catalog: CommandCatalog)
               commands: specs.map((spec) => ({
                 path: spec.path,
                 kind: spec.kind,
+                helpSection: spec.helpSection,
                 ...(spec.kind === 'action'
                   ? {
                       risk: spec.risk,

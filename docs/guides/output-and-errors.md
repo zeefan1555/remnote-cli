@@ -32,6 +32,29 @@ A failed command writes one envelope to stderr. stdout stays empty.
 The error may include `hint` for the next safe action and `details` for a failed
 receipt or partial result.
 
+Command groups have machine-readable boundary errors. A bare group prints help and
+exits 0. An unknown subcommand, a missing subcommand with a leaf-only flag, or an
+unknown group flag exits 2 with `error.details.commandPath`, `suggestions` and
+`usage`.
+
+```json
+{
+  "schemaVersion": 2,
+  "ok": false,
+  "error": {
+    "type": "usage",
+    "subtype": "unknown_subcommand",
+    "message": "unknown subcommand lis for todo; did you mean list, reopen, complete?",
+    "retryable": false,
+    "details": {
+      "commandPath": "todo",
+      "suggestions": ["list", "reopen", "complete"],
+      "usage": "todo"
+    }
+  }
+}
+```
+
 ## Error types and exit codes
 
 | Type | Exit | Meaning |

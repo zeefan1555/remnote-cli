@@ -87,10 +87,11 @@ export function buildCliContract(commands: CommandSpec[] = []) {
     },
     commands: commands.map((command) =>
       command.kind === 'group'
-        ? { path: command.path, kind: command.kind }
+        ? { path: command.path, kind: command.kind, helpSection: command.helpSection }
         : {
             path: command.path,
             kind: command.kind,
+            helpSection: command.helpSection,
             risk: command.risk,
             bridge: command.bridge,
             dynamic: command.dynamic,

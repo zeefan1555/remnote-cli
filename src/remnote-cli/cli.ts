@@ -37,6 +37,11 @@ import { CommanderError } from 'commander';
 import type { CliRuntime } from './output/runtime.js';
 import { bindRuntime, createProcessRuntime, finishProgram, runtimeFor } from './output/runtime.js';
 import { CommandCatalog } from './spec/command-spec.js';
+import {
+  commandBoundaryFailure,
+  installCommandHelpGroups,
+  rootHelpRequested,
+} from './spec/command-boundary.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version: string };
@@ -68,11 +73,9 @@ export function createProgram(
   registerPowerupCommand(program, catalog);
   registerCompositeCommands(program, catalog);
   registerTaskCommands(program, catalog);
-  registerBatchCommand(program, catalog, version);
   registerReviewStatsCommand(program, catalog);
   registerOutlineCommand(program, catalog);
   registerTodoCommand(program, catalog);
-  registerSdkCommands(program, catalog);
   registerGetMediaCommand(program, catalog);
   registerUpdateCommand(program, catalog);
   registerInsertChildrenCommand(program, catalog);
@@ -82,13 +85,16 @@ export function createProgram(
   registerUpdateTagsCommand(program, catalog);
   registerSetPropertyCommand(program, catalog);
   registerJournalCommand(program, catalog);
-  registerStatusCommand(program, catalog);
   registerReadTableCommand(program, catalog);
   registerSyncCommands(program, catalog);
+  registerBatchCommand(program, catalog, version);
+  registerStatusCommand(program, catalog);
   registerSchemaCommand(program, catalog);
   registerDoctorCommand(program, catalog);
   registerContractCommand(program, catalog);
+  registerSdkCommands(program, catalog);
 
+  installCommandHelpGroups(program);
   bindRuntime(program, runtime);
   return program;
 }
@@ -99,6 +105,15 @@ export async function runProgram(
   runtime: CliRuntime = runtimeFor(program)
 ): Promise<number> {
   try {
+    const boundaryFailure = commandBoundaryFailure(program, argv);
+    if (boundaryFailure) {
+      runtime.failure(boundaryFailure);
+      return finishProgram(runtime);
+    }
+    if (rootHelpRequested(program, argv)) {
+      program.outputHelp();
+      return finishProgram(runtime);
+    }
     await program.parseAsync(argv);
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) {

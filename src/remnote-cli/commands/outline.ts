@@ -48,7 +48,6 @@ function registerOutlineAction(
 export function registerOutlineCommand(program: Command, catalog: CommandCatalog): void {
   const outline = catalog.group(program, 'outline', {
     description: 'Preview or change outline folding',
-    bareHelp: true,
   });
   registerOutlineAction(outline, program, catalog, 'collapse', true);
   registerOutlineAction(outline, program, catalog, 'expand', false);
