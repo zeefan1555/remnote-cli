@@ -140,10 +140,16 @@ describe('local business dispatch', () => {
       runtime
     );
     expect(exitCode).toBe(3);
-    expect(JSON.parse(runtime.stderr())).toMatchObject({
+    const failure = JSON.parse(runtime.stderr());
+    expect(failure).toMatchObject({
       ok: false,
-      error: { type: 'unavailable', subtype: 'bridge_unavailable' },
+      error: {
+        type: 'unavailable',
+        subtype: 'bridge_unavailable',
+        message: 'Bridge connection failed during a read-only preview; no write was attempted.',
+      },
     });
+    expect(JSON.stringify(failure)).not.toContain('write outcome unknown');
   });
 
   it('rejects catalog drift', async () => {

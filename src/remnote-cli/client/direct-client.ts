@@ -154,7 +154,7 @@ export class DirectClient {
         throw new CliFailure(
           'unavailable',
           'bridge_unavailable',
-          error instanceof Error ? error.message : String(error),
+          'Bridge connection failed during a read-only preview; no write was attempted.',
           { cause: error }
         );
       if (!READ_ONLY_ACTIONS.has(action) && !preview && isWriteUncertainty(error))
