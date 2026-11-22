@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   navigationCatalog,
@@ -100,24 +101,54 @@ describe('SDK navigation', () => {
           status: 'supported',
           mode: 'read',
         },
+        {
+          id: 'namespace:richText.toHTML',
+          target: 'namespace',
+          namespace: 'richText',
+          method: 'toHTML',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
+        {
+          id: 'namespace:richText.toHtml',
+          target: 'namespace',
+          namespace: 'richText',
+          method: 'toHtml',
+          signatures: [],
+          status: 'supported',
+          mode: 'read',
+        },
       ],
     };
 
     const navigation = navigationCatalog(result);
+    const reversed = navigationCatalog({
+      ...result,
+      capabilities: [...result.capabilities].reverse(),
+    });
     const paths = navigation.capabilities.map(({ group, command }) => `${group}:${command}`);
-    expect(new Set(paths).size).toBe(paths.length);
-    expect(navigation.capabilities).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'namespace:app.getPlatform', command: 'get-platform' }),
-        expect.objectContaining({
-          id: 'namespace:app.pluginTrack',
-          command: 'plugin-track--namespace-app-plugin-track',
-        }),
-        expect.objectContaining({
-          id: 'namespace:plugin.track',
-          command: 'plugin-track--namespace-plugin-track',
-        }),
-      ])
+    const byId = new Map(
+      navigation.capabilities.map(({ id, group, command }) => [id, `${group}:${command}`])
     );
+    const reversedById = new Map(
+      reversed.capabilities.map(({ id, group, command }) => [id, `${group}:${command}`])
+    );
+    const suffix = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 8);
+    expect(new Set(paths).size).toBe(paths.length);
+    expect(byId.get('namespace:app.getPlatform')).toBe('app:get-platform');
+    expect(byId.get('namespace:app.pluginTrack')).toBe(
+      `app:plugin-track--namespace-app-plugin-track-${suffix('namespace:app.pluginTrack')}`
+    );
+    expect(byId.get('namespace:plugin.track')).toBe(
+      `app:plugin-track--namespace-plugin-track-${suffix('namespace:plugin.track')}`
+    );
+    expect(byId.get('namespace:richText.toHTML')).toBe(
+      `richText:to-html--namespace-rich-text-to-html-${suffix('namespace:richText.toHTML')}`
+    );
+    expect(byId.get('namespace:richText.toHtml')).toBe(
+      `richText:to-html--namespace-rich-text-to-html-${suffix('namespace:richText.toHtml')}`
+    );
+    expect(reversedById).toEqual(byId);
   });
 });

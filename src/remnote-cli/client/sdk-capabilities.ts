@@ -63,10 +63,12 @@ function toKebabCase(value: string): string {
     .toLowerCase();
 }
 
-function capabilitySlug(value: string): string {
-  return toKebabCase(value)
+function capabilitySuffix(value: string): string {
+  const slug = toKebabCase(value)
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+  const hash = createHash('sha256').update(value).digest('hex').slice(0, 8);
+  return `${slug}-${hash}`;
 }
 
 export function navigationCapability(capability: Capability): NavigationCapability {
@@ -106,7 +108,7 @@ export function navigationCatalog(result: CapabilityResult): NavigationCatalog {
       ? capability
       : {
           ...capability,
-          command: `${capability.command}--${capabilitySlug(capability.id)}`,
+          command: `${capability.command}--${capabilitySuffix(capability.id)}`,
         };
   });
   return { ...result, capabilities };

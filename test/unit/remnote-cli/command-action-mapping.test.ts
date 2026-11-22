@@ -280,8 +280,8 @@ describe('command bridge action mapping', () => {
     expect(paths).toEqual(
       expect.arrayContaining([
         'app:get-platform',
-        'app:plugin-track--namespace-app-plugin-track',
-        'app:plugin-track--namespace-plugin-track',
+        expect.stringMatching(/^app:plugin-track--namespace-app-plugin-track-/),
+        expect.stringMatching(/^app:plugin-track--namespace-plugin-track-/),
       ])
     );
     executeSpy.mockRestore();
