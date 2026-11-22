@@ -31,10 +31,21 @@ describe('project config', () => {
     expect(ciWorkflow).toContain("node: ['22.13.0', '24']");
     expect(ciWorkflow).toContain('node-version: ${{ matrix.node }}');
     expect(ciWorkflow).toContain('run: npm run typecheck');
+    expect(ciWorkflow).toContain('run: npm run check:sdk-constants');
+    expect(ciWorkflow).toContain('run: npm run check:cli-contract');
     expect(ciWorkflow).toContain('run: npm run lint');
     expect(ciWorkflow).toContain('run: npm run format:check');
-    expect(ciWorkflow).toContain('run: npm test');
+    expect(ciWorkflow).toContain('run: npm run test:coverage');
+    expect(ciWorkflow).not.toContain('run: npm test');
     expect(ciWorkflow).toContain('run: npm run build');
+    expect(ciWorkflow).toContain('run: git diff --exit-code');
+  });
+
+  it('runs coverage once instead of executing tests twice locally', () => {
+    const qualityScript = readFileSync('code-quality.sh', 'utf-8');
+
+    expect(qualityScript).toContain('npm run test:coverage');
+    expect(qualityScript).not.toContain('if npm test;');
   });
 
   it('prevents production dist emit when TypeScript reports errors', () => {
