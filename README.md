@@ -90,11 +90,26 @@ You can inspect the machine-readable interface without RemNote running:
 ```bash
 remnote-cli --help
 remnote-cli contract
+remnote-cli schema
+remnote-cli schema search
 ```
 
 `contract` prints protocol, output and error contracts, plan schemas, required SDK
 capabilities, receipt statuses, and exit codes. Use `--schema flashcards`,
 `--schema wiki`, or `--schema workspace` to inspect one plan schema.
+
+`schema` lists every command with its risk and Bridge requirement. Pass the
+command path to get positional arguments, options and defaults:
+
+```bash
+remnote-cli schema
+remnote-cli schema search
+remnote-cli schema powerup get
+remnote-cli schema sdk rem
+```
+
+Command options come directly from the registered Commander command, so schema
+and help cannot drift. See [Command schema](docs/guides/command-schema.md).
 
 ## Find and read notes
 
