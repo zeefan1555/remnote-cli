@@ -69,7 +69,7 @@ fi
 echo ""
 
 # 5. Tests and coverage
-echo -e "${YELLOW}[5/5] Running tests with coverage...${NC}"
+echo -e "${YELLOW}[5/6] Running tests with coverage...${NC}"
 # Vitest creates worker files under coverage/.tmp. Start every coverage run from
 # an empty generated directory so a preceding non-coverage test run cannot race
 # its cleanup with the V8 provider.
@@ -78,6 +78,16 @@ if npm run test:coverage; then
   echo -e "${GREEN}✓ Tests and coverage passed${NC}"
 else
   echo -e "${RED}✗ Tests or coverage failed${NC}"
+  FAILURES=$((FAILURES + 1))
+fi
+echo ""
+
+# 6. Build and installed-bin smoke
+echo -e "${YELLOW}[6/6] Building and checking the CLI executable...${NC}"
+if npm run build && npm run test:bin; then
+  echo -e "${GREEN}✓ Build and executable smoke passed${NC}"
+else
+  echo -e "${RED}✗ Build or executable smoke failed${NC}"
   FAILURES=$((FAILURES + 1))
 fi
 echo ""
