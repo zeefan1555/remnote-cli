@@ -420,20 +420,6 @@ A name, a custom powerup, or an unknown code is sent as given, and the host erro
 `getPowerupByCode("sp")` can return undefined for a built-in powerup; read the slot on the
 Rem that carries it. This command does not open RemNote's local database.
 
-## card review-stats
-
-Read native RemNote review facts from exactly one scope:
-
-```bash
-remnote-cli card review-stats <rem-id> [more-rem-ids...]
-remnote-cli card review-stats --today
-remnote-cli card review-stats --root-id <root-rem-id>
-remnote-cli card review-stats --tag-id <tag-rem-id>
-```
-
-JSON output preserves the raw card type, creation timestamp, repetition history, last and next repetition timestamps,
-and consecutive wrong count. Text output provides a compact summary. The command does not calculate mastery or change
-the review schedule.
 
 ## rem outline
 
@@ -621,7 +607,6 @@ converted. `--content -` reads UTF-8 stdin. Content uses the same Markdown and
 Hash validation, write/readback checks, receipt facts, and unknown-outcome handling
 match `rem update --content`. `rem inspect --fields cards,rawCards` reads the
 protected CardIDs, types, creation time, scheduling, and available history.
-`card apply` retains its existing plan and replay behavior during migration.
 
 ## rem document status
 
@@ -836,7 +821,7 @@ an inner stdin payload, and do not put `--kb-id`, `--allow-destructive`, or `--v
 Those flags belong on `batch`. `batch --allow-destructive` is the approval for inner `sdk` calls; repeating the flag
 inside `argv` is still rejected.
 
-Help, `--version`, and usage errors (a missing option argument, or `flashcards` without `apply`) are results for that
+Help, `--version`, and usage errors (such as a missing option argument) are results for that
 item. They do not call `process.exit`, do not print outside the JSON envelope, and do not skip later commands.
 Commander exit code 0, including root and subcommand `--help` and `--version`, is `ok: true`; the captured text is
 `result`. The bridge closes after the batch finishes or fails while reading the file.
@@ -873,59 +858,23 @@ remnote-cli status --text
 
 ## contract
 
-Print the offline machine-readable protocol, plan schemas, required SDK capabilities,
-receipt statuses, and exit codes. This command never
+Print the offline machine-readable protocol, SDK identity, command metadata,
+output and error contracts, and exit codes. This command never
 opens a Bridge session and succeeds while RemNote is closed.
 
 ```bash
 remnote-cli contract
-remnote-cli contract --schema flashcards
 ```
 
 The committed generated artifact is
 [`cli-contract.generated.json`](cli-contract.generated.json).
 
-## Task Composites (schemaVersion=1)
+## Read composites (schemaVersion=1)
 
 | CLI | Local business action |
 |-----|-----------------------|
 | `rem context --request <path or ->` | `inspectMany` |
 | `rem verify scope --expect <path or -> [--summary]` | `verifyScope` |
-| `card apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyFlashcards` |
 
-[Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
-inner plan, bound, text segment and apply receipt. Flashcard `cardCluster` defaults off; `cc` is added only when the
-plan sets it to `true` with a title and at least two new cards. Optional `parentRemId` appends new cards, untagged,
-to an existing tagged topic Rem directly under the daily document; it forbids `title`. Optional `tags`
-(`{"root":[...],"card:<key>":[...]}`) replaces `homeRootId`/`tagRemId`: every created Rem gets exactly its declared
-tag IDs, verified in the receipt, and `parentRemId` no longer requires a tag on the topic. Flashcard questions accept a plain string or
-`TextSegments`; native references use `{"remId":"EXACT_ID"}`, and plain strings containing `[[` or `]]` are rejected.
-Flashcard plans that contain only `answerPatches` or `reusedCardRemIds` omit `dailyRemId`, `homeRootId`, `tagRemId`,
-`parentRemId`, `title`, `cardCluster`, and `tags`; exact existing targets replace creation context.
-Flashcard task plans have no artificial object-count or task-file-size cap.
-Scaffold creation is partitioned internally, and SDK requests beyond the live
-in-flight window wait rather than failing.
-A flashcard answer line may be one code-block segment `{"code":"...","language":"plaintext"}`. Apply stores the SDK
-code-block element and sets `isCardItem` so the line is on the card back. Applied receipts include `answerLines`
-with `verified`. New cards and flashcard patches compare card facts before the text write and again after
-`setIsCardItem`. A mismatch sets that line's `verified` to false and `error` to
-`Card identity or history changed while writing an answer line`, and the receipt is not `verified`.
-Patching that line back to plain text leaves `isCardItem` true.
-Leaf `--help` includes examples and schemas for
-installed agents.
-Read input is the whole request; apply files contain only the inner plan. Preview is default. Full receipts precede
-nonzero exits on failed/incomplete reads or nonverified apply. Required full-card proof scopes must not be narrowed
-merely to pass. Raw context title/text/backText/aliases are limited to explicit remIds; task ids/facts contain metadata.
-
-`--summary` keeps status, IDs/hashes, scopes, counts, and failures without content or
-history bodies. It also omits passing check detail. Exit semantics are unchanged.
-
-Preview/apply never look up dates or create daily documents. Native dailyDocument type does not prove calendar
-freshness without a date scalar. The caller revalidates the intended date before
-new batches and after midnight. Replay keeps the original diary. The active KB and
-official authorization are rechecked immediately before each SDK mutation after
-awaited reads.
-
-SDK discovery fetches and verifies the live catalog once per command. Calls carry the
-expected catalog hash and fail on drift. There is no persistent metadata cache or offline
-fallback. Task journals and ID-only paging snapshots are private CLI state scoped to the KB.
+[Read receipts](read-receipts.md) documents every selector, check, and receipt field.
+Leaf `--help` includes request examples and schemas.

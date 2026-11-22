@@ -1,6 +1,6 @@
 import { emit } from '../output/runtime.js';
 import type { Command } from 'commander';
-import { buildCliContract, contractSchema } from '../../schemas/contract.js';
+import { buildCliContract } from '../../schemas/contract.js';
 import { formatResult } from '../output/formatter.js';
 import { buildCommandSpecs, type CommandCatalog } from '../spec/command-spec.js';
 
@@ -11,11 +11,8 @@ export function registerContractCommand(program: Command, catalog: CommandCatalo
       risk: 'read',
       bridge: 'none',
     })
-    .option('--schema <name>', 'Print one plan schema: flashcards')
-    .action((options: { schema?: string }) => {
-      const value = options.schema
-        ? contractSchema(options.schema)
-        : buildCliContract(buildCommandSpecs(program));
+    .action(() => {
+      const value = buildCliContract(buildCommandSpecs(program));
       emit(program, formatResult(value, 'json'));
     });
 }

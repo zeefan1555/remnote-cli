@@ -1,10 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import {
-  buildCliContract,
-  CONTRACT_SCHEMA_NAMES,
-  contractSchema,
-} from '../../src/schemas/contract.js';
+import { buildCliContract } from '../../src/schemas/contract.js';
 import { createProgram } from '../../src/remnote-cli/cli.js';
 import { createBufferedRuntime } from '../../src/remnote-cli/output/runtime.js';
 import { buildCommandSpecs } from '../../src/remnote-cli/spec/command-spec.js';
@@ -20,12 +16,13 @@ describe('generated CLI contract', () => {
     expect(generated).toEqual(contractWithCommands());
   });
 
-  it('contains all plan schemas and live capability requirements', () => {
-    expect(CONTRACT_SCHEMA_NAMES).toEqual(['flashcards']);
-    for (const name of CONTRACT_SCHEMA_NAMES) expect(contractSchema(name)).toBeDefined();
+  it('contains native command contracts without task plans', () => {
     const contract = contractWithCommands();
-    expect(contract.requiredCapabilities.flashcards.create).toContain(
-      'namespace:rem.createTreeWithMarkdown'
+    expect(contract).not.toHaveProperty('plans');
+    expect(contract).not.toHaveProperty('requiredCapabilities');
+    expect(contract).not.toHaveProperty('receipt');
+    expect(contract.commands.some(({ path }) => path === 'card' || path.startsWith('card '))).toBe(
+      false
     );
     expect(contract.bridgeActions).not.toContain('transaction_begin');
     expect(contract.sdkFacts).toEqual({

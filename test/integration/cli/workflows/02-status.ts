@@ -172,17 +172,19 @@ export async function statusWorkflow(
     }
   }
 
-  // Step 6: scoped review and outline preview are available through high-level CLI commands
   {
     const start = Date.now();
     try {
       const reviewStats = (await ctx.cli.runExpectSuccess([
-        'card',
-        'review-stats',
-        '--today',
+        'rem',
+        'inspect',
+        state.integrationParentRemId as string,
+        '--fields',
+        'cards,rawCards',
       ])) as Record<string, unknown>;
-      assertHasField(reviewStats, 'results', 'today review stats');
-      assertTruthy(Array.isArray(reviewStats.results), 'today review stats should be an array');
+      assertTruthy(reviewStats.complete === true, 'review inspection should be complete');
+      assertHasField(reviewStats, 'rems', 'review inspection');
+      assertTruthy(Array.isArray(reviewStats.rems), 'review inspection Rems should be an array');
 
       const outline = (await ctx.cli.runExpectSuccess([
         'rem',

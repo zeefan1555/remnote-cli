@@ -207,35 +207,6 @@ export const ReadNoteSchema = z
     }
   });
 
-export const ReviewStatsSchema = z
-  .object({
-    remIds: z
-      .array(z.string().min(1))
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('Exact Rem IDs whose generated cards should be inspected'),
-    rootRemId: z.string().min(1).optional().describe('Inspect this Rem and all of its descendants'),
-    tagRemId: z
-      .string()
-      .min(1)
-      .optional()
-      .describe('Inspect directly tagged Rems and all of their descendants'),
-    today: z.literal(true).optional().describe("Inspect today's daily document and descendants"),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    const selectors = [value.remIds, value.rootRemId, value.tagRemId, value.today].filter(
-      (entry) => entry !== undefined
-    );
-    if (selectors.length !== 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Provide exactly one of remIds, rootRemId, tagRemId, or today=true',
-      });
-    }
-  });
-
 export const SetOutlineCollapsedSchema = z
   .object({
     rootRemId: z.string().min(1).optional().describe('Document or portal root Rem ID'),

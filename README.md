@@ -111,7 +111,7 @@ remnote-cli doctor --offline --json
 ```
 
 Doctor checks Node, the CLI contract, state-directory access, the Bridge, plugin
-identity, protocol, knowledge base, SDK catalog, required capabilities and local
+identity, protocol, knowledge base, SDK catalog and local
 journals. It never writes RemNote data or local state.
 
 You can inspect the machine-readable interface without RemNote running:
@@ -123,9 +123,8 @@ remnote-cli schema
 remnote-cli schema rem.search
 ```
 
-`contract` prints protocol, output and error contracts, plan schemas, required SDK
-capabilities, receipt statuses, and exit codes. Use `--schema flashcards` to
-inspect the flashcard plan schema.
+`contract` prints protocol, SDK catalog identity, command metadata, output and
+error contracts, and exit codes. Use `schema <command-path>` for command inputs.
 
 `schema` lists every command path and whether it is a navigation group or an
 executable action. Pass the command path to get positional arguments, options,
@@ -238,8 +237,7 @@ verification facts. Missing SDK history remains `null`, not an invented empty hi
 `rem inspect --fields cards,rawCards` already reads these review facts. No new card
 inspection command is needed. Reads and the write are not atomic. A failed or lost
 write/readback reports `unknown_outcome`. Inspect the exact IDs before another write.
-Metadata-only title and alias updates keep their existing behavior. `card apply`
-remains available during the caller migration.
+Metadata-only title and alias updates keep their existing behavior.
 
 ## Work with native TODOs
 
@@ -259,59 +257,38 @@ remnote-cli todo reopen REM_ID --apply
 native TODOs by default. Complete and reopen preview by default. Apply changes only
 the native status and then reads the exact Rem back.
 
-## Create flashcards
+## Create cards with official text
 
-Flashcard plans target existing IDs. Save an inner `schemaVersion: 1` plan, preview it, then apply only the reviewed plan with the same stable idempotency key.
-
-```json
-{
-  "schemaVersion": 1,
-  "dailyRemId": "DAILY_ID",
-  "homeRootId": "HOME_ID",
-  "tagRemId": "TAG_ID",
-  "title": "Spaced repetition",
-  "newCards": [
-    {
-      "key": "interval",
-      "question": "What does the interval control?",
-      "answer": [["The time before the card appears again."]]
-    }
-  ]
-}
-```
+`rem create` uses RemNote's native text parser for Rems and cards.
+Run `remnote-cli rem create --help` for card syntax and multiline examples.
 
 ```bash
-remnote-cli card apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22
-remnote-cli card apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22 --apply --summary
+remnote-cli rem create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
+remnote-cli rem create --content-file - --parent-id PARENT_REM_ID
 ```
 
-Preview is the default. `--apply` performs writes. The CLI does not choose or validate the calendar date. Pass an existing daily document and recheck the intended date before a new batch or after midnight.
-
-Task plans have no artificial card, answer, patch, or plan-file
-size ceiling. The CLI partitions internal scaffold calls, persists progress and
-queues SDK requests when the Bridge connection reaches its in-flight capacity.
-Bindings, text segments and receipt fields are documented in
-[Task plans](docs/guides/task-plans.md).
+Use one parent and tag set per invocation. Read the created Rem IDs with
+`rem inspect --fields cards,rawCards` to verify native card type, CardIDs, scheduling,
+and available review history. Update question text with `rem update` and existing
+direct answers with `rem update-answer`.
 
 ## Preview, apply, and unknown writes
 
-Commands with preview and apply modes preview by default. `card apply`,
-`todo complete`, and `todo reopen` write only with `--apply`.
+Commands with preview and apply modes preview by default.
+`todo complete` and `todo reopen` write only with `--apply`.
 
 Native writes are sequential, not atomic. A timeout, disconnect, `unknown` receipt, or lost response does not prove that no data changed. If a write is interrupted:
 
 1. Stop the original writer.
-2. Keep the reviewed plan, plan hash, idempotency key, journal, and every returned ID.
+2. Keep the original input, expected hash, journal, and every returned ID.
 3. Read the exact IDs to reconcile the outcome.
 4. Use a documented recovery command only when it accepts the original evidence.
 
 Capacity backpressure is not a failed write. When the Bridge already has 32 SDK
 requests in flight, the CLI queues additional requests and continues as responses
-arrive. A flashcard scaffold whose exact IDs were durably saved is `applied`;
-failure before its content is complete is `partial` and resumes under the same
-idempotency key. `unknown` means the affected objects cannot be identified.
+arrive. Preserve returned IDs and recovery metadata when a write fails.
 
-Do not rerun the write or choose a new idempotency key to bypass uncertainty. Do not delete journals to force a fresh attempt. Some native update commands fail closed until the SDK can safely abort them. A preview receipt is not write approval.
+Do not rerun the write to bypass uncertainty. Do not delete journals to force a fresh attempt. Some native update commands fail closed until the SDK can safely abort them. A preview receipt is not write approval.
 
 ## Use SDK methods
 
@@ -358,7 +335,6 @@ For detailed diagnosis, see [troubleshooting](docs/guides/remnote-cli-troublesho
 
 - [Installation](docs/guides/installation.md)
 - [Command reference](docs/guides/remnote-cli-command-reference.md)
-- [Task plans and receipts](docs/guides/task-plans.md)
 - [Read receipts](docs/guides/read-receipts.md)
 - [State verification](docs/guides/state-verification.md)
 - [Advanced use cases](docs/advanced-use-cases.md)

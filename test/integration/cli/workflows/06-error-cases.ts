@@ -1,6 +1,3 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 /**
  * Workflow 06: Error Cases
  *
@@ -256,55 +253,6 @@ export async function errorCasesWorkflow(
         durationMs: Date.now() - start,
         error: (e as Error).message,
       });
-    }
-  }
-
-  {
-    const kind = 'flashcards' as const;
-    const start = Date.now();
-    const dir = await mkdtemp(join(tmpdir(), 'task-preview-'));
-    try {
-      const missing = `missing-task-${ctx.runId}`;
-      const plan = {
-        schemaVersion: 1,
-        dailyRemId: missing,
-        homeRootId: missing,
-        tagRemId: missing,
-        newCards: [{ key: 'card', question: 'Preview?', answer: [['No write.']] }],
-      };
-      const path = join(dir, 'plan.json');
-      await writeFile(path, JSON.stringify(plan), 'utf8');
-      const result = await ctx.cli.runExpectError([
-        kind,
-        'apply',
-        '--plan',
-        path,
-        '--idempotency-key',
-        `preview-${kind}-${ctx.runId.replace(/[^A-Za-z0-9._-]/g, '-')}`,
-      ]);
-      const receipt = result.json as Record<string, unknown>;
-      assertTruthy(
-        receipt.status === 'incomplete' && receipt.complete === false,
-        'missing target preview cannot pass'
-      );
-      assertTruthy(
-        Array.isArray(receipt.created) && receipt.created.length === 0,
-        'preview no writes'
-      );
-      steps.push({
-        label: `${kind} missing-target preview receipt`,
-        passed: true,
-        durationMs: Date.now() - start,
-      });
-    } catch (e) {
-      steps.push({
-        label: `${kind} missing-target preview receipt`,
-        passed: false,
-        durationMs: Date.now() - start,
-        error: (e as Error).message,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
     }
   }
 

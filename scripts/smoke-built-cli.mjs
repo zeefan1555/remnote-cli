@@ -36,6 +36,30 @@ try {
   if (version.stdout.trim() !== packageJson.version)
     throw new Error('Built CLI version does not match package.json');
 
+  const help = await run(['--help']);
+  if (/^\s+(?:card|task|flashcards|apply)(?:\s|$)/m.test(help.stdout))
+    throw new Error('Built CLI still exposes a public card task command');
+  for (const args of [
+    ['rem', 'create', '--help'],
+    ['rem', 'update', '--help'],
+    ['rem', 'update-answer', '--help'],
+    ['rem', 'inspect', '--help'],
+    ['sdk', 'card', '--help'],
+    ['batch', '--help'],
+  ]) {
+    const output = await run(args);
+    if (!output.stdout.includes(`Usage: remnote-cli ${args.slice(0, -1).join(' ')}`))
+      throw new Error('Built CLI lost a retained command: ' + args.join(' '));
+  }
+
+  try {
+    await run(['card', 'apply', '--plan', '-', '--idempotency-key', 'removed']);
+    throw new Error('Built CLI accepted the removed card apply command');
+  } catch (error) {
+    if (error.code !== 2 || envelope(error.stderr).error.subtype !== 'unknown_subcommand')
+      throw error;
+  }
+
   const contract = envelope((await run(['contract'])).stdout);
   if (
     contract.ok !== true ||
@@ -43,6 +67,12 @@ try {
     contract.data.commands.length === 0
   )
     throw new Error('Built CLI contract is incomplete');
+  if (
+    'plans' in contract.data ||
+    'requiredCapabilities' in contract.data ||
+    contract.data.commands.some(({ path }) => path === 'card' || path.startsWith('card '))
+  )
+    throw new Error('Built CLI contract still exposes task plans');
 
   const doctor = envelope(
     (

@@ -25,7 +25,7 @@ expect(){ local want="$1" re="$2"; shift 2; local out code; out="$(rc "$@" 2>&1)
 
 build(){ node --version; cd "$CLI" && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run build; }
 unit(){ cd "$CLI" && npm test; }
-cli(){ expect 0 "^[0-9]+\.[0-9]+\.[0-9]+" --version && expect 0 "Direct RemNote SDK automation" --help && expect 0 "Apply card tasks" card --help && expect 0 '"path": "rem search"' schema rem.search && expect 0 "Rem lookup and Rem object operations" sdk rem --help; }
+cli(){ expect 0 "^[0-9]+\.[0-9]+\.[0-9]+" --version && expect 0 "Direct RemNote SDK automation" --help && expect 0 "Usage: remnote-cli rem create" rem create --help && expect 0 "Usage: remnote-cli rem update" rem update --help && expect 0 "Usage: remnote-cli rem update-answer" rem update-answer --help && expect 0 "Usage: remnote-cli rem inspect" rem inspect --help && expect 2 '"subtype": "unknown_subcommand"' card apply && expect 0 '"path": "rem search"' schema rem.search && expect 0 "Usage: remnote-cli sdk card" sdk card --help; }
 offline(){ expect 0 '"offline": true' doctor --offline; }
 
 case "$MODE" in

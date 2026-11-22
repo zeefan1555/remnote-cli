@@ -80,7 +80,7 @@ export function remoteSdk(
   }
   (plugin.app ??= Object.create(null)).transaction = async (): Promise<never> => {
     throw new Error(
-      'Native transactions are unavailable: SDK 0.0.46 cannot acknowledge abort. No transaction writes were started. Use a journaled task or individual SDK calls.'
+      'Native transactions are unavailable: SDK 0.0.46 cannot acknowledge abort. No transaction writes were started.'
     );
   };
   return plugin as unknown as ReactRNPlugin;

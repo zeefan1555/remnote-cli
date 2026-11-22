@@ -20,7 +20,7 @@ const legacyPaths = new Map([
   ['set-document-status', 'rem document status'],
   ['get-media', 'media get'],
   ['read-table', 'table read'],
-  ['review-stats', 'card review-stats'],
+  ['review-stats', 'rem inspect'],
   ['powerup', 'rem powerup'],
   ['powerup get', 'rem powerup get'],
   ['context', 'rem context'],
@@ -28,8 +28,12 @@ const legacyPaths = new Map([
   ['outline', 'rem outline'],
   ['outline collapse', 'rem outline collapse'],
   ['outline expand', 'rem outline expand'],
-  ['flashcards', 'card'],
-  ['flashcards apply', 'card apply'],
+  ['card', 'rem create/update/update-answer/inspect'],
+  ['card apply', 'rem create/update/update-answer/inspect'],
+  ['card review-stats', 'rem inspect'],
+  ['flashcards', 'rem create/update/update-answer/inspect'],
+  ['flashcards apply', 'rem create/update/update-answer/inspect'],
+  ['contract --schema', 'schema <command-path>'],
   ['journal', 'journal append'],
 ]);
 const commandPatterns = Array.from(legacyPaths, ([path, replacement]) => ({

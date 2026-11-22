@@ -24,4 +24,20 @@ describe('repository RemNote Agent Skill', () => {
     expect(skill).not.toContain('validation, connection and incomplete-receipt');
     expect(skill).not.toContain('must exit 1');
   });
+
+  it('uses native Rem card commands without task-plan instructions', async () => {
+    const skill = await readFile('skills/remnote/SKILL.md', 'utf8');
+    for (const command of [
+      'rem create',
+      'rem update',
+      'rem update-answer',
+      'rem inspect',
+      'sdk card',
+    ])
+      expect(skill).toContain(command);
+    expect(skill).not.toContain('card apply');
+    expect(skill).not.toContain('card review-stats');
+    expect(skill).not.toContain('task-plans.md');
+    expect(skill).not.toContain('--plan');
+  });
 });

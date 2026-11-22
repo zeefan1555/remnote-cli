@@ -39,7 +39,7 @@ JSON failure is one stderr envelope with `error.type`, `error.subtype`,
 Exit 0 is success. Exit 1 is internal. Exit 2 is usage. Exit 3 means
 configuration or connection unavailable. Exit 4 means a missing target or
 conflict. A write with an unknown outcome returns exit 5. Exit 6 means an unsupported
-capability. Read task receipts from `data` on success and from `error.details`
+capability. Read receipts from `data` on success and from `error.details`
 on a failed or incomplete result.
 
 `unknown_outcome` means a write may have changed RemNote. Reconcile exact
@@ -61,10 +61,9 @@ Use one `remnote-cli` process per turn. Do not shell-chain separate processes
 because each process owns the loopback port. Use `batch --file commands.jsonl`
 to run several argv commands over one connection.
 
-Prefer file payloads for `--content-file`, `--plan`, `--request`, `--expect`,
+Use direct `--content` or stdin for native text. Use file payloads for `--content-file`, `--request`, `--expect`,
 and `--file`. Native content payloads are bounded to 100 KiB. A batch file is
-bounded to 1 MB and 100 commands. Task plans have no artificial object-count or
-file-size cap. Inner batch commands cannot read stdin.
+bounded to 1 MB and 100 commands. Inner batch commands cannot read stdin.
 
 Use exact Rem IDs, not ambiguous names. Run live development acceptance tests only
 through the guarded integration wrapper after explicit authorization.
@@ -86,7 +85,7 @@ remnote-cli rem read REM_ID OTHER_ID --content-mode none
 remnote-cli rem children list ROOT_ID
 remnote-cli rem inspect REM_ID --fields elements,markdown,tags,parent,portal,cards
 remnote-cli rem assert --file rules.json --strict
-remnote-cli card review-stats REM_ID
+remnote-cli rem inspect REM_ID --fields cards,rawCards
 remnote-cli table read --rem-id TABLE_ID
 remnote-cli sdk capabilities --status supported --mode read --text
 remnote-cli sdk call rem:getChildrenRem --target-id REM_ID --args-json '[]'
@@ -146,6 +145,8 @@ Use friendly commands when available:
 
 ```bash
 remnote-cli rem create
+remnote-cli rem update
+remnote-cli rem update-answer
 remnote-cli rem children insert
 remnote-cli rem tags update
 remnote-cli rem document status
@@ -155,62 +156,39 @@ remnote-cli rem outline expand
 remnote-cli journal append
 remnote-cli todo complete
 remnote-cli todo reopen
-remnote-cli card apply
 ```
 
 Preview-first commands need `--apply` for execution. Prefer additive
 `rem children insert`. `rem children replace` destroys child identities and
 requires `--allow-destructive`. Use stale-state guards where provided.
 
-## Flashcard task plans
+## Native Rem card editing
 
-`card apply` takes an inner schema-1 plan and a stable `--idempotency-key`.
-Preview first. Apply only the reviewed plan with the same key.
+Run `remnote-cli rem create --help` for official card syntax, then pass the
+reviewed text directly to `rem create --content` or through `--content-file -`.
+One invocation uses one parent and tag set.
 
 ```bash
-remnote-cli card apply --plan /tmp/cards.json --idempotency-key cards-batch-1
-remnote-cli card apply --plan /tmp/cards.json --idempotency-key cards-batch-1 --apply --summary
+remnote-cli rem create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
+remnote-cli rem update QUESTION_REM_ID --content "New question" --expected-text-hash CURRENT_TEXT_HASH
+remnote-cli rem update-answer ANSWER_REM_ID --card-id QUESTION_REM_ID --content "New answer" --expected-text-hash CURRENT_ANSWER_TEXT_HASH
+remnote-cli rem inspect QUESTION_REM_ID --fields cards,rawCards
 ```
 
-The boundary parser normalizes the plan to `create`, `patch`, `reuse`, or
-`mixed`. Each variant declares the official SDK capabilities it needs. The live
-catalog is checked before preview reads and before the first mutation.
+`rem update` changes only the target Rem's own text and preserves its children.
+`rem update-answer` requires an existing card-item directly under the exact card-generating
+parent Rem. `--card-id` is that parent Rem ID, not a generated CardID.
+Both content updates require the current raw-text SHA-256 from `rem context` with
+the target in `remIds`; displayed text and `cards[].hash` are not raw-text hashes.
+Updates verify text, parent, children, card-item status, CardIDs, creation time,
+scheduling, and available history. Reconcile an unknown write by exact-ID readback
+before another write.
 
-Patch-only and reuse-only plans omit daily, HOME, tag, title, and creation fields.
-They target exact card and answer Rems. New-card plans without explicit `tags`
-require `dailyRemId`, `homeRootId`, and `tagRemId`.
-
-Flashcard questions accept a plain string or `TextSegments`. Use
-`{"remId":"EXACT_ID"}` for native references. A plain string containing `[[`
-or `]]` is invalid because RemNote stores those brackets as literal text.
-
-An answer line may be one code block:
-
-```json
-[{"code":"line1\nline2","language":"plaintext"}]
-```
-
-Apply stores `{i:"m",code:true,language,text}` and sets `isCardItem` so the
-line appears on the card back. Patching a code answer back to plain text keeps
-`isCardItem` true.
-
-Task receipts contain metadata only. Use returned semantic keys such as
-`card:<key>` and `answer:<key>:<index>`; never infer IDs from creation order.
-Receipt hashes do not replace semantic final-text review.
-
-`--summary` keeps status, IDs, hashes, identity arrays, steps, counts, and errors
-while omitting passing check detail. It does not change verification or exit
-semantics. See [task plans](../../docs/guides/task-plans.md) and
-[read receipts](../../docs/guides/read-receipts.md).
-
-Task commands do not resolve dates or create daily documents. The caller validates
-the intended date before a new batch and after midnight. Same-key replay keeps the
-original recorded daily document.
-
-Flashcard mutations use a durable journal. The scaffold becomes `applied` when
-all exact IDs are saved. A later binding or content failure is `partial` and can
-resume under the same key. `unknown` means affected objects cannot be identified.
-There is no rollback guarantee.
+`rem inspect --fields cards,rawCards` returns compact card facts plus native creation
+time, full available review history, and scheduling. Missing native facts remain
+`null`. `sdk card` remains the low-level SDK inspector.
+Use `rem move` and `rem children insert` to move or reference an existing Rem.
+See [read receipts](../../docs/guides/read-receipts.md) for context and scope verification.
 
 ## Batch read session
 

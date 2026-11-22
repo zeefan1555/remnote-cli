@@ -182,6 +182,7 @@ describe('batch command', () => {
         '{"argv":["--help"]}',
         '{"argv":["rem", "read","--help"]}',
         '{"argv":["rem", "read","--depth"]}',
+        '{"argv":["rem"]}',
         '{"argv":["card"]}',
         '{"argv":["status"]}',
       ].join('\n')
@@ -193,10 +194,10 @@ describe('batch command', () => {
         ok: boolean;
         exitCode: number;
         result?: unknown;
-        error?: { message: string };
+        error?: { message: string; subtype: string };
       }>;
     };
-    expect(output.count).toBe(6);
+    expect(output.count).toBe(7);
     expect(output.results[0]).toMatchObject({ ok: true, exitCode: 0, result: '0.1.0-test' });
     expect(output.results[1]).toMatchObject({ ok: true, exitCode: 0 });
     expect(String(output.results[1].result)).toMatch(/Direct RemNote SDK automation/);
@@ -206,8 +207,13 @@ describe('batch command', () => {
     expect(output.results[3]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
     expect(output.results[3].error?.message).toMatch(/argument missing/);
     expect(output.results[4]).toMatchObject({ ok: true, exitCode: 0 });
-    expect(String(output.results[4].result)).toMatch(/Apply card tasks/);
-    expect(output.results[5]).toMatchObject({ ok: true, exitCode: 0, result: { ok: true } });
+    expect(String(output.results[4].result)).toMatch(/Inspect and modify RemNote Rems/);
+    expect(output.results[5]).toMatchObject({
+      ok: false,
+      exitCode: EXIT.USAGE,
+      error: { subtype: 'unknown_subcommand' },
+    });
+    expect(output.results[6]).toMatchObject({ ok: true, exitCode: 0, result: { ok: true } });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalled();
   });

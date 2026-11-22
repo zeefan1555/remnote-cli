@@ -35,7 +35,7 @@ node 必须 ≥ 22.13，版本号应等于根目录 `package.json` 的 `version`
 |---|---|---|---|
 | `build` | `npm ci`（按需）+ `npm run build` | 退出码 0 | [cli-surface](features/cli-surface.md) |
 | `unit` | `npm test`（vitest） | `Test Files … passed` | [cli-surface](features/cli-surface.md) |
-| `cli` | `--version`、`--help`、`card --help`、`schema rem.search`、`sdk rem --help` | 版本号、help 分区、嵌套 schema 和离线 SDK help | [cli-surface](features/cli-surface.md) |
+| `cli` | `--version`、`--help`、`rem create --help`、`rem update --help`、`rem update-answer --help`、`rem inspect --help`、拒绝旧 card 命令、`schema rem.search`、`sdk card --help` | 版本号、help 分区、Rem 命令帮助、旧命令未知和离线 SDK help | [cli-surface](features/cli-surface.md) |
 | `offline` | `doctor --offline` | exit 0，Bridge check 为 skip | [connection-status](features/connection-status.md) |
 | `all` | 以上全部 | — | — |
 

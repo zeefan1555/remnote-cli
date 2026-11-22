@@ -19,7 +19,6 @@ describe('command group boundaries', () => {
 
   it.each([
     [['rem']],
-    [['card']],
     [['table']],
     [['todo']],
     [['media']],
@@ -44,9 +43,9 @@ describe('command group boundaries', () => {
   it.each([
     { name: 'root help', args: ['help'] },
     { name: 'targeted root help', args: ['help', 'todo'] },
-    { name: 'group help', args: ['card', 'help'] },
-    { name: 'global flag before group help', args: ['--text', 'card', 'help'] },
-    { name: 'global flag after group help', args: ['card', '--text', 'help'] },
+    { name: 'group help', args: ['rem', 'help'] },
+    { name: 'global flag before group help', args: ['--text', 'rem', 'help'] },
+    { name: 'global flag after group help', args: ['rem', '--text', 'help'] },
   ])('delegates $name to Commander', async ({ args }) => {
     const result = await runCliForTest(args);
     expect(result.exitCode).toBe(0);
@@ -70,7 +69,6 @@ describe('command group boundaries', () => {
 
   it.each([
     [['create'], 'rem create'],
-    [['flashcards', 'apply'], 'card apply'],
     [['read-table', '--rem-id', 'table'], 'table read'],
   ])('rejects legacy path %j with replacement %s', async (args, replacement) => {
     const result = await runCliForTest(args);

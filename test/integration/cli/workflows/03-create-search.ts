@@ -391,12 +391,15 @@ export async function createSearchWorkflow(
       state.noteCId = (result.remIds as string[])[0];
 
       const reviewStats = (await ctx.cli.runExpectSuccess([
-        'card',
-        'review-stats',
+        'rem',
+        'inspect',
         ...(result.remIds as string[]),
+        '--fields',
+        'cards,rawCards',
       ])) as Record<string, unknown>;
-      assertIsArray(reviewStats.results, 'review stats results');
-      const cards = (reviewStats.results as Array<Record<string, unknown>>).flatMap((entry) =>
+      assertTruthy(reviewStats.complete === true, 'card inspection should be complete');
+      assertIsArray(reviewStats.rems, 'card inspection Rems');
+      const cards = (reviewStats.rems as Array<Record<string, unknown>>).flatMap((entry) =>
         Array.isArray(entry.cards) ? entry.cards : []
       );
       assertTruthy(cards.length > 0, 'created flashcard should expose at least one native card');

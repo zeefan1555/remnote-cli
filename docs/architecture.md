@@ -24,7 +24,7 @@ Only `get_status`, `get_sdk_capabilities` and `sdk_call` execute in the plugin.
 one handler, and its receipt/effect semantics. Unknown names and malformed payloads
 reject before a listener opens; a fourth action cannot pass the fixed type registry.
 `transaction_begin` and `transaction_end` explicitly fail without SDK calls. Task names
-such as `flashcards_apply` and `update_todo` are local CLI dispatch names, not plugin actions.
+such as `update_note`, `update_answer`, and `update_todo` are local CLI dispatch names, not plugin actions.
 There is no HTTP MCP endpoint, OAuth provider, MCPB proxy, daemon or semver matching.
 
 ## Connection And Safety
@@ -93,12 +93,11 @@ read-only SDK method results, preserve input order through a bounded scheduler, 
 discard the entire cache after any mutation. Values never survive the owning
 `DirectClient`, so batch commands can benefit without leaking state across commands.
 
-`OperationKernel` is the flashcard task mutation policy. It persists a
-`started` step before a native write and advances to `verified` only after
-its own readback. Flashcard scaffolding advances to `applied` as soon as
-all returned IDs are durably saved; later binding and content failures remain
-`partial` and resume under the same key. `unknown` plus exact-ID reconciliation
-is reserved for outcomes that cannot identify the affected objects.
+`rem create` uses native RemNote text parsing. Content updates in `RemAdapter`
+validate current raw-text hashes and snapshot card identity before one native
+text write. Readback verifies text, parent, children, card-item status, creation,
+scheduling, and available history. Unverified writes require exact-ID
+reconciliation before another write. `rem inspect` returns these native card facts.
 
 See [the approved decision](adr/0001-direct-cli.md),
-[read receipts](guides/read-receipts.md) and [task plans](guides/task-plans.md).
+[read receipts](guides/read-receipts.md) and [state verification](guides/state-verification.md).

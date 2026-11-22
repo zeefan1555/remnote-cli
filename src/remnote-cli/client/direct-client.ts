@@ -5,7 +5,6 @@ import { RemAdapter } from '../../business/rem-adapter.js';
 import * as schemas from '../../schemas/remnote-schemas.js';
 import { InspectManySchema, VerifyScopeSchema } from '../../schemas/composite-schemas.js';
 import { InspectStateSchema, PowerupGetSchema } from '../../schemas/state-schemas.js';
-import { FlashcardsApplySchema } from '../../schemas/task-schemas.js';
 import { resolveManagedImage } from '../../media.js';
 import { Connection } from './connection.js';
 import { remnoteCliStateHome } from './state-home.js';
@@ -29,7 +28,6 @@ const operations = {
   search_by_tag: ['searchByTag', schemas.SearchByTagSchema],
   read_note: ['readNote', schemas.ReadNoteSchema],
   list_children: ['listChildren', schemas.ListChildrenSchema],
-  get_review_stats: ['getReviewStats', schemas.ReviewStatsSchema],
   set_outline_collapsed: ['setOutlineCollapsed', schemas.SetOutlineCollapsedSchema],
   list_todos: ['listTodos', schemas.ListTodosSchema],
   update_todo: ['updateTodo', schemas.UpdateTodoSchema],
@@ -47,7 +45,6 @@ const operations = {
   verify_scope: ['verifyScope', VerifyScopeSchema],
   inspect_state: ['inspectState', InspectStateSchema],
   powerup_get: ['getPowerupSlot', PowerupGetSchema],
-  flashcards_apply: ['applyFlashcards', FlashcardsApplySchema],
 } as const;
 const READ_ONLY_ACTIONS = new Set([
   'get_status',
@@ -56,7 +53,6 @@ const READ_ONLY_ACTIONS = new Set([
   'search_by_tag',
   'read_note',
   'list_children',
-  'get_review_stats',
   'inspect_many',
   'verify_scope',
   'inspect_state',
@@ -70,7 +66,6 @@ const PREVIEWABLE_ACTIONS = new Set([
   'move_note',
   'set_document_status',
   'delete_rem',
-  'flashcards_apply',
 ]);
 export interface ClientOptions {
   kbId?: string;
@@ -121,11 +116,6 @@ export class DirectClient {
     const kbKey = createHash('sha256').update(identity.knowledgeBaseId).digest('hex');
     this.state = new LocalState(join(remnoteCliStateHome(), 'state', kbKey));
     const plugin = remoteSdk(this.connection, catalog, this.options.allowDestructive === true);
-    const supportedCapabilities = new Set(
-      catalog.capabilities
-        .filter((capability) => capability.status === 'supported')
-        .map((c) => c.id)
-    );
     this.adapter = new RemAdapter(
       plugin,
       {
@@ -133,7 +123,6 @@ export class DirectClient {
         acceptReplaceOperation: this.options.allowDestructive === true,
       },
       this.state,
-      supportedCapabilities,
       this.readSession
     );
     this.adapter.importSearchSnapshots(await this.state.getLocal('search-snapshots'));

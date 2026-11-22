@@ -272,28 +272,6 @@ describe('command bridge action mapping', () => {
     executeSpy.mockRestore();
   });
 
-  it('maps review-stats command to get_review_stats', async () => {
-    const executeSpy = await runCommand(['card', 'review-stats', 'rem-1', 'rem-2']);
-    expect(executeSpy).toHaveBeenCalledWith('get_review_stats', {
-      remIds: ['rem-1', 'rem-2'],
-    });
-    executeSpy.mockRestore();
-  });
-
-  it('maps review-stats scope selectors', async () => {
-    const todaySpy = await runCommand(['card', 'review-stats', '--today']);
-    expect(todaySpy).toHaveBeenCalledWith('get_review_stats', { today: true });
-    todaySpy.mockRestore();
-
-    const rootSpy = await runCommand(['card', 'review-stats', '--root-id', 'root-1']);
-    expect(rootSpy).toHaveBeenCalledWith('get_review_stats', { rootRemId: 'root-1' });
-    rootSpy.mockRestore();
-
-    const tagSpy = await runCommand(['card', 'review-stats', '--tag-id', 'tag-1']);
-    expect(tagSpy).toHaveBeenCalledWith('get_review_stats', { tagRemId: 'tag-1' });
-    tagSpy.mockRestore();
-  });
-
   it('maps outline and todo workflow commands', async () => {
     const outlineSpy = await runCommand(['rem', 'outline', 'collapse', '--today', '--apply']);
     expect(outlineSpy).toHaveBeenCalledWith('set_outline_collapsed', {

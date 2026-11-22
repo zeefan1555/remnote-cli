@@ -17,7 +17,7 @@ The bridge must not contain composition, translation, workarounds or business lo
 ## Ownership And Contracts
 
 - `src/remnote-cli/`: command parsing, output, connection and private state.
-- `src/business/`: composition, inspection, task journals and recovery.
+- `src/business/`: composition, inspection, write journals and recovery.
 - `src/schemas/`: Zod input/output contracts.
 - [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge): generated official SDK allowlist, serialization, live permissions and exact KB binding. Native transactions are disabled by ADR 0003.
 - [Architecture](docs/architecture.md) and [approved ADR](docs/adr/0001-direct-cli.md).
@@ -36,10 +36,11 @@ catalog, not matching product versions. `--kb-id` is validation only.
 The trust boundary is the current operating-system user. Origin checking rejects
 ordinary webpages but not native local processes that can forge headers.
 
-Task plans default to preview, require current hashes for patches and use durable
-metadata-only journals scoped to the active KB. Unknown write outcomes must not
-be replayed automatically. Task commands do not resolve dates or create daily
-documents; the caller owns calendar freshness. Replay keeps the recorded diary.
+`rem create` uses official text for Rems and cards. `rem update --content` and
+`rem update-answer` require current raw-text hashes and verify card identity,
+scheduling, and available history. `rem inspect --fields cards,rawCards` reads
+these facts. Generic low-level `sdk card` inspection remains separate.
+Unknown write outcomes must not be replayed automatically.
 Required proof scopes cannot be narrowed merely to pass.
 
 ## Verification
@@ -61,7 +62,6 @@ Development integration suites require explicit authorization and use this wrapp
 ```bash
 ./run-agent-integration-test.sh --preflight-only
 ./run-agent-integration-test.sh --yes
-./run-agent-integration-test.sh --yes --flashcards-only "EXISTING HOME CONCEPT TITLE"
 ./run-agent-integration-test.sh --yes --command status
 ./run-agent-integration-test.sh --yes --transactions-only
 ```
@@ -85,7 +85,7 @@ access the RemNote database directly. Unit mocks are not native persistence proo
 ## Documentation And Delivery
 
 Keep this map, the [CLI reference](docs/guides/remnote-cli-command-reference.md),
-[read receipts](docs/guides/read-receipts.md), [task plans](docs/guides/task-plans.md)
+[read receipts](docs/guides/read-receipts.md), [state verification](docs/guides/state-verification.md)
 and [agent skill](skills/remnote/SKILL.md) aligned with behavior. Protocol changes
 belong in this repository and in
 [remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge). Record

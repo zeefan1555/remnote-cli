@@ -29,8 +29,6 @@ import {
 } from './inspection.js';
 import { inspectState, type InspectStateParams } from './state-inspect.js';
 import { getPowerupSlot, type PowerupGetParams } from './powerup-read.js';
-import { TaskOperations, type TaskApplyParams } from './task-operations.js';
-import type { FlashcardsPlan } from '../schemas/task-schemas.js';
 import { cardDelimiterIndex } from './card-structure.js';
 import { contentHash } from './content-hash.js';
 import { snapshotCardIdentity, type InspectedRawCard } from './card-identity.js';
@@ -283,13 +281,6 @@ export interface ReadTableResult {
   rowsReturned: number;
 }
 
-export interface ReviewStatsParams {
-  remIds?: string[];
-  rootRemId?: string;
-  tagRemId?: string;
-  today?: boolean;
-}
-
 export interface CardReviewStats {
   cardId: string;
   remId: string;
@@ -299,15 +290,6 @@ export interface CardReviewStats {
   lastRepetitionTime?: number;
   nextRepetitionTime?: number;
   timesWrongInRow?: number;
-}
-
-export interface RemReviewStats {
-  remId: string;
-  cards: CardReviewStats[];
-}
-
-export interface ReviewStatsResult {
-  results: RemReviewStats[];
 }
 
 export interface OutlineParams {
@@ -520,9 +502,6 @@ const SEARCH_CURSOR_MAX_ACTIVE = 20;
 /** Search snapshots are short-lived because they capture an ordering view of mutable KB state. */
 const SEARCH_CURSOR_TTL_MS = 15 * 60 * 1000;
 
-/** Maximum Rems expanded from one review scope. */
-const REVIEW_SCOPE_LIMIT = 1000;
-
 /** Default recursion depth for read operations. */
 const DEFAULT_DEPTH = 5;
 
@@ -669,7 +648,6 @@ export class RemAdapter {
   private readonly searchCursorSnapshots = new Map<string, SearchCursorSnapshot>();
   private readonly searchByTagCursorSnapshots = new Map<string, SearchByTagCursorSnapshot>();
   private nextDiagnosticSequence = 1;
-  private taskOperations?: TaskOperations;
 
   constructor(
     private plugin: ReactRNPlugin,
@@ -678,7 +656,6 @@ export class RemAdapter {
       ReactRNPlugin['storage'],
       'getLocal' | 'setLocal'
     > = plugin.storage,
-    private readonly capabilities?: ReadonlySet<string>,
     private readonly readSession?: ReadSession
   ) {
     // Default settings
@@ -720,17 +697,6 @@ export class RemAdapter {
   }
   getPowerupSlot(params: PowerupGetParams) {
     return getPowerupSlot(this.plugin, params);
-  }
-  private tasks(): TaskOperations {
-    return (this.taskOperations ??= new TaskOperations({
-      plugin: this.plugin,
-      journal: this.journal,
-      canWrite: () => this.settings.acceptWriteOperations,
-      capabilities: this.capabilities,
-    }));
-  }
-  applyFlashcards(params: TaskApplyParams<FlashcardsPlan>) {
-    return this.tasks().apply(params);
   }
   private assertWriteEnabled(beforeMutation?: () => void): void {
     beforeMutation?.();
@@ -4496,63 +4462,6 @@ export class RemAdapter {
       totalRows,
       rowsReturned: rows.length,
     };
-  }
-
-  private async resolveReviewScope(params: ReviewStatsParams): Promise<PluginRem[]> {
-    const selectorCount =
-      (params.remIds !== undefined ? 1 : 0) +
-      (params.rootRemId !== undefined ? 1 : 0) +
-      (params.tagRemId !== undefined ? 1 : 0) +
-      (params.today === true ? 1 : 0);
-    if (selectorCount !== 1) {
-      throw new Error('Provide exactly one of remIds, rootRemId, tagRemId, or today=true');
-    }
-
-    let rems: PluginRem[] = [];
-    if (params.remIds !== undefined) {
-      const remIds = this.optionalStringArray(params.remIds, 'remIds').map((remId, index) =>
-        this.requireNonEmptyString(remId, `remIds[${index}]`)
-      );
-      if (remIds.length === 0) throw new Error('remIds must contain at least one Rem ID');
-      for (const remId of remIds) {
-        const rem = await this.plugin.rem.findOne(remId);
-        if (!rem) throw new Error(`Note not found: ${remId}`);
-        rems.push(rem);
-      }
-    } else if (params.today === true) {
-      const dailyDoc = await this.plugin.date.getTodaysDoc();
-      if (!dailyDoc) throw new Error("Today's daily document was not found");
-      rems = [dailyDoc, ...(await dailyDoc.getDescendants())];
-    } else if (params.rootRemId !== undefined) {
-      const rootRemId = this.requireNonEmptyString(params.rootRemId, 'rootRemId');
-      const root = await this.plugin.rem.findOne(rootRemId);
-      if (!root) throw new Error(`Note not found: ${rootRemId}`);
-      rems = [root, ...(await root.getDescendants())];
-    } else {
-      const tagRemId = this.requireNonEmptyString(params.tagRemId, 'tagRemId');
-      const tag = await this.plugin.rem.findOne(tagRemId);
-      if (!tag) throw new Error(`Tag not found: ${tagRemId}`);
-      const taggedRems = await tag.taggedRem();
-      for (const taggedRem of taggedRems) {
-        rems.push(taggedRem, ...(await taggedRem.getDescendants()));
-      }
-    }
-
-    const unique = [...new Map(rems.map((rem) => [rem._id, rem])).values()];
-    if (unique.length > REVIEW_SCOPE_LIMIT) {
-      throw new Error(`Review scope exceeds ${REVIEW_SCOPE_LIMIT} Rems`);
-    }
-    return unique;
-  }
-
-  /** Return the native review facts for every card generated from the requested Rem scope. */
-  async getReviewStats(params: ReviewStatsParams): Promise<ReviewStatsResult> {
-    const rems = await this.resolveReviewScope(params);
-    const results: RemReviewStats[] = [];
-    for (const rem of rems) {
-      results.push({ remId: rem._id, cards: await this.getCardReviewStats(rem) });
-    }
-    return { results };
   }
 
   async setOutlineCollapsed(params: OutlineParams): Promise<OutlineResult> {

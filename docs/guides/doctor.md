@@ -23,7 +23,7 @@ remnote-cli doctor --offline --json
 - Protocol is compatible with protocol 2
 - The active knowledge base is identified
 - SDK catalog identity matches the Bridge handshake
-- Every required SDK capability is supported
+- Live SDK facts are compared with local generated navigation
 - Local metadata and journal files are regular, private, readable JSON
 
 ## Statuses
@@ -42,7 +42,7 @@ complete report in `error.details`.
 
 `doctor --offline` does not construct a client and never opens the Bridge socket.
 It runs Node, CLI contract and local state checks. Bridge, plugin, protocol,
-knowledge-base, SDK, capability and journal checks are skipped unless they can be
+knowledge-base, SDK and journal checks are skipped unless they can be
 derived locally.
 
 ## Read-only guarantee

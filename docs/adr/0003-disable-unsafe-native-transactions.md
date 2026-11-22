@@ -19,7 +19,7 @@ offline. It is not native rollback acceptance and does not patch the SDK.
 
 Supersede only the native begin/end transaction mechanism in ADR 0001. Do not
 open native transactions over the bridge. Reject remaining transaction-dependent
-commands (`rem update`, `rem children replace`, and `rem property set`)
+commands (metadata-only `rem update`, `rem children replace`, and `rem property set`)
 before their callback or any mutation runs. Do not execute those callbacks
 non-atomically.
 In particular, destructive replacement must not become a partially committed
@@ -31,13 +31,13 @@ including daily-document lookup which can create a document. Save known parent,
 created Rem IDs immediately when returned, before follow-up mutations.
 Failure reports the recovery key and known IDs and stops without rollback, cleanup
 or replay. These commands do not promise atomicity or automatic idempotent replay;
-the existing task API remains the stable-key interface.
+the public task-plan API is removed.
 
-The existing journaled flashcard task is already a non-atomic, recoverable
-workflow. Its scaffold uses the public `createTreeWithMarkdown` call without an
-outer native transaction. Save any returned IDs before follow-up work. On failure
-retain `started`/`unknown`, IDs and the original key, then stop without replay or
-automatic cleanup. Final success still requires exact native readback.
+Cards use `rem create` with official text. `rem update --content` and
+`rem update-answer` use one native text setter, preserve card identity,
+scheduling, and available history, and require exact native readback.
+These checks are not an atomic compare-and-swap. Concurrent edits can occur
+between the hash check, write, and readback.
 
 Native TODO completion and reopening use the single SDK method
 `rem.setTodoStatus()`. They do not need an outer transaction. The command
@@ -68,9 +68,9 @@ unavailable with the other transaction-dependent commands.
 
 Check rejected begin/end requests, reconnect and status after rejection, CLI
 transaction refusal before callback execution, malformed object IDs, and
-journaled scaffold failure/replay. Run both package quality gates and builds.
+single-setter content update checks. Run both package quality gates and builds.
 After desktop reload, reconcile the earlier unknown alias creation before new
-writes, then verify real card creation, exact readback, and same-key replay.
+writes, then verify real card creation, question and answer updates, and exact readback.
 Also verify native TODO list, complete, and reopen. A label-only TODO Rem must
 remain absent from results.
 
