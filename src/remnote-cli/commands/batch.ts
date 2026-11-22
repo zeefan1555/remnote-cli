@@ -13,6 +13,7 @@ import {
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { createBufferedRuntime, emit, fail } from '../output/runtime.js';
 import { createProgram, runProgram } from '../cli.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 const MAX_BATCH_BYTES = 1024 * 1024;
 const MAX_BATCH_COMMANDS = 100;
@@ -221,10 +222,17 @@ function formatBatchText(data: unknown): string {
     .join('\n\n');
 }
 
-export function registerBatchCommand(program: Command, version: string): void {
-  program
-    .command('batch')
-    .description('Run multiple commands over one bridge connection')
+export function registerBatchCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  version: string
+): void {
+  catalog
+    .action(program, 'batch', {
+      description: 'Run multiple commands over one bridge connection',
+      risk: 'destructive',
+      bridge: 'conditional',
+    })
     .requiredOption(
       '--file <path|->',
       'JSON array, {commands:[{argv}]}, or JSONL of {argv} objects'

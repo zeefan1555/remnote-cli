@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { CliFailure } from '../output/errors.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 function formatTags(tags: unknown): string {
   if (!Array.isArray(tags)) return '';
@@ -91,10 +92,13 @@ function formatManyText(data: unknown, formatOne: (value: unknown) => string): s
     .join('\n\n');
 }
 
-export function registerReadCommand(program: Command): void {
-  program
-    .command('read <rem-id...>')
-    .description('Read one or more notes by Rem ID')
+export function registerReadCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'read <rem-id...>', {
+      description: 'Read one or more notes by Rem ID',
+      risk: 'read',
+      bridge: 'required',
+    })
     .option('-d, --depth <n>', 'Depth of child hierarchy to render (default: 5)', '5')
     .option(
       '--content-mode <mode>',

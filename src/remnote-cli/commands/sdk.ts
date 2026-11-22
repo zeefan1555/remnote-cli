@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 import {
   getSdkCapabilities,
@@ -124,10 +125,13 @@ async function readArgs(opts: {
   return source === undefined ? undefined : parseArgsJson(source);
 }
 
-function registerCapabilityCatalog(sdk: Command, program: Command): void {
-  sdk
-    .command('capabilities')
-    .description('List and search RemNote Plugin SDK commands')
+function registerCapabilityCatalog(sdk: Command, program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(sdk, 'capabilities', {
+      description: 'List and search RemNote Plugin SDK commands',
+      risk: 'read',
+      bridge: 'required',
+    })
     .option('--group <group>', 'Filter by SDK command group')
     .option('--status <status>', 'Filter by exact status')
     .option('--mode <mode>', 'Filter by exact mode')
@@ -166,13 +170,18 @@ function registerCapabilityCatalog(sdk: Command, program: Command): void {
 function registerCapabilityGroup(
   sdk: Command,
   program: Command,
+  catalog: CommandCatalog,
   group: string,
   description: string
 ): void {
   const commandName = cliGroupName(group);
-  const sdkGroup = sdk
-    .command(`${commandName} [method]`)
-    .description(description)
+  const sdkGroup = catalog
+    .action(sdk, `${commandName} [method]`, {
+      description,
+      risk: 'destructive',
+      bridge: 'required',
+      dynamic: true,
+    })
     .helpOption(false)
     .option('-h, --help', 'Show this SDK group or method help')
     .option('--target-id <id>', 'Target Rem or Card ID')
@@ -229,11 +238,13 @@ function registerCapabilityGroup(
   });
 }
 
-export function registerSdkCommands(program: Command): void {
-  const sdk = program.command('sdk').description('Low-level RemNote Plugin SDK access');
-  sdk.action(() => sdk.outputHelp());
-  registerCapabilityCatalog(sdk, program);
+export function registerSdkCommands(program: Command, catalog: CommandCatalog): void {
+  const sdk = catalog.group(program, 'sdk', {
+    description: 'Low-level RemNote Plugin SDK access',
+    bareHelp: true,
+  });
+  registerCapabilityCatalog(sdk, program, catalog);
   for (const [group, description] of SDK_GROUPS) {
-    registerCapabilityGroup(sdk, program, group, description);
+    registerCapabilityGroup(sdk, program, catalog, group, description);
   }
 }

@@ -18,7 +18,7 @@ describe('contract command', () => {
     };
     expect(result.exitCode).toBe(0);
     expect(value).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       protocolVersion: 2,
       bridgeActions: ['get_status', 'get_sdk_capabilities', 'sdk_call'],
       output: { schemaVersion: 2, failureStream: 'stderr' },

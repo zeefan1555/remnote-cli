@@ -2,6 +2,7 @@ import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 function formatTodoListText(data: unknown): string {
   const todos = (data as { todos?: Array<Record<string, unknown>> }).todos ?? [];
@@ -24,12 +25,16 @@ function formatTodoUpdateText(data: unknown): string {
 function registerTodoUpdate(
   todo: Command,
   program: Command,
+  catalog: CommandCatalog,
   name: 'complete' | 'reopen',
   finished: boolean
 ): void {
-  todo
-    .command(`${name} <rem-id>`)
-    .description(`${name === 'complete' ? 'Complete' : 'Reopen'} a todo and swap its status tags`)
+  catalog
+    .action(todo, `${name} <rem-id>`, {
+      description: `${name === 'complete' ? 'Complete' : 'Reopen'} a todo and swap its status tags`,
+      risk: 'write',
+      bridge: 'required',
+    })
     .requiredOption('--todo-tag-id <remId>', 'Exact TODO tag Rem ID')
     .requiredOption('--done-tag-id <remId>', 'Exact DONE tag Rem ID')
     .option('--apply', 'Apply the change; otherwise preview only')
@@ -51,13 +56,18 @@ function registerTodoUpdate(
     });
 }
 
-export function registerTodoCommand(program: Command): void {
-  const todo = program.command('todo').description('List and update tagged RemNote todos');
-  todo.action(() => todo.outputHelp());
+export function registerTodoCommand(program: Command, catalog: CommandCatalog): void {
+  const todo = catalog.group(program, 'todo', {
+    description: 'List and update tagged RemNote todos',
+    bareHelp: true,
+  });
 
-  todo
-    .command('list')
-    .description('List Rems carrying an exact TODO tag')
+  catalog
+    .action(todo, 'list', {
+      description: 'List Rems carrying an exact TODO tag',
+      risk: 'read',
+      bridge: 'required',
+    })
     .requiredOption('--tag-id <remId>', 'Exact TODO tag Rem ID')
     .action(async (opts) => {
       const format: OutputFormat = program.opts().text ? 'text' : 'json';
@@ -70,6 +80,6 @@ export function registerTodoCommand(program: Command): void {
       }
     });
 
-  registerTodoUpdate(todo, program, 'complete', true);
-  registerTodoUpdate(todo, program, 'reopen', false);
+  registerTodoUpdate(todo, program, catalog, 'complete', true);
+  registerTodoUpdate(todo, program, catalog, 'reopen', false);
 }

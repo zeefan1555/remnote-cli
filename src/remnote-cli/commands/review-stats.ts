@@ -2,6 +2,7 @@ import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 function formatCardType(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -42,10 +43,13 @@ function formatReviewStatsText(data: unknown): string {
     .join('\n');
 }
 
-export function registerReviewStatsCommand(program: Command): void {
-  program
-    .command('review-stats')
-    .description('Read native review facts for cards in an exact Rem scope')
+export function registerReviewStatsCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'review-stats', {
+      description: 'Read native review facts for cards in an exact Rem scope',
+      risk: 'read',
+      bridge: 'required',
+    })
     .argument('[rem-ids...]', 'One or more exact Rem IDs')
     .option('--today', "Inspect today's daily document and descendants")
     .option('--root-id <remId>', 'Inspect this Rem and all descendants')

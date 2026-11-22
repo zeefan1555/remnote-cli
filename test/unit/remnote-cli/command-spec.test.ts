@@ -79,6 +79,17 @@ describe('command specs', () => {
       bridge: 'required',
       dynamic: true,
     });
+    expect(commandSpec(specs, 'sync')).toEqual(
+      expect.not.objectContaining({ risk: expect.anything(), bridge: expect.anything() })
+    );
+  });
+
+  it('rejects a Commander command that bypasses the catalog', () => {
+    const cli = program();
+    cli.command('unregistered');
+    expect(() => buildCommandSpecs(cli)).toThrow(
+      'Command is not registered through CommandCatalog: unregistered'
+    );
   });
 
   it('prints one command schema and rejects an unknown path', async () => {
@@ -99,11 +110,12 @@ describe('command specs', () => {
       schemaVersion: number;
       commands: Array<{ path: string; risk: string }>;
     };
-    expect(value.schemaVersion).toBe(1);
+    expect(value.schemaVersion).toBe(2);
     expect(value.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: 'search', risk: 'read' }),
-        expect.objectContaining({ path: 'sync delete', risk: 'destructive' }),
+        expect.objectContaining({ path: 'search', kind: 'action', risk: 'read' }),
+        expect.objectContaining({ path: 'sync', kind: 'group' }),
+        expect.objectContaining({ path: 'sync delete', kind: 'action', risk: 'destructive' }),
       ])
     );
   });

@@ -6,7 +6,8 @@ import { CliFailure } from '../output/errors.js';
 import { formatResult } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { summarizeReceipt } from '../output/receipt-summary.js';
-export function registerCompositeCommands(program: Command): void {
+import type { CommandCatalog } from '../spec/command-spec.js';
+export function registerCompositeCommands(program: Command, catalog: CommandCatalog): void {
   async function execute(
     action: 'inspect_many' | 'verify_scope',
     path: string,
@@ -40,9 +41,12 @@ export function registerCompositeCommands(program: Command): void {
       await client.close();
     }
   }
-  program
-    .command('context')
-    .description('Read one bounded, structured context receipt without modifying RemNote')
+  catalog
+    .action(program, 'context', {
+      description: 'Read one bounded, structured context receipt without modifying RemNote',
+      risk: 'read',
+      bridge: 'required',
+    })
     .requiredOption(
       '--request <path|->',
       'Read a schemaVersion=1 inspection request from JSON file or stdin'
@@ -59,13 +63,16 @@ export function registerCompositeCommands(program: Command): void {
       ].join('\n')
     )
     .action(async (opts: { request: string }) => execute('inspect_many', opts.request));
-  program
-    .command('verify')
-    .description('Verify explicit expectations against fresh read-only evidence')
-    .command('scope')
-    .description(
-      'Verify scope expectations; emits a receipt and exits nonzero on failed/incomplete evidence'
-    )
+  const verify = catalog.group(program, 'verify', {
+    description: 'Verify explicit expectations against fresh read-only evidence',
+  });
+  catalog
+    .action(verify, 'scope', {
+      description:
+        'Verify scope expectations; emits a receipt and exits nonzero on failed/incomplete evidence',
+      risk: 'read',
+      bridge: 'required',
+    })
     .requiredOption(
       '--expect <path|->',
       'Read a schemaVersion=1 verification request from JSON file or stdin'

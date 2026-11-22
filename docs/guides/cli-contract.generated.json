@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "protocolVersion": 2,
   "bridgeActions": [
     "get_status",
@@ -799,78 +799,88 @@
   "commands": [
     {
       "path": "assert",
+      "kind": "action",
       "risk": "read",
       "bridge": "optional",
       "dynamic": false
     },
     {
       "path": "batch",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "conditional",
       "dynamic": false
     },
     {
       "path": "context",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "contract",
+      "kind": "action",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "create",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "doctor",
+      "kind": "action",
       "risk": "read",
       "bridge": "optional",
       "dynamic": false
     },
     {
       "path": "flashcards",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "flashcards apply",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "get-media",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "insert-children",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "inspect",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "journal",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "list-children",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false,
@@ -886,198 +896,222 @@
     },
     {
       "path": "move-note",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "outline",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "outline collapse",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "outline expand",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "powerup",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "powerup get",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "read",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "read-table",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "replace-children",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "review-stats",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "schema",
+      "kind": "action",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sdk",
-      "risk": "destructive",
-      "bridge": "none",
-      "dynamic": true
+      "kind": "group"
     },
     {
       "path": "sdk app",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk capabilities",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sdk card",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk date",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk editor",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk event",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk focus",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk kb",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk messaging",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk powerup",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk queue",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk reader",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk rem",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk rich-text",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk scheduler",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk search",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk settings",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk storage",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk widget",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "sdk window",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
     },
     {
       "path": "search",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false,
@@ -1093,6 +1127,7 @@
     },
     {
       "path": "search-by-tag",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false,
@@ -1108,162 +1143,177 @@
     },
     {
       "path": "set-document-status",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "set-property",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "status",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "sync apply",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync delete",
+      "kind": "action",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync diff",
+      "kind": "action",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sync format",
+      "kind": "action",
       "risk": "write",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sync import",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync lint",
+      "kind": "action",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sync plan",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync read",
+      "kind": "action",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sync recover",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync relocate",
+      "kind": "action",
       "risk": "write",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sync resume",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync save",
+      "kind": "action",
       "risk": "write",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sync status",
+      "kind": "action",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "todo",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "todo complete",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "todo list",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "todo reopen",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "update",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "update-tags",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "verify",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "verify scope",
+      "kind": "action",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "wiki",
-      "risk": "read",
-      "bridge": "none",
-      "dynamic": false
+      "kind": "group"
     },
     {
       "path": "wiki apply",
+      "kind": "action",
       "risk": "write",
       "bridge": "required",
       "dynamic": false

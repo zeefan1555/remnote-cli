@@ -4,13 +4,17 @@ import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { resolveOptionalInlineOrFileContent } from './content-input.js';
 import { checkPayloadForFlags, validateNotFlag } from './arg-utils.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerCreateCommand(program: Command): void {
-  const subprogram = program.command('create [title]');
+export function registerCreateCommand(program: Command, catalog: CommandCatalog): void {
+  const subprogram = catalog.action(program, 'create [title]', {
+    description: 'Create a note; newly created non-leaf Rems are collapsed automatically',
+    risk: 'write',
+    bridge: 'required',
+  });
   const validate = (val: string) => validateNotFlag(val, subprogram);
 
   subprogram
-    .description('Create a note; newly created non-leaf Rems are collapsed automatically')
     .option('--title <text>', 'Note title (supports [[id:<remId>]] references)', validate)
     .option(
       '-c, --content <text>',

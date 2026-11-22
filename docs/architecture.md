@@ -78,6 +78,12 @@ The CLI fetches a live capability catalog for each command; there is no persiste
 capability cache or offline identity fallback. Official SDK constants used by local
 business logic are generated without importing the browser SDK runtime into Node.
 
+Every Commander command is created through `CommandCatalog`. The catalog records
+the path once and distinguishes navigation groups from executable actions. Risk,
+Bridge requirements and pagination belong only to actions. Help, schema, contract
+and diagnostics read that registered model instead of maintaining a second path
+policy table. Commander still owns argument parsing and the mature option model.
+
 `ReadSession` is command-local. `context` and `inspect` share exact Rem loads and
 read-only SDK method results, preserve input order through a bounded scheduler, and
 discard the entire cache after any mutation. Values never survive the owning

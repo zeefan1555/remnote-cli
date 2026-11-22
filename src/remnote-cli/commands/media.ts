@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 interface MediaResult extends Record<string, unknown> {
   data: string;
@@ -25,10 +26,13 @@ function requireMediaResult(value: unknown): MediaResult {
   return value as MediaResult;
 }
 
-export function registerGetMediaCommand(program: Command): void {
-  program
-    .command('get-media <rem-id>')
-    .description('Save one RemNote-managed image returned by read --include-media-metadata')
+export function registerGetMediaCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'get-media <rem-id>', {
+      description: 'Save one RemNote-managed image returned by read --include-media-metadata',
+      risk: 'write',
+      bridge: 'required',
+    })
     .requiredOption('--field <field>', 'Rich-text field: text or backText')
     .requiredOption('--media-id <id>', 'Stable media ID returned by read')
     .requiredOption(

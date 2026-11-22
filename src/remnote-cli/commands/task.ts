@@ -5,6 +5,7 @@ import { readContentFileOrStdin } from './content-input.js';
 import { CliFailure } from '../output/errors.js';
 import { formatResult } from '../output/formatter.js';
 import { summarizeReceipt } from '../output/receipt-summary.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 const commonHelp = [
   'The file contains the inner plan, not a request envelope. schemaVersion must be 1.',
   'TextSegments = ["literal text", {"remId":"EXACT_ID"}, ...] (1..100 segments).',
@@ -60,13 +61,18 @@ const help = {
     'After the last Wiki mutation, run verify scope with the WIKI root and zeroCards for final task acceptance.',
   ],
 };
-export function registerTaskCommands(program: Command): void {
+export function registerTaskCommands(program: Command, catalog: CommandCatalog): void {
   for (const kind of ['flashcards', 'wiki'] as const)
-    program
-      .command(kind)
-      .description(`Plan and apply ${kind} tasks`)
-      .command('apply')
-      .description(`Preview a ${kind} plan; use --apply to perform guarded writes`)
+    catalog
+      .action(
+        catalog.group(program, kind, { description: `Plan and apply ${kind} tasks` }),
+        'apply',
+        {
+          description: `Preview a ${kind} plan; use --apply to perform guarded writes`,
+          risk: 'write',
+          bridge: 'required',
+        }
+      )
       .requiredOption(
         '--plan <path|->',
         'Read the inner schemaVersion=1 JSON plan from a file or stdin'

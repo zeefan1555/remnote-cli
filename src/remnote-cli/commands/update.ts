@@ -3,13 +3,17 @@ import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { validateNotFlag } from './arg-utils.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerUpdateCommand(program: Command): void {
-  const subprogram = program.command('update <rem-id>');
+export function registerUpdateCommand(program: Command, catalog: CommandCatalog): void {
+  const subprogram = catalog.action(program, 'update <rem-id>', {
+    description: 'Update note metadata',
+    risk: 'write',
+    bridge: 'required',
+  });
   const validate = (val: string) => validateNotFlag(val, subprogram);
 
   subprogram
-    .description('Update note metadata')
     .option('--title <text>', 'New title (supports [[id:<remId>]] references)', validate)
     .option('--add-aliases <aliases...>', 'Real aliases to add')
     .option('--remove-aliases <aliases...>', 'Real aliases to remove by normalized match')

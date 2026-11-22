@@ -1,13 +1,16 @@
 import type { Command } from 'commander';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { emit } from '../output/runtime.js';
-import { buildCommandSpecs, commandSpec } from '../spec/command-spec.js';
+import { buildCommandSpecs, commandSpec, type CommandCatalog } from '../spec/command-spec.js';
 import { CliFailure } from '../output/errors.js';
 
-export function registerSchemaCommand(program: Command): void {
-  program
-    .command('schema [command-path...]')
-    .description('Print the offline command schema and risk metadata')
+export function registerSchemaCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'schema [command-path...]', {
+      description: 'Print the offline command schema and risk metadata',
+      risk: 'read',
+      bridge: 'none',
+    })
     .addHelpText(
       'after',
       [
@@ -26,12 +29,17 @@ export function registerSchemaCommand(program: Command): void {
         pathParts && pathParts.length > 0
           ? commandSpecAt(specs, pathParts.join(' '))
           : {
-              schemaVersion: 1,
+              schemaVersion: 2,
               commands: specs.map((spec) => ({
                 path: spec.path,
-                risk: spec.risk,
-                bridge: spec.bridge,
-                dynamic: spec.dynamic,
+                kind: spec.kind,
+                ...(spec.kind === 'action'
+                  ? {
+                      risk: spec.risk,
+                      bridge: spec.bridge,
+                      dynamic: spec.dynamic,
+                    }
+                  : {}),
               })),
             };
       emit(

@@ -36,6 +36,7 @@ import { registerDoctorCommand } from './commands/doctor.js';
 import { CommanderError } from 'commander';
 import type { CliRuntime } from './output/runtime.js';
 import { bindRuntime, createProcessRuntime, finishProgram, runtimeFor } from './output/runtime.js';
+import { CommandCatalog } from './spec/command-spec.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version: string };
@@ -45,6 +46,7 @@ export function createProgram(
   runtime: CliRuntime = createProcessRuntime()
 ): Command {
   const program = new Command();
+  const catalog = new CommandCatalog(program);
 
   program
     .name('remnote-cli')
@@ -56,36 +58,36 @@ export function createProgram(
     .option('--allow-destructive', 'Explicitly allow destructive SDK operations')
     .option('--verbose', 'Enable verbose stderr logging');
 
-  registerCreateCommand(program);
-  registerSearchCommand(program);
-  registerSearchByTagCommand(program);
-  registerListChildrenCommand(program);
-  registerReadCommand(program);
-  registerInspectCommand(program);
-  registerAssertCommand(program);
-  registerPowerupCommand(program);
-  registerCompositeCommands(program);
-  registerTaskCommands(program);
-  registerBatchCommand(program, version);
-  registerReviewStatsCommand(program);
-  registerOutlineCommand(program);
-  registerTodoCommand(program);
-  registerSdkCommands(program);
-  registerGetMediaCommand(program);
-  registerUpdateCommand(program);
-  registerInsertChildrenCommand(program);
-  registerMoveNoteCommand(program);
-  registerSetDocumentStatusCommand(program);
-  registerReplaceChildrenCommand(program);
-  registerUpdateTagsCommand(program);
-  registerSetPropertyCommand(program);
-  registerJournalCommand(program);
-  registerStatusCommand(program);
-  registerReadTableCommand(program);
-  registerSyncCommands(program);
-  registerSchemaCommand(program);
-  registerDoctorCommand(program);
-  registerContractCommand(program);
+  registerCreateCommand(program, catalog);
+  registerSearchCommand(program, catalog);
+  registerSearchByTagCommand(program, catalog);
+  registerListChildrenCommand(program, catalog);
+  registerReadCommand(program, catalog);
+  registerInspectCommand(program, catalog);
+  registerAssertCommand(program, catalog);
+  registerPowerupCommand(program, catalog);
+  registerCompositeCommands(program, catalog);
+  registerTaskCommands(program, catalog);
+  registerBatchCommand(program, catalog, version);
+  registerReviewStatsCommand(program, catalog);
+  registerOutlineCommand(program, catalog);
+  registerTodoCommand(program, catalog);
+  registerSdkCommands(program, catalog);
+  registerGetMediaCommand(program, catalog);
+  registerUpdateCommand(program, catalog);
+  registerInsertChildrenCommand(program, catalog);
+  registerMoveNoteCommand(program, catalog);
+  registerSetDocumentStatusCommand(program, catalog);
+  registerReplaceChildrenCommand(program, catalog);
+  registerUpdateTagsCommand(program, catalog);
+  registerSetPropertyCommand(program, catalog);
+  registerJournalCommand(program, catalog);
+  registerStatusCommand(program, catalog);
+  registerReadTableCommand(program, catalog);
+  registerSyncCommands(program, catalog);
+  registerSchemaCommand(program, catalog);
+  registerDoctorCommand(program, catalog);
+  registerContractCommand(program, catalog);
 
   bindRuntime(program, runtime);
   return program;

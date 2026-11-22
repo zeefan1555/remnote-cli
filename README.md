@@ -113,8 +113,9 @@ remnote-cli schema search
 capabilities, receipt statuses, and exit codes. Use `--schema flashcards`,
 `--schema wiki`, or `--schema workspace` to inspect one plan schema.
 
-`schema` lists every command with its risk and Bridge requirement. Pass the
-command path to get positional arguments, options and defaults:
+`schema` lists every command path and whether it is a navigation group or an
+executable action. Pass the command path to get positional arguments, options,
+defaults and action-only risk or Bridge metadata:
 
 ```bash
 remnote-cli schema
@@ -123,8 +124,9 @@ remnote-cli schema powerup get
 remnote-cli schema sdk rem
 ```
 
-Command options come directly from the registered Commander command, so schema
-and help cannot drift. See [Command schema](docs/guides/command-schema.md).
+Every command is registered through one command catalog. Its Commander instance
+and schema projection come from that registration, so schema and help cannot
+drift. See [Command schema](docs/guides/command-schema.md).
 
 See [Doctor](docs/guides/doctor.md) for status meanings and offline behavior.
 
