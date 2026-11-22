@@ -37,6 +37,15 @@ function isKnownOption(command: Command, token: string): boolean {
   );
 }
 
+function isKnownShortFlagCluster(command: Command, token: string): boolean {
+  if (!/^-[^-].+/.test(token) || token.includes('=')) return false;
+  return [...token.slice(1)].every((name) => {
+    if (name === 'h') return true;
+    const option = optionsOf(command).find((candidate) => candidate.short === `-${name}`);
+    return option !== undefined && !option.required && !option.optional;
+  });
+}
+
 function hasDescendantOption(command: Command, token: string): boolean {
   const name = token.replace(/^-+/, '').split('=', 1)[0];
   return command.commands.some(
@@ -104,6 +113,7 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
   for (let index = 0; index < args.length; index++) {
     const token = args[index];
     if (token === '--') break;
+    if (token === 'help') return undefined;
     if (token === '--help' || token === '-h') return undefined;
     if (token.startsWith('-')) {
       if (isKnownOption(command, token)) {
@@ -113,6 +123,7 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
         }
         continue;
       }
+      if (isKnownShortFlagCluster(command, token)) continue;
       if (command.commands.length > 0 && hasDescendantOption(command, token)) {
         return groupFailure(
           command,
@@ -152,9 +163,14 @@ export function rootHelpRequested(program: Command, argv: string[]): boolean {
   const args = argv.slice(2);
   for (let index = 0; index < args.length; index++) {
     const token = args[index];
+    if (token === 'help') return false;
     if (token === '--help' || token === '-h') return true;
     if (token === '--version' || token === '-V') return false;
     if (token.startsWith('-')) {
+      if (isKnownShortFlagCluster(program, token)) {
+        if (token.includes('h')) return true;
+        continue;
+      }
       if (!isKnownOption(program, token)) return false;
       if (optionTakesValue(program, token)) {
         if (index + 1 >= args.length) return false;

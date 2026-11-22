@@ -61,7 +61,8 @@ export function createProgram(
     .option('--text', 'Human-readable output')
     .option('--kb-id <id>', 'Require this exact active knowledge base')
     .option('--allow-destructive', 'Explicitly allow destructive SDK operations')
-    .option('--verbose', 'Enable verbose stderr logging');
+    .option('--verbose', 'Enable verbose stderr logging')
+    .helpCommand('help [command]', 'display help for command');
 
   registerCreateCommand(program, catalog);
   registerSearchCommand(program, catalog);
@@ -104,17 +105,21 @@ export async function runProgram(
   argv: string[],
   runtime: CliRuntime = runtimeFor(program)
 ): Promise<number> {
+  const normalizedArgv = [...argv];
+  if (normalizedArgv.length > 3 && normalizedArgv.at(-1) === 'help') {
+    normalizedArgv[normalizedArgv.length - 1] = '--help';
+  }
   try {
-    const boundaryFailure = commandBoundaryFailure(program, argv);
+    const boundaryFailure = commandBoundaryFailure(program, normalizedArgv);
     if (boundaryFailure) {
       runtime.failure(boundaryFailure);
       return finishProgram(runtime);
     }
-    if (rootHelpRequested(program, argv)) {
+    if (rootHelpRequested(program, normalizedArgv)) {
       program.outputHelp();
       return finishProgram(runtime);
     }
-    await program.parseAsync(argv);
+    await program.parseAsync(normalizedArgv);
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) {
       runtime.setExitCode(0);

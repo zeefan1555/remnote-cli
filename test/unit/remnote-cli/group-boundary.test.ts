@@ -21,6 +21,13 @@ describe('command group boundaries', () => {
     });
   });
 
+  it('accepts combined short flags without rejecting them as a group flag', async () => {
+    const result = await runCliForTest(['-Vh']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('Usage: remnote-cli');
+  });
+
   it.each(['powerup', 'flashcards', 'wiki', 'outline', 'todo', 'verify', 'sync', 'sdk'])(
     'shows help for bare group %s',
     async (group) => {
@@ -35,6 +42,17 @@ describe('command group boundaries', () => {
     const result = await runCliForTest(['sync', '--text']);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('Usage: remnote-cli sync');
+  });
+
+  it.each([
+    { name: 'root help', args: ['help'] },
+    { name: 'targeted root help', args: ['help', 'todo'] },
+    { name: 'group help', args: ['flashcards', 'help'] },
+  ])('delegates $name to Commander', async ({ args }) => {
+    const result = await runCliForTest(args);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('Usage: remnote-cli');
   });
 
   it('returns ranked machine-readable suggestions for a typo', async () => {
