@@ -1,7 +1,7 @@
 # Read Receipts: Context and Scoped Verification
 
-`remnote-cli context --request <path|->` and
-`remnote-cli verify scope --expect <path|->` compose official SDK calls locally. Input is UTF-8 JSON from a file or
+`remnote-cli rem context --request <path|->` and
+`remnote-cli rem verify scope --expect <path|->` compose official SDK calls locally. Input is UTF-8 JSON from a file or
 stdin, limited to 100 KiB. These commands never mutate RemNote, look up dates, create daily documents, or cache KB data.
 
 ## Inspection request
@@ -19,7 +19,7 @@ stdin, limited to 100 KiB. These commands never mutate RemNote, look up dates, c
 - Tag selectors inspect the tag and collect independent inverse membership as `taggedRemIds`
 
 ```bash
-remnote-cli context --request /tmp/context.json
+remnote-cli rem context --request /tmp/context.json
 ```
 
 ## Receipt and privacy

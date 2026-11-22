@@ -27,13 +27,13 @@ hierarchical tag namespace whose child tags act as practical discoverability fac
 
 Proposed tag changes should be written to a review file first, with each candidate note, exact Rem ID, proposed tags,
 and short evidence. After human approval, the client applies tags with exact tag Rem IDs, for example through
-`remnote-cli update-tags`, avoiding ambiguous name-based tag lookup.
+`remnote-cli rem tags update`, avoiding ambiguous name-based tag lookup.
 
-When a tag carries required properties, use `remnote-cli set-property` after applying the tag. Pass the target Rem ID, the
+When a tag carries required properties, use `remnote-cli rem property set` after applying the tag. Pass the target Rem ID, the
 owning tag/table Rem ID, and the property Rem ID exactly; for dropdown/select values, pass the option Rem ID as a
 `rem_reference` value.
 
-Finally, the client audits the write with strict tag lookup, such as `remnote-cli search-by-tag` in direct tagged-result
+Finally, the client audits the write with strict tag lookup, such as `remnote-cli rem search-by-tag` in direct tagged-result
 mode, and records an applied log so future sessions can continue from durable state instead of chat history. This
 pattern works especially well when false negatives are more costly than occasional broad matches, because the purpose
 is better future retrieval and cross-navigation.

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-11-22
+
+### Changed
+
+- Replace flat business commands with stable resource groups: `rem`, `card`, `wiki`, `table`, `todo`, `media`, `journal`, `sync`, diagnostics and `sdk`.
+- Move `--kb-id` and `--allow-destructive` from the root parser to the live or destructive leaf commands that use them.
+- Rename batch inner-command argv examples and all CLI docs to the new paths without executable legacy aliases.
+
+### Added
+
+- Add guarded `rem delete` with preview, exact-title guard, destructive authorization, durable journal and absence readback.
+
+### Removed
+
+- Old flat paths now fail as unknown commands and include a canonical replacement suggestion where one exists.
+
 ## [0.28.4] - 2026-11-22
 
 ### Added

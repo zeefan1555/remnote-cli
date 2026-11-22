@@ -167,8 +167,12 @@ function configureCommandTree(command: Command, runtime: CliRuntime): void {
 
 export function bindRuntime(command: Command, runtime: CliRuntime): void {
   runtimes.set(command, runtime);
-  command.hook('preAction', () => {
-    runtime.setFormat(command.opts().text ? 'text' : 'json');
+  command.hook('preAction', (_thisCommand, actionCommand) => {
+    runtime.setFormat(actionCommand.optsWithGlobals().text ? 'text' : 'json');
+    for (const key of ['kbId', 'allowDestructive']) {
+      const value = actionCommand.getOptionValue(key);
+      if (value !== undefined) command.setOptionValue(key, value);
+    }
   });
   configureCommandTree(command, runtime);
   for (const child of command.commands) runtimes.set(child, runtime);

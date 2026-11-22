@@ -2931,6 +2931,83 @@ describe('RemAdapter', () => {
     });
   });
 
+  describe('deleteRem', () => {
+    it('previews deletion without mutating the Rem', async () => {
+      const rem = plugin.addTestRem('delete_preview', 'Preview delete');
+      const result = await adapter.deleteRem({ remId: rem._id });
+
+      expect(result).toEqual({
+        remId: rem._id,
+        title: 'Preview delete',
+        dryRun: true,
+        changed: false,
+        verified: false,
+        scope: 'rem-and-descendants',
+      });
+      expect(await plugin.rem.findOne(rem._id)).toBe(rem);
+    });
+
+    it('requires the destructive gate and an exact title for apply', async () => {
+      const rem = plugin.addTestRem('delete_guard', 'Delete guard');
+      await expect(
+        adapter.deleteRem({ remId: rem._id, dryRun: false, expectedTitle: rem._id })
+      ).rejects.toThrow('Current title does not match expectedTitle');
+
+      await expect(
+        adapter.deleteRem({ remId: rem._id, dryRun: false, expectedTitle: 'Delete guard' })
+      ).rejects.toThrow('--allow-destructive');
+      expect(await plugin.rem.findOne(rem._id)).toBe(rem);
+    });
+
+    it('deletes one exact Rem, verifies absence and journals the outcome', async () => {
+      adapter.updateSettings({ acceptReplaceOperation: true });
+      const rem = plugin.addTestRem('delete_apply', 'Delete apply');
+      plugin.addTestRem('delete_child', 'Child').setParent(rem);
+      vi.spyOn(plugin.rem, 'findOne')
+        .mockResolvedValueOnce(rem)
+        .mockResolvedValue(undefined as never);
+
+      const result = await adapter.deleteRem({
+        remId: rem._id,
+        dryRun: false,
+        expectedTitle: 'Delete apply',
+      });
+
+      expect(result).toMatchObject({
+        remId: rem._id,
+        dryRun: false,
+        changed: true,
+        verified: true,
+      });
+      expect(await plugin.rem.findOne(rem._id)).toBeUndefined();
+      expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^destructive:/),
+        expect.objectContaining({ state: 'applied', remIds: [rem._id] })
+      );
+    });
+
+    it('reports a destructive unknown outcome when removal fails', async () => {
+      adapter.updateSettings({ acceptReplaceOperation: true });
+      const rem = plugin.addTestRem('delete_unknown', 'Delete unknown');
+      vi.spyOn(plugin.rem, 'findOne').mockResolvedValueOnce(rem);
+      vi.spyOn(rem, 'remove').mockRejectedValueOnce(new Error('Native removal failed'));
+
+      await expect(
+        adapter.deleteRem({
+          remId: rem._id,
+          dryRun: false,
+          expectedTitle: 'Delete unknown',
+        })
+      ).rejects.toThrow(
+        /Native removal failed\. Destructive write may have partially completed or completed/
+      );
+      expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^destructive:/),
+        expect.objectContaining({ state: 'unknown', remIds: [rem._id] })
+      );
+    });
+  });
+
   describe('listChildren', () => {
     it('should list direct children only with paging', async () => {
       const parent = plugin.addTestRem('list_parent', 'Parent');

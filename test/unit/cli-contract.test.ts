@@ -29,7 +29,12 @@ describe('generated CLI contract', () => {
     );
     expect(contract.requiredCapabilities.wiki.pages).toContain('namespace:rem.createRem');
     expect(contract.bridgeActions).not.toContain('transaction_begin');
-    expect(contract.sdkFacts).toEqual({ schemaVersion: 1 });
+    expect(contract.sdkFacts).toEqual({
+      schemaVersion: 1,
+      sdkVersion: '0.0.46',
+      catalogHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      capabilities: expect.any(Number),
+    });
     expect(contract.output).toMatchObject({
       schemaVersion: 2,
       successStream: 'stdout',
@@ -40,14 +45,14 @@ describe('generated CLI contract', () => {
     expect(contract.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: 'search',
+          path: 'rem search',
           kind: 'action',
           risk: 'read',
           bridge: 'required',
         }),
         expect.objectContaining({ path: 'sync', kind: 'group' }),
         expect.objectContaining({
-          path: 'move-note',
+          path: 'rem move',
           kind: 'action',
           risk: 'destructive',
           bridge: 'required',

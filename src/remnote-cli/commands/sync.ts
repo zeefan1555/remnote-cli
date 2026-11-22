@@ -33,6 +33,8 @@ interface SyncOptions {
   editableRootId?: string;
   contentFile?: string;
   expectedFileHash?: string;
+  kbId?: string;
+  allowDestructive?: boolean;
 }
 
 interface SelectionOptions {
@@ -48,6 +50,11 @@ function pathOptions(command: Command): Command {
     (value: string, paths: string[]) => paths.concat(value),
     [] as string[]
   );
+}
+
+function businessOptions(options: SyncOptions): SyncOptions {
+  const { kbId: _kbId, allowDestructive: _allowDestructive, ...rest } = options;
+  return rest;
 }
 
 export function registerSyncCommands(program: Command, catalog: CommandCatalog): void {
@@ -74,6 +81,7 @@ export function registerSyncCommands(program: Command, catalog: CommandCatalog):
   ): Promise<void> {
     const format = program.opts().text ? 'text' : 'json';
     const client = createCommandClient(program);
+    const commandOptions = businessOptions(options);
     try {
       let result: unknown;
       if (name === 'read') result = await readWorkspace(directory, path!);
@@ -89,19 +97,24 @@ export function registerSyncCommands(program: Command, catalog: CommandCatalog):
       else if (name === 'import') {
         const kbId = program.opts().kbId;
         if (!kbId) throw new Error('sync import requires explicit --kb-id');
-        result = await importWorkspace(directory, kbId, () => client.workspaceBackend(), options);
+        result = await importWorkspace(
+          directory,
+          kbId,
+          () => client.workspaceBackend(),
+          commandOptions
+        );
       } else if (name === 'recover')
         result = await recoverWorkspace(directory, () => client.workspaceBackend());
       else if (name === 'resume')
         result = await resumeWorkspace(
           directory,
           () => client.workspaceBackend(),
-          options.planHash!
+          commandOptions.planHash!
         );
       else if (name === 'status') result = await statusWorkspace(directory);
       else if (name === 'lint') result = await lintWorkspace(directory);
-      else if (name === 'diff') result = await diffWorkspace(directory, options);
-      else result = await pushWorkspace(directory, () => client.workspaceBackend(), options);
+      else if (name === 'diff') result = await diffWorkspace(directory, commandOptions);
+      else result = await pushWorkspace(directory, () => client.workspaceBackend(), commandOptions);
       const failed =
         (result as { ok?: boolean; complete?: boolean }).ok === false ||
         (result as { complete?: boolean }).complete === false;

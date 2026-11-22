@@ -152,9 +152,13 @@ function registerCommonSearchOptions(command: Command): Command {
   return registerPaginationOptions(configured);
 }
 
-export function registerSearchCommand(program: Command, catalog: CommandCatalog): void {
+export function registerSearchCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   registerCommonSearchOptions(
-    catalog.action(program, 'search <query>', {
+    catalog.action(parent, 'search <query>', {
       description: 'Search for notes in RemNote',
       risk: 'read',
       bridge: 'required',
@@ -202,10 +206,14 @@ export function registerSearchCommand(program: Command, catalog: CommandCatalog)
     });
 }
 
-export function registerSearchByTagCommand(program: Command, catalog: CommandCatalog): void {
+export function registerSearchByTagCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   registerCommonSearchOptions(
     catalog
-      .action(program, 'search-by-tag', {
+      .action(parent, 'search-by-tag', {
         description: 'Search notes by exact tag Rem ID with ancestor-context resolution',
         risk: 'read',
         bridge: 'required',
@@ -252,9 +260,13 @@ export function registerSearchByTagCommand(program: Command, catalog: CommandCat
   });
 }
 
-export function registerListChildrenCommand(program: Command, catalog: CommandCatalog): void {
+export function registerListChildrenCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   const command = catalog
-    .action(program, 'list-children <parent-rem-id...>', {
+    .action(parent, 'list <parent-rem-id...>', {
       description: 'List direct child Rems under one or more parents',
       risk: 'read',
       bridge: 'required',

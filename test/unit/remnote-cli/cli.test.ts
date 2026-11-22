@@ -19,16 +19,29 @@ describe('createProgram', () => {
 
     expect(commandNames).not.toContain('daemon');
     expect(commandNames).not.toContain('pair');
-    expect(commandNames).toContain('create');
-    expect(commandNames).toContain('search');
-    expect(commandNames).toContain('search-by-tag');
-    expect(commandNames).not.toContain('search-tag');
-    expect(commandNames).toContain('read');
-    expect(commandNames).toContain('inspect');
-    expect(commandNames).toContain('assert');
-    expect(commandNames).toContain('powerup');
-    expect(commandNames).toContain('get-media');
-    expect(commandNames).toContain('outline');
+    expect(commandNames).toEqual(
+      expect.arrayContaining([
+        'rem',
+        'card',
+        'wiki',
+        'table',
+        'todo',
+        'media',
+        'journal',
+        'sync',
+        'batch',
+        'status',
+        'doctor',
+        'schema',
+        'contract',
+        'sdk',
+      ])
+    );
+    expect(
+      commandNames.filter((name) =>
+        ['create', 'read', 'update', 'search', 'read-table', 'get-media'].includes(name)
+      )
+    ).toEqual([]);
     expect(commandNames).toContain('todo');
     expect(commandNames).toContain('sdk');
     expect(commandNames).not.toContain('sdk-capabilities');
@@ -43,9 +56,6 @@ describe('createProgram', () => {
     expect(sdkCommandNames).toContain('rich-text');
     expect(sdkCommandNames).toContain('window');
     expect(sdkCommandNames).toHaveLength(21);
-    expect(commandNames).toContain('update');
-    expect(commandNames).toContain('set-document-status');
-    expect(commandNames).toContain('journal');
     expect(commandNames).toContain('status');
     expect(commandNames).toContain('contract');
   });
@@ -57,7 +67,8 @@ describe('createProgram', () => {
     expect(optionNames).toContain('--json');
     expect(optionNames).toContain('--text');
     expect(optionNames).not.toContain('--port');
-    expect(optionNames).toContain('--kb-id');
+    expect(optionNames).not.toContain('--kb-id');
+    expect(optionNames).not.toContain('--allow-destructive');
     expect(optionNames).not.toContain('--mcp-url');
     expect(optionNames).not.toContain('--control-port');
     expect(optionNames).toContain('--verbose');
@@ -72,13 +83,15 @@ describe('createProgram', () => {
   it('rejects the removed search-by-tag transport timeout flag', async () => {
     const program = createProgram('test');
     program.commands
-      .find((command) => command.name() === 'search-by-tag')!
+      .find((command) => command.name() === 'rem')!
+      .commands.find((command) => command.name() === 'search-by-tag')!
       .exitOverride()
       .configureOutput({ writeErr: () => {} });
     await expect(
       program.parseAsync([
         'node',
         'remnote-cli',
+        'rem',
         'search-by-tag',
         '--tag-id',
         'tag',
@@ -89,7 +102,7 @@ describe('createProgram', () => {
   });
 
   it('returns one structured usage error without leaking Commander stderr', async () => {
-    const result = await runCliForTest(['read', '--depth']);
+    const result = await runCliForTest(['rem', 'read', '--depth']);
 
     expect(result.exitCode).toBe(EXIT.USAGE);
     expect(result.stdout).toBe('');

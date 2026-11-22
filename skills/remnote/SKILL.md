@@ -36,7 +36,7 @@ See [installation](../../docs/guides/installation.md) and
 
 For machine-readable schemas and capability requirements while RemNote is closed,
 run `remnote-cli contract`, `remnote-cli schema` or
-`remnote-cli schema search`. Select one plan schema with
+`remnote-cli schema rem.search`. Select one plan schema with
 `remnote-cli contract --schema flashcards|wiki|workspace`.
 
 ## Output Contract
@@ -80,7 +80,7 @@ Each entry includes `ok`, `exitCode`, and either `result` or a
 structured `error`. Help, `--version`, and usage errors stay inside that
 envelope and later commands still run. Put `--allow-destructive` on
 `batch` when an inner `sdk` call needs it.
-`read` and `list-children` also accept multiple Rem IDs in one call. One ID keeps
+`rem read` and `rem children list` also accept multiple Rem IDs in one call. One ID keeps
 the previous JSON object; several IDs return `results` keyed by ID.
 Prefer file payloads (`--content-file`, `--plan`, `--request`,
 `--expect`, `--file`) over shell interpolation. Ordinary native content payloads
@@ -98,21 +98,21 @@ remnote-cli status
 remnote-cli doctor --text
 remnote-cli doctor --offline
 remnote-cli schema
-remnote-cli search "topic" --parent-id ROOT_ID
-remnote-cli search "topic" --all
-remnote-cli search "topic" --cards-only --include-review-stats
-remnote-cli search-by-tag --tag-id TAG_ID
-remnote-cli read REM_ID --content-mode structured --depth 1 --child-limit 100
-remnote-cli read REM_ID OTHER_ID --content-mode none
-remnote-cli list-children ROOT_ID
-remnote-cli list-children ROOT_ID --all
-remnote-cli list-children ROOT_ID OTHER_ID
+remnote-cli rem search "topic" --parent-id ROOT_ID
+remnote-cli rem search "topic" --all
+remnote-cli rem search "topic" --cards-only --include-review-stats
+remnote-cli rem search-by-tag --tag-id TAG_ID
+remnote-cli rem read REM_ID --content-mode structured --depth 1 --child-limit 100
+remnote-cli rem read REM_ID OTHER_ID --content-mode none
+remnote-cli rem children list ROOT_ID
+remnote-cli rem children list ROOT_ID --all
+remnote-cli rem children list ROOT_ID OTHER_ID
 remnote-cli batch --file commands.jsonl
-remnote-cli inspect REM_ID --fields elements,markdown,tags,parent,portal,cards
-remnote-cli assert --file rules.json --strict
-remnote-cli powerup get --rem REM_ID --powerup sp --slot q
-remnote-cli review-stats REM_ID
-remnote-cli read-table --rem-id TABLE_ID
+remnote-cli rem inspect REM_ID --fields elements,markdown,tags,parent,portal,cards
+remnote-cli rem assert --file rules.json --strict
+remnote-cli rem powerup get --rem REM_ID --powerup sp --slot q
+remnote-cli card review-stats REM_ID
+remnote-cli table read --rem-id TABLE_ID
 remnote-cli todo list --tag-id TAG_ID
 remnote-cli sdk capabilities --status supported --mode read --text
 remnote-cli sdk rem object-get-children-rem --help
@@ -147,12 +147,12 @@ native transactions are disabled. Atomic update/replace/property/TODO apply comm
 are unavailable. Additive create/journal/insert commands retain per-attempt recovery
 keys and known IDs on failure; they are not atomic and must not be blindly replayed.
 
-Use friendly commands when available: `create`, `update`, `insert-children`,
-`update-tags`, `set-property` and `journal`.
-`set-document-status`, `move-note`, `outline`, `todo complete|reopen`,
-`flashcards apply` and `wiki apply` default to preview and need `--apply`.
+Use friendly commands when available: `rem create`, `rem update`,
+`rem children insert`, `rem tags update`, `rem property set` and `journal append`.
+`rem document status`, `rem move`, `rem outline`, `todo complete|reopen`,
+`card apply` and `wiki apply` default to preview and need `--apply`.
 
-Prefer additive `insert-children`. `replace-children` destroys child identities
+Prefer additive `rem children insert`. `rem children replace` destroys child identities
 and requires `--allow-destructive`; an empty payload clears content children.
 Use stale-state guards where provided. Existing title/card/document identity and
 exact tag/property semantics are documented in the
@@ -160,8 +160,8 @@ exact tag/property semantics are documented in the
 
 ## Task Plans
 
-Use `context --request FILE` for bounded exact-ID metadata, then
-`verify scope --expect FILE` for fresh proof. Raw text appears only for explicit
+Use `rem context --request FILE` for bounded exact-ID metadata, then
+`rem verify scope --expect FILE` for fresh proof. Raw text appears only for explicit
 `remIds`; request it narrowly. Required subtree and inverse-tag scopes must not
 be narrowed merely to pass. Incomplete evidence is not success.
 Read a successful receipt from `data`. Failed or incomplete receipts use
@@ -169,7 +169,7 @@ Read a successful receipt from `data`. Failed or incomplete receipts use
 `error.type=unknown_outcome` with exit 5 is reserved for a write whose affected
 objects cannot be identified.
 
-`flashcards apply` and `wiki apply` take an inner schema-1 plan and stable
+`card apply` and `wiki apply` take an inner schema-1 plan and stable
 `--idempotency-key`. Preview first, then authorized apply. Existing text patches
 require the current raw-text hash. Semantic receipt keys identify returned Rems;
 never infer IDs from creation order. Multi-card flashcards do not receive the
@@ -186,7 +186,7 @@ Optional flashcard `tags` declares tags by semantic key, e.g.
 `"tags":{"root":[],"card:a":["TAG_ID"]}`; then omit `homeRootId`/`tagRemId`. Every
 created Rem ends with exactly its declared tags (none if undeclared), and a
 `parentRemId` topic need not carry a tag. Declare final tags in the plan instead of
-`update-tags` afterwards, which breaks same-key replay. New-card plans without
+`rem tags update` afterwards, which breaks same-key replay. New-card plans without
 `tags` use the implicit HOME tag plus `homeRootId` and `tagRemId`.
 Flashcard questions accept a plain string or `TextSegments`. Use `{"remId":"EXACT_ID"}`
 segments for native references. A plain string containing `[[` or `]]` is invalid.

@@ -55,8 +55,12 @@ async function resolveRequiredContent(options: {
   return content;
 }
 
-export function registerInsertChildrenCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'insert-children <parent-rem-id>', {
+export function registerInsertChildrenCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'insert <parent-rem-id>', {
     description: 'Insert child Rems; newly created non-leaf Rems are collapsed automatically',
     risk: 'write',
     bridge: 'required',
@@ -112,8 +116,12 @@ export function registerInsertChildrenCommand(program: Command, catalog: Command
     });
 }
 
-export function registerReplaceChildrenCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'replace-children <parent-rem-id>', {
+export function registerReplaceChildrenCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'replace <parent-rem-id>', {
     description: 'Replace direct children; newly created non-leaf Rems are collapsed automatically',
     risk: 'destructive',
     bridge: 'required',
@@ -155,8 +163,12 @@ export function registerReplaceChildrenCommand(program: Command, catalog: Comman
     });
 }
 
-export function registerUpdateTagsCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'update-tags <rem-id>', {
+export function registerUpdateTagsCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'update <rem-id>', {
     description: 'Add or remove tags by exact tag Rem ID',
     risk: 'write',
     bridge: 'required',
@@ -186,8 +198,12 @@ export function registerUpdateTagsCommand(program: Command, catalog: CommandCata
     });
 }
 
-export function registerSetPropertyCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'set-property <rem-id>', {
+export function registerSetPropertyCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'set <rem-id>', {
     description: 'Set or clear a tag/table property value by exact IDs',
     risk: 'write',
     bridge: 'required',
@@ -252,8 +268,12 @@ export function registerSetPropertyCommand(program: Command, catalog: CommandCat
     });
 }
 
-export function registerMoveNoteCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'move-note <rem-id>', {
+export function registerMoveNoteCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'move <rem-id>', {
     description: 'Move a Rem and its subtree under a new parent',
     risk: 'destructive',
     bridge: 'required',
@@ -306,8 +326,58 @@ export function registerMoveNoteCommand(program: Command, catalog: CommandCatalo
     });
 }
 
-export function registerSetDocumentStatusCommand(program: Command, catalog: CommandCatalog): void {
-  const subprogram = catalog.action(program, 'set-document-status <rem-id>', {
+export function registerDeleteCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'delete <rem-id>', {
+    description: 'Preview or delete one exact Rem and all of its descendants',
+    risk: 'destructive',
+    bridge: 'required',
+  });
+  const validate = (value: string) => validateNotFlag(value, subprogram);
+
+  subprogram
+    .option('--apply', 'Delete the Rem. Without this flag, the command runs as a preview.')
+    .option('--expected-title <text>', 'Require this exact current title when applying', validate)
+    .addHelpText(
+      'after',
+      [
+        '',
+        'Preview is the default and performs no writes.',
+        'Apply requires --allow-destructive and --expected-title, then reads the exact Rem ID back to confirm absence.',
+        'Deletion removes the Rem and all of its descendants.',
+      ].join('\n')
+    )
+    .action(async (remId: string, opts: { apply?: boolean; expectedTitle?: string }) => {
+      const format: OutputFormat = program.opts().text ? 'text' : 'json';
+      const client = createCommandClient(program);
+      try {
+        const result = await client.execute('delete_rem', {
+          remId,
+          dryRun: opts.apply !== true,
+          ...(opts.expectedTitle === undefined ? {} : { expectedTitle: opts.expectedTitle }),
+        });
+        emit(
+          program,
+          formatResult(result, format, (data) => {
+            const value = data as Record<string, unknown>;
+            return `${value.dryRun === true ? 'Preview deletion' : 'Deleted'} ${String(value.title)} [${String(value.remId)}]`;
+          })
+        );
+      } finally {
+        await client.close();
+      }
+    });
+}
+
+export function registerSetDocumentStatusCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const subprogram = catalog.action(parent, 'status <rem-id>', {
     description: 'Preview or set document status on an existing Rem',
     risk: 'write',
     bridge: 'required',

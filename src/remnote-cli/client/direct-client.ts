@@ -33,6 +33,7 @@ const operations = {
   set_document_status: ['setDocumentStatus', schemas.SetDocumentStatusSchema],
   insert_children: ['insertChildren', schemas.InsertChildrenSchema],
   move_note: ['moveNote', schemas.MoveNoteSchema],
+  delete_rem: ['deleteRem', schemas.DeleteRemSchema],
   replace_children: ['replaceChildren', schemas.ReplaceChildrenSchema],
   update_tags: ['updateTags', schemas.UpdateTagsSchema],
   set_property: ['setProperty', schemas.SetPropertySchema],

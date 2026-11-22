@@ -3,7 +3,7 @@
 Flashcard and Wiki task composition runs locally in `remnote-cli` using the plugin's SDK gateway.
 
 ```bash
-remnote-cli flashcards apply --plan /tmp/cards.json --idempotency-key cards-batch-1
+remnote-cli card apply --plan /tmp/cards.json --idempotency-key cards-batch-1
 remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-batch-1
 ```
 

@@ -86,9 +86,13 @@ function formatRulesText(data: unknown): string {
     .join('\n');
 }
 
-export function registerInspectCommand(program: Command, catalog: CommandCatalog): void {
+export function registerInspectCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   catalog
-    .action(program, 'inspect [ids...]', {
+    .action(parent, 'inspect [ids...]', {
       description: 'Read generic Rem state as JSON in one bridge session',
       risk: 'read',
       bridge: 'required',
@@ -112,8 +116,8 @@ export function registerInspectCommand(program: Command, catalog: CommandCatalog
         'Explicit rawCards includes native id/remId/type, creation, full repetition history, and scheduling; unavailable values stay null. Explicit isDocument/isFolder and native audit is* fields return each actual SDK boolean. These audit fields and rawCards are not included by default.',
         'Rule failures are reported in assertions and exit 0 unless --strict. assertions.ok is false when a rule fails, the read is incomplete, or the read has errors. Usage and connection errors still exit 1.',
         'Examples:',
-        '  remnote-cli inspect REM_ID --fields elements,markdown,isCardItem,hasCardStructure',
-        '  remnote-cli inspect --from-file ids.txt --descendants 1 --expect rules.json --strict',
+        '  remnote-cli rem inspect REM_ID --fields elements,markdown,isCardItem,hasCardStructure',
+        '  remnote-cli rem inspect --from-file ids.txt --descendants 1 --expect rules.json --strict',
       ].join('\n')
     )
     .action(async (ids: string[], opts) => {
@@ -157,9 +161,13 @@ export function registerInspectCommand(program: Command, catalog: CommandCatalog
     });
 }
 
-export function registerAssertCommand(program: Command, catalog: CommandCatalog): void {
+export function registerAssertCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   catalog
-    .action(program, 'assert', {
+    .action(parent, 'assert', {
       description: 'Evaluate generic rules against inspect JSON',
       risk: 'read',
       bridge: 'optional',

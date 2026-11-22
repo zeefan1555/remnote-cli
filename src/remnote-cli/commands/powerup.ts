@@ -4,8 +4,12 @@ import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerPowerupCommand(program: Command, catalog: CommandCatalog): void {
-  const powerup = catalog.group(program, 'powerup', { description: 'Read powerup slots by code' });
+export function registerPowerupCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
+  const powerup = catalog.group(parent, 'powerup', { description: 'Read powerup slots by code' });
   catalog
     .action(powerup, 'get', {
       description: 'Read one powerup slot from a Rem',
@@ -24,7 +28,7 @@ export function registerPowerupCommand(program: Command, catalog: CommandCatalog
         'Search portal: f becomes Filter and q becomes Query. A name, a custom powerup, or an unknown code is sent unchanged, and the host error is returned.',
         "The plugin passes those arguments through. This command does not rewrite them in the bridge, call a private RPC, or open RemNote's database.",
         'getPowerupByCode("sp") can return undefined for a built-in powerup. Read the slot on the Rem that carries it.',
-        'Example: remnote-cli powerup get --rem REM_ID --powerup sp --slot f',
+        'Example: remnote-cli rem powerup get --rem REM_ID --powerup sp --slot f',
       ].join('\n')
     )
     .action(async (opts: { rem: string; powerup: string; slot: string; as: string }) => {

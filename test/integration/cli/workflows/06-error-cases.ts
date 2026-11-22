@@ -22,7 +22,7 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       // Current contract requires either title or content
-      const result = await ctx.cli.runExpectError(['create']);
+      const result = await ctx.cli.runExpectError(['rem', 'create']);
       assertTruthy(result.exitCode !== 0, 'should have non-zero exit code');
       steps.push({
         label: 'Create rejects with neither title nor content',
@@ -43,7 +43,7 @@ export async function errorCasesWorkflow(
   {
     const start = Date.now();
     try {
-      const result = await ctx.cli.runExpectError(['read', 'nonexistent-id-00000']);
+      const result = await ctx.cli.runExpectError(['rem', 'read', 'nonexistent-id-00000']);
       assertTruthy(result.exitCode !== 0, 'should have non-zero exit code');
       steps.push({
         label: 'Read nonexistent note returns error',
@@ -65,6 +65,7 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       const result = await ctx.cli.runExpectError([
+        'rem',
         'update',
         'nonexistent-id-00000',
         '--title',
@@ -91,7 +92,7 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       // Empty query might return empty results or an error — both are acceptable
-      const result = await ctx.cli.run(['search', '']);
+      const result = await ctx.cli.run(['rem', 'search', '']);
       // Either success with empty results or an error — both OK
       assertTruthy(result.exitCode === 0 || result.exitCode === 1, 'should exit with 0 or 1');
       steps.push({
@@ -114,6 +115,7 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       const result = await ctx.cli.runExpectError([
+        'rem',
         'update',
         'conflict-id-00000',
         '--append',
@@ -141,7 +143,13 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       // Missing value for --title causes it to swallow --content
-      const result = await ctx.cli.runExpectError(['create', '--title', '--content', 'Body']);
+      const result = await ctx.cli.runExpectError([
+        'rem',
+        'create',
+        '--title',
+        '--content',
+        'Body',
+      ]);
       assertTruthy(result.exitCode !== 0, 'should have non-zero exit code');
       assertContains(
         result.stderr,
@@ -167,7 +175,7 @@ export async function errorCasesWorkflow(
   {
     const start = Date.now();
     try {
-      const result = await ctx.cli.runExpectError(['update', 'abc123', '--title']);
+      const result = await ctx.cli.runExpectError(['rem', 'update', 'abc123', '--title']);
       assertTruthy(result.exitCode !== 0, 'should have non-zero exit code');
       assertContains(result.stderr, '--title', 'stderr should mention missing title value');
       steps.push({
@@ -190,6 +198,7 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       const result = await ctx.cli.runExpectError([
+        'rem',
         'update',
         'validation-only-rem-id',
         '--add-aliases',
@@ -223,7 +232,12 @@ export async function errorCasesWorkflow(
     const start = Date.now();
     try {
       // Missing value for --content causes it to swallow --no-timestamp
-      const result = await ctx.cli.runExpectError(['journal', '--content', '--no-timestamp']);
+      const result = await ctx.cli.runExpectError([
+        'journal',
+        'append',
+        '--content',
+        '--no-timestamp',
+      ]);
       assertTruthy(result.exitCode !== 0, 'should have non-zero exit code');
       assertContains(
         result.stderr,

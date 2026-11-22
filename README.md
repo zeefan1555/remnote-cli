@@ -37,6 +37,21 @@ capabilities and unknown write outcomes. `unknown_outcome` is never safe to retr
 automatically. Text mode remains human-readable and strips terminal control
 characters. See [Output and errors](docs/guides/output-and-errors.md).
 
+## Commands
+
+The root commands group stable product domains:
+
+```text
+Knowledge: rem, card, wiki, table, todo, media, journal
+Workflows: sync
+Diagnostics: batch, status, doctor, schema, contract
+Raw SDK: sdk
+```
+
+Most work uses `rem <action>`. Examples include `rem read`, `rem search`,
+`rem children list`, `rem property set`, and guarded `rem delete`. SDK group and
+method help is available offline; execution still checks the live Bridge catalog.
+
 ## Requirements
 
 - Node.js 22.13.0 or newer. Node.js 24 is recommended.
@@ -106,7 +121,7 @@ You can inspect the machine-readable interface without RemNote running:
 remnote-cli --help
 remnote-cli contract
 remnote-cli schema
-remnote-cli schema search
+remnote-cli schema rem.search
 ```
 
 `contract` prints protocol, output and error contracts, plan schemas, required SDK
@@ -119,8 +134,8 @@ defaults and action-only risk or Bridge metadata:
 
 ```bash
 remnote-cli schema
-remnote-cli schema search
-remnote-cli schema powerup get
+remnote-cli schema rem.search
+remnote-cli schema rem.powerup.get
 remnote-cli schema sdk rem
 ```
 
@@ -132,32 +147,32 @@ See [Doctor](docs/guides/doctor.md) for status meanings and offline behavior.
 
 ## Find and read notes
 
-`search` returns result IDs and metadata. Use `--content-mode` when you need note content in the search response.
+`rem search` returns result IDs and metadata. Use `--content-mode` when you need note content in the search response.
 
 ```bash
-remnote-cli search "project plan" --limit 10 --text
-remnote-cli search "project plan" --content-mode structured --depth 2
-remnote-cli read REM_ID --content-mode structured --depth 2
+remnote-cli rem search "project plan" --limit 10 --text
+remnote-cli rem search "project plan" --content-mode structured --depth 2
+remnote-cli rem read REM_ID --content-mode structured --depth 2
 ```
 
-Pass one or more IDs to `read`. Use `--content-mode none` to read metadata only, or `--include-media-metadata` to find image IDs for `get-media`.
+Pass one or more IDs to `rem read`. Use `--content-mode none` to read metadata only, or `--include-media-metadata` to find image IDs for `media get`.
 
 Page through large searches with the returned `nextCursor`. Reuse the cursor with
 the same query and scope. Use `--all` when the complete snapshot is required.
 
 ```bash
-remnote-cli search "project plan" --all
-remnote-cli search "project plan" --all --max-pages 20 --page-delay 100
+remnote-cli rem search "project plan" --all
+remnote-cli rem search "project plan" --all --max-pages 20 --page-delay 100
 ```
 
 `--all` follows every page by default. `--max-pages` is an explicit safety
 bound, not a hidden default. The result contains a `paging` object with
 `complete`, `pages`, `itemCount` and `nextCursor` when the result is incomplete.
-The same options work for `search-by-tag` and single-parent `list-children`.
+The same options work for `rem search-by-tag` and single-parent `rem children list`.
 
 ## Gather bounded context
 
-`context` reads a bounded set of Rems in one bridge session. Save the request as JSON, then pass it by path or through stdin.
+`rem context` reads a bounded set of Rems in one bridge session. Save the request as JSON, then pass it by path or through stdin.
 
 ```json
 {
@@ -171,28 +186,28 @@ The same options work for `search-by-tag` and single-parent `list-children`.
 ```
 
 ```bash
-remnote-cli context --request /tmp/context-request.json
-printf '%s\n' '{"schemaVersion":1,"remIds":["REM_ID"],"maxRems":1000,"ancestorDepth":20}' | remnote-cli context --request -
+remnote-cli rem context --request /tmp/context-request.json
+printf '%s\n' '{"schemaVersion":1,"remIds":["REM_ID"],"maxRems":1000,"ancestorDepth":20}' | remnote-cli rem context --request -
 ```
 
 Raw titles, text, and aliases are included only for IDs in `remIds`. Subtree and tag selectors return structural metadata and content hashes.
 
-Use `verify scope` when a later step needs fresh proof for a parent, tag, type, child list, references, or card scope. It exits zero only when the requested evidence is complete and passes.
+Use `rem verify scope` when a later step needs fresh proof for a parent, tag, type, child list, references, or card scope. It exits zero only when the requested evidence is complete and passes.
 
 ```bash
-remnote-cli verify scope --expect /tmp/verify-request.json --summary
+remnote-cli rem verify scope --expect /tmp/verify-request.json --summary
 ```
 
 See [Read receipts](docs/guides/read-receipts.md) for request fields and receipt meanings.
 
 ## Inspect state
 
-`inspect` returns generic Rem state in one connection. Select only the fields you need.
+`rem inspect` returns generic Rem state in one connection. Select only the fields you need.
 
 ```bash
-remnote-cli inspect REM_ID --fields markdown,tags,cards,children
-remnote-cli inspect REM_ID --fields elements,isCardItem,hasCardStructure
-remnote-cli inspect REM_ID --expect /tmp/rules.json --strict
+remnote-cli rem inspect REM_ID --fields markdown,tags,cards,children
+remnote-cli rem inspect REM_ID --fields elements,isCardItem,hasCardStructure
+remnote-cli rem inspect REM_ID --expect /tmp/rules.json --strict
 ```
 
 Rules can compare exact fields, counts, hashes, and nested values. Without `--strict`, rule failures still appear in the result but do not change the exit code. Use [state verification](docs/guides/state-verification.md) to author reusable rules.
@@ -219,8 +234,8 @@ Flashcard plans target existing IDs. Save an inner `schemaVersion: 1` plan, prev
 ```
 
 ```bash
-remnote-cli flashcards apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22
-remnote-cli flashcards apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22 --apply --summary
+remnote-cli card apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22
+remnote-cli card apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22 --apply --summary
 ```
 
 Preview is the default. `--apply` performs writes. The CLI does not choose or validate the calendar date. Pass an existing daily document and recheck the intended date before a new batch or after midnight.
@@ -268,7 +283,7 @@ Create the first baseline in a new, empty vault with an exact knowledge-base ID 
 
 ```bash
 mkdir -m 700 /PRIVATE/remnote-vault
-remnote-cli --kb-id KB_ID sync import /PRIVATE/remnote-vault --root-id ROOT_ID
+remnote-cli sync import /PRIVATE/remnote-vault --kb-id KB_ID --root-id ROOT_ID
 ```
 
 After import, preview and apply changes from either side:
@@ -295,7 +310,7 @@ File removal is not a delete command. Native deletion is a separate, bounded ope
 
 ```bash
 remnote-cli sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID
-remnote-cli --allow-destructive sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID --apply --plan-hash HASH
+remnote-cli sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID --allow-destructive --apply --plan-hash HASH
 ```
 
 The first command previews. The second requires an explicitly authorized deletion, `--allow-destructive`, `--apply`, and the preview's `--plan-hash`.
@@ -338,10 +353,10 @@ allowlist, live catalog hash, target requirements or destructive approval.
 
 ## Knowledge-base boundary
 
-`--kb-id` is an optional global guard. Put it before the command name.
+`--kb-id` is available on live leaf commands. Put it on the executable command.
 
 ```bash
-remnote-cli --kb-id KB_ID search "architecture" --text
+remnote-cli rem search "architecture" --kb-id KB_ID --text
 ```
 
 The option checks the Bridge's active knowledge base. It does not switch knowledge bases. A mismatch is an error. `sync import` requires `--kb-id` because it creates the first binding.
@@ -354,7 +369,7 @@ If a command reports a knowledge-base mismatch, read the target from the live `s
 
 If a command reports `CLI port occupied`, run queued commands with `batch` or wait for the active command to finish. Do not stop an unknown process that uses the local listener.
 
-If `update`, `replace-children`, `set-property`, or a TODO state change fails before mutation, the installed SDK does not provide a safe abort path for that operation. Use a supported preview or follow the command help. Do not retry a partial batch.
+If `rem update`, `rem children replace`, `rem property set`, or a TODO state change fails before mutation, the installed SDK does not provide a safe abort path for that operation. Use a supported preview or follow the command help. Do not retry a partial batch.
 
 For detailed diagnosis, see [troubleshooting](docs/guides/remnote-cli-troubleshooting.md).
 

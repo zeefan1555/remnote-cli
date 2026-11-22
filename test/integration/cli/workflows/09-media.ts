@@ -32,6 +32,7 @@ export async function mediaWorkflow(
   try {
     const readStart = Date.now();
     const read = (await ctx.cli.runExpectSuccess([
+      'rem',
       'read',
       mediaRemId,
       '--content-mode',
@@ -55,7 +56,8 @@ export async function mediaWorkflow(
     const outputPath = join(tempDir, 'retrieved-image');
     const getStart = Date.now();
     const result = (await ctx.cli.runExpectSuccess([
-      'get-media',
+      'media',
+      'get',
       mediaRemId,
       '--field',
       mediaField,

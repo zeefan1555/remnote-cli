@@ -43,9 +43,13 @@ function formatReviewStatsText(data: unknown): string {
     .join('\n');
 }
 
-export function registerReviewStatsCommand(program: Command, catalog: CommandCatalog): void {
+export function registerReviewStatsCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   catalog
-    .action(program, 'review-stats', {
+    .action(parent, 'review-stats', {
       description: 'Read native review facts for cards in an exact Rem scope',
       risk: 'read',
       bridge: 'required',

@@ -92,9 +92,13 @@ function formatManyText(data: unknown, formatOne: (value: unknown) => string): s
     .join('\n\n');
 }
 
-export function registerReadCommand(program: Command, catalog: CommandCatalog): void {
+export function registerReadCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   catalog
-    .action(program, 'read <rem-id...>', {
+    .action(parent, 'read <rem-id...>', {
       description: 'Read one or more notes by Rem ID',
       risk: 'read',
       bridge: 'required',

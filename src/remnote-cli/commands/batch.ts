@@ -242,7 +242,7 @@ export function registerBatchCommand(
       'after',
       [
         '',
-        'Each command is {"argv":["read","REM_ID"]}. argv is the command and its arguments, not the remnote-cli program name.',
+        'Each command is {"argv":["rem","read","REM_ID"]}. argv is the command and its arguments, not the remnote-cli program name.',
         'A JSON array, a {commands:[...]} object, one JSON object, or JSONL (one object per line) are accepted.',
         'Connection flags (--kb-id, --allow-destructive, --verbose) belong on batch. Inner commands must not read stdin.',
         'batch --allow-destructive authorizes inner sdk calls. An inner argv that repeats the flag is rejected.',

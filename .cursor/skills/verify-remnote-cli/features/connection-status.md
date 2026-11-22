@@ -1,25 +1,23 @@
 # 连接状态
 
-用户运行 `status` 确认插件已连上；未连上时得到明确错误而不是挂起。
+用户运行 `doctor --offline` 确认安装和状态，不要求 RemNote 在线。
 
 ## Sub-features
 
-- `status-timeout` 无插件时 15 秒超时，退出码 1，提示打开 RemNote 检查配对。
-- `status-connected` 插件在线时返回知识库与版本（真机）。
+- `doctor-offline` 不构造 client，Bridge 检查标记为 skip。
+- `status-connected` 是单独的 live 真机检查。
 
 ## How to get to it (user POV)
 
-- `remnote-cli status`
+- `remnote-cli doctor --offline`
 
 ## Driving it with verify.sh
 
 Preconditions:
 
-- 已有临时配对文件（脚本缺失时自动 `pair`），端口上没有插件。
-
-- **未连接。** `verify.sh status`。约 15 秒后日志 `Plugin connection timed out` 与 `[exit 1]`。
-- **已连接（真机）。** RemNote 打开且插件已配对时运行 `remnote-cli status`；box 上记 not-run。
+- **离线。** `verify.sh offline`。exit 0，输出 `offline: true`，Bridge check 为 skip。
+- **已连接（真机）。** RemNote 打开时运行 `remnote-cli status`；box 上记 not-run。
 
 ## Gotchas
 
-- `--port` 指定一个空闲端口，避免撞上机器上正在用的真实 CLI 端口。
+- 离线检查不证明 Bridge、权限、KB 绑定或写入。

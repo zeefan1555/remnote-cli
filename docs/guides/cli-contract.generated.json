@@ -2,7 +2,10 @@
   "schemaVersion": 2,
   "protocolVersion": 2,
   "sdkFacts": {
-    "schemaVersion": 1
+    "schemaVersion": 1,
+    "sdkVersion": "0.0.46",
+    "catalogHash": "ef2861ab2b1f6f063030e27a1c7c9939945c334d0a4c6eb0ad42a2788dc7f11a",
+    "capabilities": 286
   },
   "bridgeActions": [
     "get_status",
@@ -801,19 +804,32 @@
   },
   "commands": [
     {
-      "path": "assert",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "optional",
-      "dynamic": false
-    },
-    {
       "path": "batch",
       "kind": "action",
       "helpSection": "diagnostics",
       "risk": "destructive",
       "bridge": "conditional",
+      "dynamic": false
+    },
+    {
+      "path": "card",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "card apply",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "card review-stats",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
       "dynamic": false
     },
     {
@@ -825,27 +841,11 @@
       "dynamic": false
     },
     {
-      "path": "context",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
       "path": "contract",
       "kind": "action",
       "helpSection": "diagnostics",
       "risk": "read",
       "bridge": "none",
-      "dynamic": false
-    },
-    {
-      "path": "create",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
       "dynamic": false
     },
     {
@@ -857,12 +857,12 @@
       "dynamic": false
     },
     {
-      "path": "flashcards",
+      "path": "journal",
       "kind": "group",
       "helpSection": "knowledge"
     },
     {
-      "path": "flashcards apply",
+      "path": "journal append",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "write",
@@ -870,7 +870,12 @@
       "dynamic": false
     },
     {
-      "path": "get-media",
+      "path": "media",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "media get",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "write",
@@ -878,23 +883,25 @@
       "dynamic": false
     },
     {
-      "path": "insert-children",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
-      "dynamic": false
+      "path": "rem",
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
-      "path": "inspect",
+      "path": "rem assert",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "read",
-      "bridge": "required",
+      "bridge": "optional",
       "dynamic": false
     },
     {
-      "path": "journal",
+      "path": "rem children",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem children insert",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "write",
@@ -902,7 +909,7 @@
       "dynamic": false
     },
     {
-      "path": "list-children",
+      "path": "rem children list",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "read",
@@ -919,7 +926,7 @@
       }
     },
     {
-      "path": "move-note",
+      "path": "rem children replace",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "destructive",
@@ -927,12 +934,15 @@
       "dynamic": false
     },
     {
-      "path": "outline",
-      "kind": "group",
-      "helpSection": "knowledge"
+      "path": "rem context",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
-      "path": "outline collapse",
+      "path": "rem create",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "write",
@@ -940,44 +950,7 @@
       "dynamic": false
     },
     {
-      "path": "outline expand",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "powerup",
-      "kind": "group",
-      "helpSection": "knowledge"
-    },
-    {
-      "path": "powerup get",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "read",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "read-table",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "replace-children",
+      "path": "rem delete",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "destructive",
@@ -985,7 +958,151 @@
       "dynamic": false
     },
     {
-      "path": "review-stats",
+      "path": "rem document",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem document status",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem inspect",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem move",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem outline",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem outline collapse",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem outline expand",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem powerup",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem powerup get",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem property",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem property set",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem read",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem search",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false,
+      "pagination": {
+        "kind": "cursor",
+        "automatic": true,
+        "arguments": [
+          "all",
+          "max-pages",
+          "page-delay"
+        ]
+      }
+    },
+    {
+      "path": "rem search-by-tag",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false,
+      "pagination": {
+        "kind": "cursor",
+        "automatic": true,
+        "arguments": [
+          "all",
+          "max-pages",
+          "page-delay"
+        ]
+      }
+    },
+    {
+      "path": "rem tags",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem tags update",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem update",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "rem verify",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "rem verify scope",
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "read",
@@ -3405,56 +3522,6 @@
       "dynamic": false
     },
     {
-      "path": "search",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "required",
-      "dynamic": false,
-      "pagination": {
-        "kind": "cursor",
-        "automatic": true,
-        "arguments": [
-          "all",
-          "max-pages",
-          "page-delay"
-        ]
-      }
-    },
-    {
-      "path": "search-by-tag",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
-      "bridge": "required",
-      "dynamic": false,
-      "pagination": {
-        "kind": "cursor",
-        "automatic": true,
-        "arguments": [
-          "all",
-          "max-pages",
-          "page-delay"
-        ]
-      }
-    },
-    {
-      "path": "set-document-status",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "set-property",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
       "path": "status",
       "kind": "action",
       "helpSection": "diagnostics",
@@ -3572,6 +3639,19 @@
       "dynamic": false
     },
     {
+      "path": "table",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "table read",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
       "path": "todo",
       "kind": "group",
       "helpSection": "knowledge"
@@ -3597,35 +3677,6 @@
       "kind": "action",
       "helpSection": "knowledge",
       "risk": "write",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "update",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "update-tags",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "write",
-      "bridge": "required",
-      "dynamic": false
-    },
-    {
-      "path": "verify",
-      "kind": "group",
-      "helpSection": "knowledge"
-    },
-    {
-      "path": "verify scope",
-      "kind": "action",
-      "helpSection": "knowledge",
-      "risk": "read",
       "bridge": "required",
       "dynamic": false
     },

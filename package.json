@@ -1,7 +1,7 @@
 {
   "name": "remnote-cli",
   "private": true,
-  "version": "0.28.4",
+  "version": "0.29.0",
   "description": "Direct CLI automation for RemNote through the RemNote CLI Bridge plugin",
   "type": "module",
   "main": "dist/remnote-cli/index.js",
@@ -29,7 +29,8 @@
     "check:sdk-constants": "node scripts/generate-sdk-constants.mjs --check",
     "generate:cli-contract": "node --import tsx scripts/generate-cli-contract.mjs",
     "check:cli-contract": "node --import tsx scripts/generate-cli-contract.mjs --check",
-    "sync:sdk-facts": "node scripts/sync-sdk-facts.mjs"
+    "sync:sdk-facts": "node scripts/sync-sdk-facts.mjs",
+    "check:command-references": "node scripts/check-command-references.mjs ."
   },
   "author": "zeefan1555",
   "contributors": [

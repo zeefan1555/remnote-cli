@@ -136,6 +136,7 @@ async function ensureIntegrationParentNote(
 
   for (const query of INTEGRATION_PARENT_SEARCH_QUERIES) {
     const searchResult = (await cli.runExpectSuccess([
+      'rem',
       'search',
       query,
       '--limit',
@@ -186,6 +187,7 @@ async function ensureIntegrationParentNote(
   }
 
   const parentTagSearch = (await cli.runExpectSuccess([
+    'rem',
     'search',
     INTEGRATION_PARENT_TAG,
     '--limit',
@@ -205,6 +207,7 @@ async function ensureIntegrationParentNote(
   const byTagResult =
     typeof parentTagRemId === 'string'
       ? ((await cli.runExpectSuccess([
+          'rem',
           'search-by-tag',
           '--tag-id',
           parentTagRemId,
@@ -249,10 +252,11 @@ async function ensureIntegrationParentNote(
     };
   }
 
-  const tagResult = (await cli.runExpectSuccess(['create', INTEGRATION_PARENT_TAG])) as Record<
-    string,
-    unknown
-  >;
+  const tagResult = (await cli.runExpectSuccess([
+    'rem',
+    'create',
+    INTEGRATION_PARENT_TAG,
+  ])) as Record<string, unknown>;
   const tagRemIds = Array.isArray(tagResult.remIds) ? (tagResult.remIds as string[]) : [];
   const tagRemId = tagRemIds[0];
   if (typeof tagRemId !== 'string') {
@@ -262,6 +266,7 @@ async function ensureIntegrationParentNote(
   }
 
   const createResult = (await cli.runExpectSuccess([
+    'rem',
     'create',
     INTEGRATION_PARENT_TITLE,
     '--tag-ids',
@@ -345,11 +350,18 @@ async function main(): Promise<void> {
   {
     const resolution = await resolvePersistentIntegrationFixtures({
       readTableByRemId: (remId, limit) =>
-        cli.runExpectSuccess(['read-table', '--rem-id', remId, '--limit', String(limit)]),
+        cli.runExpectSuccess(['table', 'read', '--rem-id', remId, '--limit', String(limit)]),
       searchByTitle: (title) =>
-        cli.runExpectSuccess(['search', title, '--limit', '150', '--content-mode', 'none']),
+        cli.runExpectSuccess(['rem', 'search', title, '--limit', '150', '--content-mode', 'none']),
       readNoteWithMedia: (remId) =>
-        cli.runExpectSuccess(['read', remId, '--content-mode', 'none', '--include-media-metadata']),
+        cli.runExpectSuccess([
+          'rem',
+          'read',
+          remId,
+          '--content-mode',
+          'none',
+          '--include-media-metadata',
+        ]),
     });
     state.fixtures = resolution.fixtures;
     state.fixtureIssues = resolution.issues;

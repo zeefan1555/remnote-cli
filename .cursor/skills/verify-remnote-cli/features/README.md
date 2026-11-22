@@ -5,7 +5,7 @@
 ## 基线
 
 - 仓库根运行 `.cursor/skills/verify-remnote-cli/scripts/verify.sh`；node ≥ 22.13。
-- 临时 `REMNOTE_CLI_CONFIG` 与空闲回环端口，不碰真实配对文件和已安装的 remnote-cli。
+- 临时 `REMNOTE_CLI_STATE_HOME`，不碰真实状态目录和已安装的 remnote-cli。
 - 用 `dist/remnote-cli/index.js` 驱动。
 
 ## 证明与跳过
@@ -16,6 +16,5 @@
 ## Features
 
 - [CLI 表面](./cli-surface.md)：构建、单测、版本和帮助。
-- [配对](./pairing.md)：`pair` 生成私有配对文件。
-- [连接状态](./connection-status.md)：`status` 在已配对/未连接时的行为。
-- [闪卡计划与写入](./flashcards.md)：`flashcards apply` 预览与受控写入（真机）。
+- [连接状态](./connection-status.md)：`doctor --offline` 的离线边界。
+- [闪卡计划与写入](./flashcards.md)：`card apply` 预览与受控写入（真机）。

@@ -6,9 +6,9 @@ cursor pagination.
 ## Complete snapshots
 
 ```bash
-remnote-cli search "project plan" --all
-remnote-cli search-by-tag --tag-id TAG_ID --all
-remnote-cli list-children PARENT_ID --all
+remnote-cli rem search "project plan" --all
+remnote-cli rem search-by-tag --tag-id TAG_ID --all
+remnote-cli rem children list PARENT_ID --all
 ```
 
 `--all` follows every page by default. It does not impose a hidden page or item
@@ -17,7 +17,7 @@ limit.
 ## Explicit bounds
 
 ```bash
-remnote-cli search "project plan" --all --max-pages 20 --page-delay 100
+remnote-cli rem search "project plan" --all --max-pages 20 --page-delay 100
 ```
 
 `--max-pages` is an operator-selected safety bound and requires `--all`.

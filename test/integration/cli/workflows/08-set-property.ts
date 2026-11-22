@@ -1,7 +1,7 @@
 /**
  * Workflow 08: Set Property
  *
- * Validates remnote-cli set-property through the shared Automation Bridge Test
+ * Validates remnote-cli rem property set through the shared Automation Bridge Test
  * Tag fixture. The fixture must be a property-bearing tag/table with an
  * automation-level property.
  */
@@ -51,7 +51,8 @@ async function findVerifiedPropertyRow(
 
   do {
     const page = (await ctx.cli.runExpectSuccess([
-      'read-table',
+      'table',
+      'read',
       '--rem-id',
       tableRemId,
       '--properties',
@@ -146,7 +147,9 @@ export async function setPropertyWorkflow(
       automationLevelRenderedValue = `${propertyValuePrefix} [[${state.integrationParentTitle}]]`;
 
       const result = (await ctx.cli.runExpectSuccess([
-        'set-property',
+        'rem',
+        'property',
+        'set',
         targetRemId,
         '--tag-id',
         propertyFixtureTagRemId,

@@ -4,9 +4,13 @@ import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerReadTableCommand(program: Command, catalog: CommandCatalog): void {
+export function registerReadTableCommand(
+  program: Command,
+  catalog: CommandCatalog,
+  parent: Command
+): void {
   catalog
-    .action(program, 'read-table', {
+    .action(parent, 'read', {
       description: 'Read an Advanced Table (columns and row data)',
       risk: 'read',
       bridge: 'required',

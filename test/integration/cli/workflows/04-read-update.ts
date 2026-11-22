@@ -64,6 +64,7 @@ async function resolveExpectedSearchByTagTarget(
   taggedRemId: string
 ): Promise<string> {
   const tagged = (await ctx.cli.runExpectSuccess([
+    'rem',
     'read',
     taggedRemId,
     '--content-mode',
@@ -78,6 +79,7 @@ async function resolveExpectedSearchByTagTarget(
 
   while (currentParentId) {
     const parent = (await ctx.cli.runExpectSuccess([
+      'rem',
       'read',
       currentParentId,
       '--content-mode',
@@ -186,7 +188,7 @@ export async function readUpdateWorkflow(
   {
     const start = Date.now();
     try {
-      const result = (await ctx.cli.runExpectSuccess(['read', state.noteAId])) as Record<
+      const result = (await ctx.cli.runExpectSuccess(['rem', 'read', state.noteAId])) as Record<
         string,
         unknown
       >;
@@ -224,6 +226,7 @@ export async function readUpdateWorkflow(
     try {
       if (acceptWriteOperations) {
         const created = (await ctx.cli.runExpectSuccess([
+          'rem',
           'create',
           '--title',
           `[CLI-TEST] Document Status Candidate ${ctx.runId}`,
@@ -238,6 +241,7 @@ export async function readUpdateWorkflow(
         const candidateRemId = (created.remIds as string[])[0];
 
         const before = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           candidateRemId,
           '--content-mode',
@@ -247,7 +251,9 @@ export async function readUpdateWorkflow(
         const oldRemType = before.remType as string;
 
         const dryRun = (await ctx.cli.runExpectSuccess([
-          'set-document-status',
+          'rem',
+          'document',
+          'status',
           candidateRemId,
           '--document',
           '--expected-old-rem-type',
@@ -259,6 +265,7 @@ export async function readUpdateWorkflow(
         assertEqual(dryRun.newIsDocument as boolean, true, 'dry-run should preview document');
 
         const afterDryRun = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           candidateRemId,
           '--content-mode',
@@ -271,7 +278,9 @@ export async function readUpdateWorkflow(
         );
 
         const applied = (await ctx.cli.runExpectSuccess([
-          'set-document-status',
+          'rem',
+          'document',
+          'status',
           candidateRemId,
           '--document',
           '--expected-old-rem-type',
@@ -283,6 +292,7 @@ export async function readUpdateWorkflow(
         assertEqual(applied.newIsDocument as boolean, true, 'apply should mark document');
 
         const reread = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           candidateRemId,
           '--content-mode',
@@ -298,7 +308,9 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
-          'set-document-status',
+          'rem',
+          'document',
+          'status',
           state.noteAId as string,
           '--document',
         ]);
@@ -332,6 +344,7 @@ export async function readUpdateWorkflow(
     let debugResult: Record<string, unknown> | null = null;
     try {
       const result = (await ctx.cli.runExpectSuccess([
+        'rem',
         'read',
         state.noteBId,
         '--content-mode',
@@ -402,6 +415,7 @@ export async function readUpdateWorkflow(
       if (acceptWriteOperations) {
         assertTruthy(typeof state.noteBId === 'string', 'update title reference target remId');
         const result = (await ctx.cli.runExpectSuccess([
+          'rem',
           'update',
           state.noteAId as string,
           '--title',
@@ -410,6 +424,7 @@ export async function readUpdateWorkflow(
         assertHasField(result, 'remIds', 'update note A title');
 
         const reread = await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           state.noteAId as string,
           '--content-mode',
@@ -430,6 +445,7 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
+          'rem',
           'update',
           state.noteAId as string,
           '--title',
@@ -467,6 +483,7 @@ export async function readUpdateWorkflow(
         const unicodeAlias = `한국어 ${ctx.runId}`;
         const addedAlias = `العنوان ${ctx.runId}`;
         const result = (await ctx.cli.runExpectSuccess([
+          'rem',
           'update',
           state.noteAId as string,
           '--add-aliases',
@@ -480,6 +497,7 @@ export async function readUpdateWorkflow(
         assertHasField(result, 'remIds', 'update note aliases');
 
         const reread = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           state.noteAId as string,
           '--content-mode',
@@ -504,6 +522,7 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
+          'rem',
           'update',
           state.noteAId as string,
           '--add-aliases',
@@ -542,7 +561,9 @@ export async function readUpdateWorkflow(
           `Appended by CLI integration test [[id:${state.noteBId}]]`,
           async (contentPath) =>
             (await ctx.cli.runExpectSuccess([
-              'insert-children',
+              'rem',
+              'children',
+              'insert',
               state.noteAId as string,
               '--content-file',
               contentPath,
@@ -555,6 +576,7 @@ export async function readUpdateWorkflow(
         assertTruthy(typeof insertedRemId === 'string', 'inserted exact reference child remId');
 
         const reread = await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           insertedRemId,
           '--content-mode',
@@ -575,7 +597,9 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
-          'insert-children',
+          'rem',
+          'children',
+          'insert',
           state.noteAId as string,
           '--content',
           'Should be blocked',
@@ -611,6 +635,7 @@ export async function readUpdateWorkflow(
     try {
       if (acceptWriteOperations) {
         const tagResult = (await ctx.cli.runExpectSuccess([
+          'rem',
           'create',
           '--title',
           tagVerificationName,
@@ -624,13 +649,16 @@ export async function readUpdateWorkflow(
           state.noteBId as string
         );
         const result = (await ctx.cli.runExpectSuccess([
-          'update-tags',
+          'rem',
+          'tags',
+          'update',
           state.noteBId as string,
           '--add-tag-ids',
           tagVerificationRemId,
         ])) as Record<string, unknown>;
         assertHasField(result, 'remIds', 'update note B add tags');
         const taggedSearch = (await ctx.cli.runExpectSuccess([
+          'rem',
           'search-by-tag',
           '--tag-id',
           tagVerificationRemId,
@@ -648,6 +676,7 @@ export async function readUpdateWorkflow(
         const match = taggedResults.find((r) => r.remId === expectedTargetRemId);
         assertTruthy(match, 'added tag should resolve to the tagged target');
         const taggedRead = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           state.noteBId as string,
           '--content-mode',
@@ -661,7 +690,9 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
-          'update-tags',
+          'rem',
+          'tags',
+          'update',
           state.noteBId as string,
           '--add-tag-ids',
           'blocked-tag-id',
@@ -700,13 +731,16 @@ export async function readUpdateWorkflow(
           state.noteBId as string
         );
         const result = (await ctx.cli.runExpectSuccess([
-          'update-tags',
+          'rem',
+          'tags',
+          'update',
           state.noteBId as string,
           '--remove-tag-ids',
           tagVerificationRemId as string,
         ])) as Record<string, unknown>;
         assertHasField(result, 'remIds', 'update note B remove tags');
         const taggedSearch = (await ctx.cli.runExpectSuccess([
+          'rem',
           'search-by-tag',
           '--tag-id',
           tagVerificationRemId as string,
@@ -724,6 +758,7 @@ export async function readUpdateWorkflow(
         const match = taggedResults.find((r) => r.remId === expectedTargetRemId);
         assertTruthy(!match, 'removed tag should no longer resolve to the tagged target');
         const taggedRead = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           state.noteBId as string,
           '--content-mode',
@@ -737,7 +772,9 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
-          'update-tags',
+          'rem',
+          'tags',
+          'update',
           state.noteBId as string,
           '--remove-tag-ids',
           'blocked-tag-id',
@@ -772,6 +809,7 @@ export async function readUpdateWorkflow(
       if (acceptReplaceOperation) {
         assertTruthy(typeof state.noteBId === 'string', 'replace content reference target remId');
         const parentBefore = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           state.noteAId as string,
           '--content-mode',
@@ -784,7 +822,9 @@ export async function readUpdateWorkflow(
           replaceBody,
           async (contentPath) =>
             (await ctx.cli.runExpectSuccess([
-              'replace-children',
+              'rem',
+              'children',
+              'replace',
               state.noteAId as string,
               '--content-file',
               contentPath,
@@ -793,6 +833,7 @@ export async function readUpdateWorkflow(
         assertHasField(result, 'remIds', 'replace note A');
 
         const reread = (await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           state.noteAId as string,
           '--content-mode',
@@ -815,6 +856,7 @@ export async function readUpdateWorkflow(
         const replacedRemId = (result.remIds as string[])[0];
         assertTruthy(typeof replacedRemId === 'string', 'replaced exact reference child remId');
         const rereadChild = await ctx.cli.runExpectSuccess([
+          'rem',
           'read',
           replacedRemId,
           '--content-mode',
@@ -834,7 +876,9 @@ export async function readUpdateWorkflow(
         });
       } else if (acceptWriteOperations) {
         const result = await ctx.cli.runExpectError([
-          'replace-children',
+          'rem',
+          'children',
+          'replace',
           state.noteAId as string,
           '--content',
           'Should be blocked',
@@ -851,7 +895,9 @@ export async function readUpdateWorkflow(
         });
       } else {
         const result = await ctx.cli.runExpectError([
-          'replace-children',
+          'rem',
+          'children',
+          'replace',
           state.noteAId as string,
           '--content',
           'Should be blocked',
@@ -886,6 +932,7 @@ export async function readUpdateWorkflow(
     const start = Date.now();
     try {
       const parentBefore = (await ctx.cli.runExpectSuccess([
+        'rem',
         'read',
         state.noteAId as string,
         '--content-mode',
@@ -894,7 +941,9 @@ export async function readUpdateWorkflow(
         'full',
       ])) as Record<string, unknown>;
       const result = (await ctx.cli.runExpectSuccess([
-        'replace-children',
+        'rem',
+        'children',
+        'replace',
         state.noteAId as string,
         '--content',
         '',
@@ -902,6 +951,7 @@ export async function readUpdateWorkflow(
       assertHasField(result, 'remIds', 'empty replace note A');
 
       const reread = (await ctx.cli.runExpectSuccess([
+        'rem',
         'read',
         state.noteAId as string,
         '--content-mode',
@@ -938,7 +988,7 @@ export async function readUpdateWorkflow(
   {
     const start = Date.now();
     try {
-      const result = (await ctx.cli.runExpectSuccess(['read', state.noteAId])) as Record<
+      const result = (await ctx.cli.runExpectSuccess(['rem', 'read', state.noteAId])) as Record<
         string,
         unknown
       >;
@@ -967,7 +1017,9 @@ export async function readUpdateWorkflow(
         markdownTree,
         async (contentPath) =>
           (await ctx.cli.runExpectSuccess([
-            'insert-children',
+            'rem',
+            'children',
+            'insert',
             state.noteAId as string,
             '--content-file',
             contentPath,
@@ -1003,7 +1055,9 @@ export async function readUpdateWorkflow(
         markdownTree,
         async (contentPath) =>
           (await ctx.cli.runExpectSuccess([
-            'replace-children',
+            'rem',
+            'children',
+            'replace',
             state.noteAId as string,
             '--content-file',
             contentPath,
@@ -1016,6 +1070,7 @@ export async function readUpdateWorkflow(
       );
 
       const reread = (await ctx.cli.runExpectSuccess([
+        'rem',
         'read',
         state.noteAId as string,
         '--content-mode',
@@ -1053,7 +1108,7 @@ export async function readUpdateWorkflow(
       };
       const receipt = (await withTempContentFile(
         JSON.stringify(inspect),
-        async (path) => await ctx.cli.runExpectSuccess(['context', '--request', path])
+        async (path) => await ctx.cli.runExpectSuccess(['rem', 'context', '--request', path])
       )) as Record<string, unknown>;
       assertEqual(receipt.complete, true, 'context complete');
       const objects = receipt.objects as Array<Record<string, unknown>>;
@@ -1076,7 +1131,7 @@ export async function readUpdateWorkflow(
       };
       const result = (await withTempContentFile(
         JSON.stringify(verify),
-        async (path) => await ctx.cli.runExpectSuccess(['verify', 'scope', '--expect', path])
+        async (path) => await ctx.cli.runExpectSuccess(['rem', 'verify', 'scope', '--expect', path])
       )) as Record<string, unknown>;
       assertEqual(result.status, 'passed', 'verify');
       const uncovered = {
@@ -1086,7 +1141,7 @@ export async function readUpdateWorkflow(
       };
       const failed = await withTempContentFile(
         JSON.stringify(uncovered),
-        async (path) => await ctx.cli.runExpectError(['verify', 'scope', '--expect', path])
+        async (path) => await ctx.cli.runExpectError(['rem', 'verify', 'scope', '--expect', path])
       );
       assertEqual(
         (failed.json as Record<string, unknown>).status,

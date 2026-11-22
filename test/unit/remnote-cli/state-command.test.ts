@@ -51,6 +51,7 @@ describe('inspect and assert commands', () => {
     vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
 
     const result = await runCliForTest([
+      'rem',
       'inspect',
       'root',
       '--fields',
@@ -94,6 +95,7 @@ describe('inspect and assert commands', () => {
     vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
 
     const result = await runCliForTest([
+      'rem',
       'inspect',
       'answer',
       'other',
@@ -136,11 +138,11 @@ describe('inspect and assert commands', () => {
     });
     vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
 
-    const strict = await runCliForTest(['assert', '--file', rules, '--strict']);
+    const strict = await runCliForTest(['rem', 'assert', '--file', rules, '--strict']);
     expect(strict.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
     expect(parseFailure(strict.stderr).subtype).toBe('strict_assertion_failed');
 
-    const normal = await runCliForTest(['assert', '--file', rules]);
+    const normal = await runCliForTest(['rem', 'assert', '--file', rules]);
     expect(normal.exitCode).toBe(0);
     expect((parseSuccess(normal.stdout) as RuleReport).rules?.[0]?.status).toBe('fail');
   });
@@ -166,11 +168,16 @@ describe('inspect and assert commands', () => {
     );
     const execute = vi.spyOn(DirectClient.prototype, 'execute');
 
-    const passed = await runCliForTest(['assert', '--file', rules, '--against', inspect]);
+    const passed = await runCliForTest(['rem', 'assert', '--file', rules, '--against', inspect]);
     expect(execute).not.toHaveBeenCalled();
     expect((parseSuccess(passed.stdout) as RuleReport).rules?.[0]?.status).toBe('pass');
 
-    const missing = await runCliForTest(['assert', '--file', join(directory, 'missing.json')]);
+    const missing = await runCliForTest([
+      'rem',
+      'assert',
+      '--file',
+      join(directory, 'missing.json'),
+    ]);
     expect(missing.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
     expect(missing.stderr).toContain('ENOENT');
   });
@@ -194,7 +201,7 @@ describe('inspect and assert commands', () => {
     });
     vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
 
-    const result = await runCliForTest(['assert', '--file', rules, '--strict']);
+    const result = await runCliForTest(['rem', 'assert', '--file', rules, '--strict']);
     const failure = parseFailure(result.stderr);
     const report = failure.details as RuleReport;
 
@@ -218,6 +225,7 @@ describe('inspect and assert commands', () => {
     });
 
     const result = await runCliForTest([
+      'rem',
       'powerup',
       'get',
       '--rem',
