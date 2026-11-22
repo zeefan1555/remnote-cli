@@ -218,17 +218,16 @@ RemNote TODO state lives on the Rem. The CLI uses `isTodo()`,
 not identify a native TODO.
 
 ```bash
-remnote-cli todo list
-remnote-cli todo list --status all
 remnote-cli todo list --root-id ROOT_ID
+remnote-cli todo list --root-id ROOT_ID --status all
 remnote-cli todo complete REM_ID
 remnote-cli todo complete REM_ID --apply
 remnote-cli todo reopen REM_ID --apply
 ```
 
-`todo list` shows unfinished native TODOs by default. Pass `--root-id` to scan
-one Rem and its descendants. Complete and reopen preview by default. Apply changes
-only the native status and then reads the exact Rem back.
+`todo list` scans one exact root Rem and its descendants. It shows unfinished
+native TODOs by default. Complete and reopen preview by default. Apply changes only
+the native status and then reads the exact Rem back.
 
 ## Create flashcards
 

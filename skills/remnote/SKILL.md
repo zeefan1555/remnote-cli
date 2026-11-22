@@ -116,20 +116,18 @@ RemNote TODO identity comes from the Rem's native `isTodo` flag. Status comes fr
 and does not change tag membership.
 
 ```bash
-remnote-cli todo list
-remnote-cli todo list --status finished
-remnote-cli todo list --status all
 remnote-cli todo list --root-id ROOT_ID
+remnote-cli todo list --root-id ROOT_ID --status finished
+remnote-cli todo list --root-id ROOT_ID --status all
 remnote-cli todo complete REM_ID
 remnote-cli todo complete REM_ID --apply
 remnote-cli todo reopen REM_ID
 remnote-cli todo reopen REM_ID --apply
 ```
 
-`todo list` scans native Rems and returns only those where `isTodo()` is true.
-It scans the whole accessible KB by default. Use `--root-id` for one exact
-subtree. The status defaults to `Unfinished`. `complete` and `reopen` preview
-by default and change only
+`todo list` scans one required exact root Rem and its descendants. It returns
+only Rems where `isTodo()` is true. The status defaults to `Unfinished`.
+`complete` and `reopen` preview by default and change only
 `getTodoStatus()` or `setTodoStatus()` on an existing native TODO. They do not
 add or remove tags.
 

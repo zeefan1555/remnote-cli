@@ -200,13 +200,12 @@ describe('command bridge action mapping', () => {
     });
     outlineSpy.mockRestore();
 
-    const listSpy = await runCommand(['todo', 'list', '--status', 'all']);
-    expect(listSpy).toHaveBeenCalledWith('list_todos', { status: 'all' });
+    const listSpy = await runCommand(['todo', 'list', '--root-id', 'root', '--status', 'all']);
+    expect(listSpy).toHaveBeenCalledWith('list_todos', {
+      status: 'all',
+      rootRemId: 'root',
+    });
     listSpy.mockRestore();
-
-    const defaultListSpy = await runCommand(['todo', 'list']);
-    expect(defaultListSpy).toHaveBeenCalledWith('list_todos', { status: 'unfinished' });
-    defaultListSpy.mockRestore();
 
     const scopedListSpy = await runCommand(['todo', 'list', '--root-id', 'root']);
     expect(scopedListSpy).toHaveBeenCalledWith('list_todos', {
@@ -214,6 +213,10 @@ describe('command bridge action mapping', () => {
       rootRemId: 'root',
     });
     scopedListSpy.mockRestore();
+
+    const missingRoot = await runCliForTest(['todo', 'list']);
+    expect(missingRoot.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(missingRoot.stderr).subtype).toBe('commander.missingMandatoryOptionValue');
 
     const completeSpy = await runCommand(['todo', 'complete', 'todo-1', '--apply']);
     expect(completeSpy).toHaveBeenCalledWith('update_todo', {

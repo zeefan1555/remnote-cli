@@ -13,7 +13,12 @@ import { verifiedCatalog, type CapabilityResult } from './sdk-capabilities.js';
 import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
 import { ReadSession } from './session.js';
-import { CliFailure, isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
+import {
+  CliFailure,
+  isConnectionMessage,
+  isWriteUncertainty,
+  unknownOutcomeFailure,
+} from '../output/errors.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
@@ -137,6 +142,12 @@ export class DirectClient {
     try {
       return await this.executeAction(action, payload);
     } catch (error) {
+      if (READ_ONLY_ACTIONS.has(action) && isWriteUncertainty(error)) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (isConnectionMessage(message))
+          throw new CliFailure('unavailable', 'bridge_unavailable', message, { cause: error });
+        throw new CliFailure('internal', 'read_failed', message, { cause: error });
+      }
       if (preview && isWriteUncertainty(error))
         throw new CliFailure(
           'unavailable',

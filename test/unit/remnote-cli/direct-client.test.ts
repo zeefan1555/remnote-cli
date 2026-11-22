@@ -88,10 +88,23 @@ describe('local business dispatch', () => {
     expect(wire.open).not.toHaveBeenCalled();
   });
 
+  it('reports read-only bridge failures without claiming an unknown write', async () => {
+    const plugin = wire.plugin as MockRemNotePlugin;
+    vi.spyOn(plugin.rem, 'findOne').mockRejectedValueOnce(
+      new Error('SDK array exceeds maximum length 1000; verify write outcome before retry')
+    );
+
+    await expect(client.execute('list_todos', { rootRemId: 'root' })).rejects.toMatchObject({
+      type: 'internal',
+      subtype: 'read_failed',
+    });
+  });
+
   it('invalidates command reads after a mutation but not after status', async () => {
     const invalidate = vi.spyOn(ReadSession.prototype, 'invalidateAll');
     await client.execute('get_status', {});
-    await client.execute('list_todos', {});
+    const root = (wire.plugin as MockRemNotePlugin).addTestRem('todo-root', 'Root');
+    await client.execute('list_todos', { rootRemId: root._id });
     expect(invalidate).not.toHaveBeenCalled();
     await client.execute('create_note', { title: 'Invalidate' });
     expect(invalidate).toHaveBeenCalledOnce();
