@@ -124,7 +124,7 @@ describe('batch command', () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-cli-batch-conn-'));
     directories.push(directory);
     vi.stubEnv('REMNOTE_CLI_STATE_HOME', directory);
-    const data = { sdkVersion: '0.0.46', capabilities: [] };
+    const data = { catalogSchemaVersion: 1 as const, sdkVersion: '0.0.46', capabilities: [] };
     const sdkCatalogHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
     wire.open.mockResolvedValue({
       pluginVersion: 'test',
@@ -215,13 +215,15 @@ describe('batch command', () => {
       id: 'rem:setText',
       target: 'rem',
       method: 'setText',
-      group: 'rem',
-      command: 'object-set-text',
       signatures: ['setText: (text: RichTextInterface) => Promise<void>'],
       status: 'supported',
       mode: 'write',
     };
-    const catalog = { sdkVersion: '0.0.46', capabilities: [capability] };
+    const catalog = {
+      catalogSchemaVersion: 1 as const,
+      sdkVersion: '0.0.46',
+      capabilities: [capability],
+    };
     const sdkCatalogHash = createHash('sha256').update(JSON.stringify(catalog)).digest('hex');
     const calls: Array<{ action: string; payload: Record<string, unknown> }> = [];
     vi.spyOn(DirectClient.prototype, 'execute').mockImplementation(async (action, payload) => {

@@ -116,6 +116,7 @@ remnote-cli read-table --rem-id TABLE_ID
 remnote-cli todo list --tag-id TAG_ID
 remnote-cli sdk capabilities --status supported --mode read --text
 remnote-cli sdk rem object-get-children-rem --help
+remnote-cli sdk call rem:getChildrenRem --target-id REM_ID --args-json '[]'
 ```
 
 JSON is preferred for ID-based follow-up work. Use shallow structured reads for
@@ -133,8 +134,11 @@ Add `--strict` when a failed rule or an incomplete read must fail with exit 4.
 Compare `cards[].hash` to a baseline file to see that card
 identity and history did not change. See
 [state verification](../../docs/guides/state-verification.md).
-SDK command help comes from the live catalog. Callback/private/stateful-handle
-methods are unsupported; do not substitute arbitrary JavaScript.
+SDK group and method help comes from the versioned facts shipped with the CLI, so
+it works while RemNote is closed. Execution checks the live catalog hash and support
+status. `sdk call <capability-id>` is the raw escape hatch for a supported live
+capability. Callback/private/stateful-handle methods are unsupported; do not
+substitute arbitrary JavaScript.
 
 ## Authorized Writes
 

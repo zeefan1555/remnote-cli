@@ -171,6 +171,7 @@ export class DirectClient {
         acceptWriteOperations: true,
         acceptReplaceOperation: this.options.allowDestructive === true,
         cliVersion: version,
+        catalogSchemaVersion: this.catalog!.catalogSchemaVersion,
         sdkVersion: this.catalog!.sdkVersion,
         sdkCatalogHash: this.catalog!.sdkCatalogHash,
         timings: {

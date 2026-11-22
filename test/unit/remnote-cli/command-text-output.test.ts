@@ -1,9 +1,14 @@
-vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js', () => ({
-  getSdkCapabilities: async (client: DirectClient) => ({
-    ...((await client.execute('get_sdk_capabilities', {})) as Record<string, unknown>),
-    sdkCatalogHash: 'a'.repeat(64),
-  }),
-}));
+vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/remnote-cli/client/sdk-capabilities.js')>();
+  return {
+    ...actual,
+    getSdkCapabilities: async (client: DirectClient) => ({
+      ...((await client.execute('get_sdk_capabilities', {})) as Record<string, unknown>),
+      sdkCatalogHash: 'a'.repeat(64),
+    }),
+  };
+});
 import { describe, expect, it, vi, type MockInstance } from 'vitest';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { runCliForTest } from '../../helpers/run-cli.js';
@@ -251,14 +256,13 @@ describe('command text output', () => {
 
   it('formats SDK capability discovery', async () => {
     const { output, executeSpy } = await runTextCommand(['sdk', 'capabilities'], {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
           id: 'rem:getText',
           target: 'rem',
           method: 'getText',
-          group: 'rem',
-          command: 'object-get-text',
           signatures: ['getText: () => Promise<RichTextInterface>'],
           status: 'supported',
           mode: 'read',
@@ -273,16 +277,15 @@ describe('command text output', () => {
     executeSpy.mockRestore();
   });
 
-  it('shows generated SDK group and method help', async () => {
+  it('shows generated SDK group and method help offline', async () => {
     const capabilities = {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
           id: 'rem:collapse',
           target: 'rem',
           method: 'collapse',
-          group: 'rem',
-          command: 'object-collapse',
           signatures: ['collapse: (portalId: string) => Promise<boolean>'],
           summary: 'Collapse this Rem in a portal.',
           status: 'supported',
@@ -294,17 +297,20 @@ describe('command text output', () => {
     const group = await runTextCommand(['sdk', 'rem'], capabilities);
     expect(group.output).toContain('Usage: remnote-cli sdk rem <command> [options]');
     expect(group.output).toContain('object-collapse');
+    expect(group.executeSpy).not.toHaveBeenCalled();
     group.executeSpy.mockRestore();
 
     const method = await runTextCommand(['sdk', 'rem', 'object-collapse', '--help'], capabilities);
     expect(method.output).toContain('Capability: rem:collapse');
-    expect(method.output).toContain('collapse: (portalId: string) => Promise<boolean>');
+    expect(method.output).toContain('collapse: (portal: RemId | RemObject | undefined)');
     expect(method.output).toContain('--target-id REM_ID');
+    expect(method.executeSpy).not.toHaveBeenCalled();
     method.executeSpy.mockRestore();
   });
 
   it('shows unsupported SDK method help without invoking it', async () => {
     const capabilities = {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
@@ -312,8 +318,6 @@ describe('command text output', () => {
           target: 'namespace',
           namespace: 'event',
           method: 'addListener',
-          group: 'event',
-          command: 'add-listener',
           signatures: ['addListener: (event: string, callback: CallbackFn) => void'],
           status: 'unsupported',
           mode: 'write',
@@ -327,7 +331,7 @@ describe('command text output', () => {
     );
     expect(output).toContain('Status: unsupported');
     expect(output).toContain('Reason: Event listeners require a persistent callback.');
-    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(executeSpy).not.toHaveBeenCalled();
     executeSpy.mockRestore();
   });
 

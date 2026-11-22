@@ -1,6 +1,9 @@
 {
   "schemaVersion": 2,
   "protocolVersion": 2,
+  "sdkFacts": {
+    "schemaVersion": 1
+  },
   "bridgeActions": [
     "get_status",
     "get_sdk_capabilities",
@@ -975,6 +978,13 @@
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
+    },
+    {
+      "path": "sdk call",
+      "kind": "action",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk capabilities",

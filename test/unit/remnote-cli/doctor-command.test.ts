@@ -55,17 +55,16 @@ function catalog() {
     id,
     target: 'namespace' as const,
     method: 'method',
-    group: 'test',
-    command: id.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, ''),
     signatures: ['method: () => Promise<void>'],
     status: 'supported' as const,
     mode: 'read' as const,
   }));
   const sdkVersion = '0.0.46';
+  const catalogSchemaVersion = 1 as const;
   const sdkCatalogHash = createHash('sha256')
-    .update(JSON.stringify({ sdkVersion, capabilities }))
+    .update(JSON.stringify({ catalogSchemaVersion, sdkVersion, capabilities }))
     .digest('hex');
-  return { sdkVersion, sdkCatalogHash, capabilities };
+  return { catalogSchemaVersion, sdkVersion, sdkCatalogHash, capabilities };
 }
 
 function mockHealthyBridge(catalogValue: ReturnType<typeof catalog>): void {

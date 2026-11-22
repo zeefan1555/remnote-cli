@@ -321,6 +321,21 @@ idempotency key. `unknown` means the affected objects cannot be identified.
 
 Do not rerun the write or choose a new idempotency key to bypass uncertainty. Do not delete journals to force a fresh attempt. Some native update commands fail closed until the SDK can safely abort them. A preview receipt is not write approval.
 
+## Use SDK methods
+
+SDK group and method help comes from versioned SDK facts shipped with the CLI. It
+works while RemNote is closed. Execution still checks the live Bridge catalog.
+
+```bash
+remnote-cli sdk rem object-get-children-rem --help
+remnote-cli sdk rem object-get-children-rem --target-id REM_ID --args-json '[]'
+remnote-cli sdk call rem:getChildrenRem --target-id REM_ID --args-json '[]'
+```
+
+Use the generated group and method command when it exists. `sdk call` is the raw
+escape hatch for one supported live capability. It does not bypass the Bridge
+allowlist, live catalog hash, target requirements or destructive approval.
+
 ## Knowledge-base boundary
 
 `--kb-id` is an optional global guard. Put it before the command name.
