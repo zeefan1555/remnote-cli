@@ -105,10 +105,7 @@ export async function runProgram(
   argv: string[],
   runtime: CliRuntime = runtimeFor(program)
 ): Promise<number> {
-  const normalizedArgv = [...argv];
-  if (normalizedArgv.length > 3 && normalizedArgv.at(-1) === 'help') {
-    normalizedArgv[normalizedArgv.length - 1] = '--help';
-  }
+  const normalizedArgv = normalizeTrailingGroupHelp(program, argv);
   try {
     const boundaryFailure = commandBoundaryFailure(program, normalizedArgv);
     if (boundaryFailure) {
@@ -128,6 +125,19 @@ export async function runProgram(
     runtime.failure(error);
   }
   return finishProgram(runtime);
+}
+
+function normalizeTrailingGroupHelp(program: Command, argv: string[]): string[] {
+  if (argv.at(-1) !== 'help' || argv.slice(2, -1).includes('--')) return argv;
+  let command = program;
+  for (const token of argv.slice(2, -1)) {
+    if (token.startsWith('-')) return argv;
+    const child = command.commands.find((candidate) => candidate.name() === token);
+    if (!child) return argv;
+    command = child;
+  }
+  if (command === program || command.commands.length === 0) return argv;
+  return [...argv.slice(0, -1), '--help'];
 }
 
 export async function runCli(

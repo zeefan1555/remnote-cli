@@ -763,6 +763,15 @@ describe('command bridge action mapping', () => {
     executeSpy.mockRestore();
   });
 
+  it('keeps help as literal journal content', async () => {
+    const executeSpy = await runCommand(['journal', '--content', 'help']);
+    expect(executeSpy).toHaveBeenCalledWith(
+      'append_journal',
+      expect.objectContaining({ content: 'help' })
+    );
+    executeSpy.mockRestore();
+  });
+
   it('maps set-property --value to set_property payload', async () => {
     const executeSpy = await runCommand([
       'set-property',
