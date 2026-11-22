@@ -46,6 +46,13 @@ describe('command specs', () => {
       default: '50',
     });
     expect(search.input.properties.text).toMatchObject({ type: 'boolean' });
+    expect(search.input.properties.all).toMatchObject({ type: 'boolean' });
+    expect(search.input.properties.maxPages).toMatchObject({ type: 'string' });
+    expect(search.input.properties.pageDelay).toMatchObject({
+      type: 'string',
+      default: '0',
+    });
+    expect(search.pagination).toMatchObject({ kind: 'cursor', automatic: true });
     expect(search.output).toEqual({
       envelope: 'remnote-cli/v2',
       successStream: 'stdout',

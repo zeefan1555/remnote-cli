@@ -344,7 +344,8 @@ describe('command text output', () => {
       ],
     });
 
-    expect(output).toBe('1. [concept] Plan (aka: Strategy, Roadmap) <- Workspace [rem-1]');
+    expect(output).toContain('1. [concept] Plan (aka: Strategy, Roadmap) <- Workspace [rem-1]');
+    expect(output).toContain('Paging: complete=true, pages=1, items=1');
     executeSpy.mockRestore();
   });
 

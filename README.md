@@ -136,7 +136,18 @@ remnote-cli read REM_ID --content-mode structured --depth 2
 
 Pass one or more IDs to `read`. Use `--content-mode none` to read metadata only, or `--include-media-metadata` to find image IDs for `get-media`.
 
-Page through large searches with the returned `nextCursor`. Reuse the cursor with the same query and scope.
+Page through large searches with the returned `nextCursor`. Reuse the cursor with
+the same query and scope. Use `--all` when the complete snapshot is required.
+
+```bash
+remnote-cli search "project plan" --all
+remnote-cli search "project plan" --all --max-pages 20 --page-delay 100
+```
+
+`--all` follows every page by default. `--max-pages` is an explicit safety
+bound, not a hidden default. The result contains a `paging` object with
+`complete`, `pages`, `itemCount` and `nextCursor` when the result is incomplete.
+The same options work for `search-by-tag` and single-parent `list-children`.
 
 ## Gather bounded context
 

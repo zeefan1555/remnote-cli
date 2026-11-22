@@ -53,7 +53,7 @@ const COMMAND_POLICIES: Record<string, CommandPolicy> = {
     bridge: 'required',
     pagination: {
       kind: 'cursor',
-      automatic: false,
+      automatic: true,
       arguments: ['all', 'max-pages', 'page-delay'],
     },
   },
@@ -62,7 +62,7 @@ const COMMAND_POLICIES: Record<string, CommandPolicy> = {
     bridge: 'required',
     pagination: {
       kind: 'cursor',
-      automatic: false,
+      automatic: true,
       arguments: ['all', 'max-pages', 'page-delay'],
     },
   },
@@ -71,7 +71,7 @@ const COMMAND_POLICIES: Record<string, CommandPolicy> = {
     bridge: 'required',
     pagination: {
       kind: 'cursor',
-      automatic: false,
+      automatic: true,
       arguments: ['all', 'max-pages', 'page-delay'],
     },
   },

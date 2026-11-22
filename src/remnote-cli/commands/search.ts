@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { CliFailure } from '../output/errors.js';
+import { collectPages, paginationOptions, registerPaginationOptions } from './pagination.js';
 
 /** Default number of search results. */
 const DEFAULT_SEARCH_LIMIT = 50;
@@ -108,12 +109,31 @@ function formatSearchText(data: unknown): string {
     const reason = (r as Record<string, unknown>).truncationReason;
     pagingLines.push(`Results truncated${typeof reason === 'string' ? `: ${reason}` : ''}`);
   }
+  const paging = (r as Record<string, unknown>).paging;
+  if (
+    paging &&
+    typeof paging === 'object' &&
+    'complete' in paging &&
+    typeof paging.complete === 'boolean' &&
+    'pages' in paging &&
+    typeof paging.pages === 'number' &&
+    'itemCount' in paging &&
+    typeof paging.itemCount === 'number'
+  )
+    pagingLines.push(
+      'Paging: complete=' +
+        String(paging.complete) +
+        ', pages=' +
+        paging.pages +
+        ', items=' +
+        paging.itemCount
+    );
 
   return pagingLines.length > 0 ? `${lines}\n${pagingLines.join('\n')}` : lines;
 }
 
 function registerCommonSearchOptions(command: Command): Command {
-  return command
+  const configured = command
     .option(
       '-l, --limit <n>',
       `Maximum results (default: ${DEFAULT_SEARCH_LIMIT})`,
@@ -128,6 +148,7 @@ function registerCommonSearchOptions(command: Command): Command {
     .option('--depth <n>', 'Depth of child hierarchy to render (default: 1)')
     .option('--child-limit <n>', 'Maximum children per level (default: 20)')
     .option('--max-content-length <n>', 'Maximum content character length (default: 3000)');
+  return registerPaginationOptions(configured);
 }
 
 export function registerSearchCommand(program: Command): void {
@@ -154,7 +175,13 @@ export function registerSearchCommand(program: Command): void {
         if (opts.includeReviewStats) payload.includeReviewStats = true;
         applySearchOptions(payload, opts);
 
-        const result = await client.execute('search', payload);
+        const result = await collectPages(
+          client,
+          'search',
+          payload,
+          'results',
+          paginationOptions(opts)
+        );
         emit(
           program,
           formatResult(result, format, (data) => formatSearchText(data))
@@ -190,7 +217,13 @@ export function registerSearchByTagCommand(program: Command): void {
       if (opts.cursor) payload.cursor = opts.cursor;
       applySearchOptions(payload, opts);
 
-      const result = await client.execute('search_by_tag', payload);
+      const result = await collectPages(
+        client,
+        'search_by_tag',
+        payload,
+        'results',
+        paginationOptions(opts)
+      );
       emit(
         program,
         formatResult(result, format, (data) => formatSearchText(data))
@@ -202,73 +235,76 @@ export function registerSearchByTagCommand(program: Command): void {
 }
 
 export function registerListChildrenCommand(program: Command): void {
-  program
+  const command = program
     .command('list-children <parent-rem-id...>')
     .description('List direct child Rems under one or more parents')
     .option('-l, --limit <n>', 'Maximum direct children (default: 50)', '50')
     .option('--cursor <cursor>', 'Opaque cursor returned by a previous list-children page')
     .option('--view <view>', 'Output detail level: compact, standard, or full')
-    .option('--ancestor-depth <n>', 'Number of parent Rems to include, direct parent first')
-    .action(async (parentRemIds: string[], opts) => {
-      const globalOpts = program.opts();
-      const format: OutputFormat = globalOpts.text ? 'text' : 'json';
-      const client = createCommandClient(program);
+    .option('--ancestor-depth <n>', 'Number of parent Rems to include, direct parent first');
+  registerPaginationOptions(command).action(async (parentRemIds: string[], opts) => {
+    const globalOpts = program.opts();
+    const format: OutputFormat = globalOpts.text ? 'text' : 'json';
+    const client = createCommandClient(program);
 
-      try {
-        if (new Set(parentRemIds).size !== parentRemIds.length)
-          throw new Error('Duplicate Rem IDs');
-        if (parentRemIds.length > 1 && opts.cursor)
-          throw new Error('cursor pages one parent; omit it when listing several parents');
-        const payload: Record<string, unknown> = {
-          limit: parseInt(opts.limit, 10),
-        };
-        if (parentRemIds.length === 1) payload.parentRemId = parentRemIds[0];
-        else payload.parentRemIds = parentRemIds;
-        if (opts.cursor) payload.cursor = opts.cursor;
-        if (opts.view) payload.view = opts.view;
-        if (opts.ancestorDepth) payload.ancestorDepth = parseInt(opts.ancestorDepth, 10);
+    try {
+      if (new Set(parentRemIds).size !== parentRemIds.length) throw new Error('Duplicate Rem IDs');
+      if (parentRemIds.length > 1 && (opts.cursor || opts.all))
+        throw new Error('--all and --cursor page one parent; omit them for several parents');
+      const payload: Record<string, unknown> = {
+        limit: parseInt(opts.limit, 10),
+      };
+      if (parentRemIds.length === 1) payload.parentRemId = parentRemIds[0];
+      else payload.parentRemIds = parentRemIds;
+      if (opts.cursor) payload.cursor = opts.cursor;
+      if (opts.view) payload.view = opts.view;
+      if (opts.ancestorDepth) payload.ancestorDepth = parseInt(opts.ancestorDepth, 10);
 
-        const result = await client.execute('list_children', payload);
-        const many = (result as { results?: Record<string, { error?: string }> }).results;
-        if (many && Object.values(many).some((value) => typeof value?.error === 'string'))
-          fail(
-            program,
-            new CliFailure(
-              'not_found',
-              'partial_list_children',
-              'One or more parent reads failed',
-              {
-                details: result,
-              }
+      const result =
+        parentRemIds.length === 1
+          ? await collectPages(
+              client,
+              'list_children',
+              payload,
+              'children',
+              paginationOptions(opts)
             )
-          );
-        else
-          emit(
-            program,
-            formatResult(result, format, (data) => {
-              const many = (data as { results?: Record<string, Record<string, unknown>> }).results;
-              if (many && typeof many === 'object') {
-                return Object.entries(many)
-                  .map(([id, value]) => {
-                    if (typeof value.error === 'string') return `# ${id}\nError: ${value.error}`;
-                    return `# ${id}\n${formatSearchText({
-                      results: value.children,
-                      hasMore: value.hasMore,
-                      nextCursor: value.nextCursor,
-                    })}`;
-                  })
-                  .join('\n\n');
-              }
-              const r = data as Record<string, unknown>;
-              return formatSearchText({
-                results: r.children,
-                hasMore: r.hasMore,
-                nextCursor: r.nextCursor,
-              });
-            })
-          );
-      } finally {
-        await client.close();
-      }
-    });
+          : await client.execute('list_children', payload);
+      const many = (result as { results?: Record<string, { error?: string }> }).results;
+      if (many && Object.values(many).some((value) => typeof value?.error === 'string'))
+        fail(
+          program,
+          new CliFailure('not_found', 'partial_list_children', 'One or more parent reads failed', {
+            details: result,
+          })
+        );
+      else
+        emit(
+          program,
+          formatResult(result, format, (data) => {
+            const many = (data as { results?: Record<string, Record<string, unknown>> }).results;
+            if (many && typeof many === 'object') {
+              return Object.entries(many)
+                .map(([id, value]) => {
+                  if (typeof value.error === 'string') return `# ${id}\nError: ${value.error}`;
+                  return `# ${id}\n${formatSearchText({
+                    results: value.children,
+                    hasMore: value.hasMore,
+                    nextCursor: value.nextCursor,
+                  })}`;
+                })
+                .join('\n\n');
+            }
+            const r = data as Record<string, unknown>;
+            return formatSearchText({
+              results: r.children,
+              hasMore: r.hasMore,
+              nextCursor: r.nextCursor,
+            });
+          })
+        );
+    } finally {
+      await client.close();
+    }
+  });
 }
