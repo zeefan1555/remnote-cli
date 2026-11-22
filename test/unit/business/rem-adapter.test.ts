@@ -794,6 +794,7 @@ describe('RemAdapter', () => {
     });
 
     it('lists native todos, ignores TODO labels, and changes only native status', async () => {
+      const root = plugin.addTestRem('todo-root', 'Root');
       const legacyTag = plugin.addTestRem('legacy-tag', 'TODO');
       const legacyLabel = plugin.addTestRem('legacy-label', 'TODO');
       legacyLabel.setTagRemsMock([legacyTag]);
@@ -802,10 +803,11 @@ describe('RemAdapter', () => {
       todo.setTagRemsMock([legacyTag]);
       const completed = plugin.addTestRem('todo-2', 'Already done');
       completed.setTodoMock(true, 'Finished');
+      for (const rem of [legacyTag, legacyLabel, todo, completed]) await rem.setParent(root);
 
-      await expect(adapter.listTodos({})).resolves.toEqual({
+      await expect(adapter.listTodos({ rootRemId: root._id })).resolves.toMatchObject({
         status: 'unfinished',
-        scanned: 4,
+        scanned: 5,
         todos: [
           {
             remId: 'todo-1',
@@ -814,9 +816,11 @@ describe('RemAdapter', () => {
           },
         ],
       });
-      await expect(adapter.listTodos({ status: 'all' })).resolves.toMatchObject({
+      await expect(
+        adapter.listTodos({ status: 'all', rootRemId: root._id })
+      ).resolves.toMatchObject({
         status: 'all',
-        scanned: 4,
+        scanned: 5,
         todos: [
           { remId: 'todo-1', todoStatus: 'Unfinished' },
           { remId: 'todo-2', todoStatus: 'Finished' },

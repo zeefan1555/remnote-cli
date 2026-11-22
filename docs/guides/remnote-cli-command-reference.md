@@ -446,17 +446,16 @@ selected root itself is not changed.
 List native RemNote TODOs and change their native status:
 
 ```bash
-remnote-cli todo list
-remnote-cli todo list --status finished
-remnote-cli todo list --status all
 remnote-cli todo list --root-id <root-rem-id>
+remnote-cli todo list --root-id <root-rem-id> --status finished
+remnote-cli todo list --root-id <root-rem-id> --status all
 remnote-cli todo complete <rem-id>
 remnote-cli todo complete <rem-id> --apply
 remnote-cli todo reopen <rem-id> --apply
 ```
 
-`list` returns Rems where native `isTodo()` is true. It defaults to
-`Unfinished`. Optional `--root-id` scans that Rem and its descendants.
+`list` scans one required exact root Rem and its descendants. It returns Rems
+where native `isTodo()` is true and defaults to `Unfinished`.
 `complete` and `reopen` preview by default. Apply calls `setTodoStatus()` on
 the exact native TODO and reads the status back. TODO tags and TODO text do not
 identify or change these Rems.

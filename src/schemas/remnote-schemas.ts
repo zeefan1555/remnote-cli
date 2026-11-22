@@ -259,11 +259,7 @@ export const ListTodosSchema = z
       .enum(['unfinished', 'finished', 'all'])
       .default('unfinished')
       .describe('Native TODO status to list'),
-    rootRemId: z
-      .string()
-      .min(1)
-      .optional()
-      .describe('Inspect this native Rem and all of its descendants'),
+    rootRemId: z.string().min(1).describe('Inspect this native Rem and all of its descendants'),
   })
   .strict();
 

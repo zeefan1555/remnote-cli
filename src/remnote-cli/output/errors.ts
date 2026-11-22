@@ -103,7 +103,7 @@ function subtypeFromMessage(message: string): string {
   return normalized || 'unclassified';
 }
 
-function isConnectionMessage(message: string): boolean {
+export function isConnectionMessage(message: string): boolean {
   return /\b(bridge|connection|connect|socket|websocket|port|loopback|handshake|session closed)\b/i.test(
     message
   );

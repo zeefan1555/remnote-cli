@@ -248,7 +248,7 @@ describe('command text output', () => {
     expect(outline.output).toContain('changed=2');
     outline.executeSpy.mockRestore();
 
-    const todos = await runTextCommand(['todo', 'list', '--status', 'all'], {
+    const todos = await runTextCommand(['todo', 'list', '--root-id', 'root', '--status', 'all'], {
       status: 'all',
       scanned: 1,
       todos: [

@@ -64,7 +64,7 @@ export function registerTodoCommand(program: Command, catalog: CommandCatalog): 
     bridge: 'required',
   });
   list
-    .option('--root-id <id>', 'Inspect this native Rem and all of its descendants')
+    .requiredOption('--root-id <id>', 'Inspect this native Rem and all of its descendants')
     .addOption(
       new Option('--status <status>', 'Filter by native TODO status')
         .choices(['unfinished', 'finished', 'all'])
@@ -76,7 +76,7 @@ export function registerTodoCommand(program: Command, catalog: CommandCatalog): 
       try {
         const result = await client.execute('list_todos', {
           status: opts.status,
-          ...(opts.rootId ? { rootRemId: opts.rootId } : {}),
+          rootRemId: opts.rootId,
         });
         emit(program, formatResult(result, format, formatTodoListText));
       } finally {

@@ -298,7 +298,7 @@ export type TodoStatusFilter = 'unfinished' | 'finished' | 'all';
 
 export interface ListTodosParams {
   status?: TodoStatusFilter;
-  rootRemId?: string;
+  rootRemId: string;
 }
 
 export interface TodoItem {
@@ -4448,13 +4448,10 @@ export class RemAdapter {
 
   async listTodos(params: ListTodosParams): Promise<ListTodosResult> {
     const status = params.status ?? 'unfinished';
-    const scope =
-      params.rootRemId !== undefined ? await this.plugin.rem.findOne(params.rootRemId) : undefined;
-    if (params.rootRemId !== undefined && !scope)
-      throw new Error(`Root not found: ${params.rootRemId}`);
-    const rems = scope
-      ? [scope, ...(await scope.getDescendants())]
-      : await this.plugin.rem.getAll();
+    const rootRemId = this.requireNonEmptyString(params.rootRemId, 'rootRemId');
+    const scope = await this.plugin.rem.findOne(rootRemId);
+    if (!scope) throw new Error(`Root not found: ${rootRemId}`);
+    const rems = [scope, ...(await scope.getDescendants())];
     if (!Array.isArray(rems) || rems.some((rem) => !rem || typeof rem._id !== 'string' || !rem._id))
       throw new Error('Malformed SDK Rem list');
     const tasks = rems.map((rem) => async () => await rem.isTodo());
