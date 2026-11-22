@@ -53,6 +53,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Rewrite the README as a task-based usage guide covering Bridge and CLI setup,
+  connection checks, representative read and task commands, preview/apply and
+  unknown-write rules, knowledge-base binding, sync boundaries, and troubleshooting.
+
 ### Added
 
 - Offline `sync relocate OLD NEW` moves a private vault and rebinds its authoritative
