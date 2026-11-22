@@ -68,6 +68,11 @@ const inlinePatterns = Array.from(legacyPaths, ([path, replacement]) => ({
   replacement,
   regex: new RegExp('`' + path.replace(/ /g, '\\s+') + '(?=\\s|`|$)', 'g'),
 })).filter(({ path }) => path.includes('-') || path.includes(' '));
+inlinePatterns.push({
+  path: 'context',
+  replacement: 'rem context',
+  regex: /`context(?=\s+--)/g,
+});
 
 async function files(directory) {
   const output = [];

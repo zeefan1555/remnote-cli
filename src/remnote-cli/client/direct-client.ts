@@ -14,7 +14,7 @@ import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
 import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
 import { ReadSession } from './session.js';
-import { isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
+import { CliFailure, isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
@@ -150,6 +150,13 @@ export class DirectClient {
     try {
       return await this.executeAction(action, payload);
     } catch (error) {
+      if (preview && isWriteUncertainty(error))
+        throw new CliFailure(
+          'unavailable',
+          'bridge_unavailable',
+          error instanceof Error ? error.message : String(error),
+          { cause: error }
+        );
       if (!READ_ONLY_ACTIONS.has(action) && !preview && isWriteUncertainty(error))
         throw unknownOutcomeFailure(error);
       throw error;

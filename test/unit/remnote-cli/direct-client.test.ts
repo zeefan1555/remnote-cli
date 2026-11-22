@@ -26,6 +26,8 @@ vi.mock('../../../src/remnote-cli/client/remote-sdk.js', () => ({ remoteSdk: () 
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { ReadSession } from '../../../src/remnote-cli/client/session.js';
 import { LocalState } from '../../../src/remnote-cli/client/local-state.js';
+import { createProgram, runProgram } from '../../../src/remnote-cli/cli.js';
+import { createBufferedRuntime } from '../../../src/remnote-cli/output/runtime.js';
 
 let directory: string, client: DirectClient;
 beforeEach(async () => {
@@ -123,6 +125,25 @@ describe('local business dispatch', () => {
       .catch((value: unknown) => value);
     expect(error).toBeInstanceOf(Error);
     expect((error as { type?: string }).type).not.toBe('unknown_outcome');
+  });
+
+  it('keeps a delete preview transport failure unavailable at the CLI boundary', async () => {
+    wire.open.mockRejectedValueOnce(
+      new Error('Connection lost; write outcome unknown. Do not blindly replay.')
+    );
+    const runtime = createBufferedRuntime();
+    const program = createProgram('test', runtime);
+
+    const exitCode = await runProgram(
+      program,
+      ['node', 'remnote-cli', 'rem', 'delete', 'preview-rem'],
+      runtime
+    );
+    expect(exitCode).toBe(3);
+    expect(JSON.parse(runtime.stderr())).toMatchObject({
+      ok: false,
+      error: { type: 'unavailable', subtype: 'bridge_unavailable' },
+    });
   });
 
   it('rejects catalog drift', async () => {
