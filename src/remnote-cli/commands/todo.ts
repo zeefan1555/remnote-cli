@@ -59,7 +59,6 @@ function registerTodoUpdate(
 export function registerTodoCommand(program: Command, catalog: CommandCatalog): void {
   const todo = catalog.group(program, 'todo', {
     description: 'List and update tagged RemNote todos',
-    bareHelp: true,
   });
 
   catalog

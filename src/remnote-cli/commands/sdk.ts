@@ -287,7 +287,6 @@ function registerSdkCall(sdk: Command, program: Command, catalog: CommandCatalog
 export function registerSdkCommands(program: Command, catalog: CommandCatalog): void {
   const sdk = catalog.group(program, 'sdk', {
     description: 'Low-level RemNote Plugin SDK access',
-    bareHelp: true,
   });
   registerCapabilityCatalog(sdk, program, catalog);
   registerSdkCall(sdk, program, catalog);

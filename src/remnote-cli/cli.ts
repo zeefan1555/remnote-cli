@@ -37,6 +37,12 @@ import { CommanderError } from 'commander';
 import type { CliRuntime } from './output/runtime.js';
 import { bindRuntime, createProcessRuntime, finishProgram, runtimeFor } from './output/runtime.js';
 import { CommandCatalog } from './spec/command-spec.js';
+import {
+  commandBoundaryFailure,
+  installCommandHelpGroups,
+  normalizeTrailingGroupHelp,
+  rootHelpRequested,
+} from './spec/command-boundary.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version: string };
@@ -56,7 +62,8 @@ export function createProgram(
     .option('--text', 'Human-readable output')
     .option('--kb-id <id>', 'Require this exact active knowledge base')
     .option('--allow-destructive', 'Explicitly allow destructive SDK operations')
-    .option('--verbose', 'Enable verbose stderr logging');
+    .option('--verbose', 'Enable verbose stderr logging')
+    .helpCommand('help [command]', 'display help for command');
 
   registerCreateCommand(program, catalog);
   registerSearchCommand(program, catalog);
@@ -68,11 +75,9 @@ export function createProgram(
   registerPowerupCommand(program, catalog);
   registerCompositeCommands(program, catalog);
   registerTaskCommands(program, catalog);
-  registerBatchCommand(program, catalog, version);
   registerReviewStatsCommand(program, catalog);
   registerOutlineCommand(program, catalog);
   registerTodoCommand(program, catalog);
-  registerSdkCommands(program, catalog);
   registerGetMediaCommand(program, catalog);
   registerUpdateCommand(program, catalog);
   registerInsertChildrenCommand(program, catalog);
@@ -82,13 +87,16 @@ export function createProgram(
   registerUpdateTagsCommand(program, catalog);
   registerSetPropertyCommand(program, catalog);
   registerJournalCommand(program, catalog);
-  registerStatusCommand(program, catalog);
   registerReadTableCommand(program, catalog);
   registerSyncCommands(program, catalog);
+  registerBatchCommand(program, catalog, version);
+  registerStatusCommand(program, catalog);
   registerSchemaCommand(program, catalog);
   registerDoctorCommand(program, catalog);
   registerContractCommand(program, catalog);
+  registerSdkCommands(program, catalog);
 
+  installCommandHelpGroups(program);
   bindRuntime(program, runtime);
   return program;
 }
@@ -98,8 +106,18 @@ export async function runProgram(
   argv: string[],
   runtime: CliRuntime = runtimeFor(program)
 ): Promise<number> {
+  const normalizedArgv = normalizeTrailingGroupHelp(program, argv);
   try {
-    await program.parseAsync(argv);
+    const boundaryFailure = commandBoundaryFailure(program, normalizedArgv);
+    if (boundaryFailure) {
+      runtime.failure(boundaryFailure);
+      return finishProgram(runtime);
+    }
+    if (rootHelpRequested(program, normalizedArgv)) {
+      program.outputHelp();
+      return finishProgram(runtime);
+    }
+    await program.parseAsync(normalizedArgv);
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) {
       runtime.setExitCode(0);

@@ -14,8 +14,8 @@ remnote-cli schema
 ```
 
 Each summary contains the exact command path and its `group` or `action` kind.
-Actions also include risk, Bridge requirement, dynamic SDK marker and cursor
-pagination metadata when applicable.
+Every row also includes its root `helpSection`. Actions include risk, Bridge
+requirement, dynamic SDK marker and cursor pagination metadata when applicable.
 
 ## Inspect one command
 

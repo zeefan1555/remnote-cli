@@ -803,6 +803,7 @@
     {
       "path": "assert",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "optional",
       "dynamic": false
@@ -810,6 +811,7 @@
     {
       "path": "batch",
       "kind": "action",
+      "helpSection": "diagnostics",
       "risk": "destructive",
       "bridge": "conditional",
       "dynamic": false
@@ -817,6 +819,7 @@
     {
       "path": "context",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -824,6 +827,7 @@
     {
       "path": "contract",
       "kind": "action",
+      "helpSection": "diagnostics",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
@@ -831,6 +835,7 @@
     {
       "path": "create",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -838,17 +843,20 @@
     {
       "path": "doctor",
       "kind": "action",
+      "helpSection": "diagnostics",
       "risk": "read",
       "bridge": "optional",
       "dynamic": false
     },
     {
       "path": "flashcards",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
       "path": "flashcards apply",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -856,6 +864,7 @@
     {
       "path": "get-media",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -863,6 +872,7 @@
     {
       "path": "insert-children",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -870,6 +880,7 @@
     {
       "path": "inspect",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -877,6 +888,7 @@
     {
       "path": "journal",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -884,6 +896,7 @@
     {
       "path": "list-children",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false,
@@ -900,17 +913,20 @@
     {
       "path": "move-note",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "outline",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
       "path": "outline collapse",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -918,17 +934,20 @@
     {
       "path": "outline expand",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "powerup",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
       "path": "powerup get",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -936,6 +955,7 @@
     {
       "path": "read",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -943,6 +963,7 @@
     {
       "path": "read-table",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -950,6 +971,7 @@
     {
       "path": "replace-children",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
@@ -957,6 +979,7 @@
     {
       "path": "review-stats",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -964,17 +987,20 @@
     {
       "path": "schema",
       "kind": "action",
+      "helpSection": "diagnostics",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "sdk",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "raw-sdk"
     },
     {
       "path": "sdk app",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -982,6 +1008,7 @@
     {
       "path": "sdk call",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
@@ -989,6 +1016,7 @@
     {
       "path": "sdk capabilities",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -996,6 +1024,7 @@
     {
       "path": "sdk card",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1003,6 +1032,7 @@
     {
       "path": "sdk date",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1010,6 +1040,7 @@
     {
       "path": "sdk editor",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1017,6 +1048,7 @@
     {
       "path": "sdk event",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1024,6 +1056,7 @@
     {
       "path": "sdk focus",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1031,6 +1064,7 @@
     {
       "path": "sdk kb",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1038,6 +1072,7 @@
     {
       "path": "sdk messaging",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1045,6 +1080,7 @@
     {
       "path": "sdk powerup",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1052,6 +1088,7 @@
     {
       "path": "sdk queue",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1059,6 +1096,7 @@
     {
       "path": "sdk reader",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1066,6 +1104,7 @@
     {
       "path": "sdk rem",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1073,6 +1112,7 @@
     {
       "path": "sdk rich-text",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1080,6 +1120,7 @@
     {
       "path": "sdk scheduler",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1087,6 +1128,7 @@
     {
       "path": "sdk search",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1094,6 +1136,7 @@
     {
       "path": "sdk settings",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1101,6 +1144,7 @@
     {
       "path": "sdk storage",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1108,6 +1152,7 @@
     {
       "path": "sdk widget",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1115,6 +1160,7 @@
     {
       "path": "sdk window",
       "kind": "action",
+      "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": true
@@ -1122,6 +1168,7 @@
     {
       "path": "search",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false,
@@ -1138,6 +1185,7 @@
     {
       "path": "search-by-tag",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false,
@@ -1154,6 +1202,7 @@
     {
       "path": "set-document-status",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1161,6 +1210,7 @@
     {
       "path": "set-property",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1168,17 +1218,20 @@
     {
       "path": "status",
       "kind": "action",
+      "helpSection": "diagnostics",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "sync",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "workflows"
     },
     {
       "path": "sync apply",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1186,6 +1239,7 @@
     {
       "path": "sync delete",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "destructive",
       "bridge": "required",
       "dynamic": false
@@ -1193,6 +1247,7 @@
     {
       "path": "sync diff",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
@@ -1200,6 +1255,7 @@
     {
       "path": "sync format",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "none",
       "dynamic": false
@@ -1207,6 +1263,7 @@
     {
       "path": "sync import",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1214,6 +1271,7 @@
     {
       "path": "sync lint",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
@@ -1221,6 +1279,7 @@
     {
       "path": "sync plan",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -1228,6 +1287,7 @@
     {
       "path": "sync read",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
@@ -1235,6 +1295,7 @@
     {
       "path": "sync recover",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1242,6 +1303,7 @@
     {
       "path": "sync relocate",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "none",
       "dynamic": false
@@ -1249,6 +1311,7 @@
     {
       "path": "sync resume",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1256,6 +1319,7 @@
     {
       "path": "sync save",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "write",
       "bridge": "none",
       "dynamic": false
@@ -1263,17 +1327,20 @@
     {
       "path": "sync status",
       "kind": "action",
+      "helpSection": "workflows",
       "risk": "read",
       "bridge": "none",
       "dynamic": false
     },
     {
       "path": "todo",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
       "path": "todo complete",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1281,6 +1348,7 @@
     {
       "path": "todo list",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
@@ -1288,6 +1356,7 @@
     {
       "path": "todo reopen",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1295,6 +1364,7 @@
     {
       "path": "update",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
@@ -1302,28 +1372,33 @@
     {
       "path": "update-tags",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "verify",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
       "path": "verify scope",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "read",
       "bridge": "required",
       "dynamic": false
     },
     {
       "path": "wiki",
-      "kind": "group"
+      "kind": "group",
+      "helpSection": "knowledge"
     },
     {
       "path": "wiki apply",
       "kind": "action",
+      "helpSection": "knowledge",
       "risk": "write",
       "bridge": "required",
       "dynamic": false

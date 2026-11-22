@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 export type CommandRisk = 'read' | 'write' | 'destructive';
 export type BridgeRequirement = 'required' | 'optional' | 'conditional' | 'none';
+export type RootHelpSection = 'knowledge' | 'workflows' | 'diagnostics' | 'raw-sdk';
 
 export interface PaginationSpec {
   kind: 'cursor';
@@ -27,6 +28,7 @@ interface CommandSpecBase {
   path: string;
   description: string;
   usage: string;
+  helpSection: RootHelpSection;
   input: CommandInputSchema;
   output: {
     envelope: 'remnote-cli/v2';
@@ -52,7 +54,6 @@ export type CommandSpec = CommandGroupSpec | CommandActionSpec;
 
 export interface CommandGroupOptions {
   description: string;
-  bareHelp?: boolean;
 }
 
 export interface CommandActionOptions {
@@ -149,6 +150,23 @@ function usage(path: string, command: Command): string {
   return [path, args].filter(Boolean).join(' ');
 }
 
+export function rootHelpSection(path: string): RootHelpSection {
+  const root = path.split(' ', 1)[0];
+  if (root === 'sdk') return 'raw-sdk';
+  if (root === 'sync') return 'workflows';
+  if (['batch', 'status', 'doctor', 'schema', 'contract'].includes(root)) return 'diagnostics';
+  return 'knowledge';
+}
+
+export function rootHelpLabel(section: RootHelpSection): string {
+  return {
+    knowledge: 'Knowledge commands:',
+    workflows: 'Workflow commands:',
+    diagnostics: 'Diagnostics and tooling:',
+    'raw-sdk': 'Raw SDK commands:',
+  }[section];
+}
+
 function commandSpecFor(program: Command, entry: CatalogEntry): CommandSpec {
   const command = entry.command;
   const path = pathOf(command);
@@ -156,6 +174,7 @@ function commandSpecFor(program: Command, entry: CatalogEntry): CommandSpec {
     path,
     description: command.description(),
     usage: usage(path, command),
+    helpSection: rootHelpSection(path),
     input: inputSchema(program, command),
     output: {
       envelope: 'remnote-cli/v2' as const,
@@ -192,9 +211,9 @@ export class CommandCatalog {
     this.entries.set(command, {
       command,
       kind: 'group',
-      bareHelp: options.bareHelp ?? false,
+      bareHelp: true,
     });
-    if (options.bareHelp) command.action(() => command.outputHelp());
+    command.action(() => command.outputHelp());
     return command;
   }
 

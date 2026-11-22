@@ -204,7 +204,8 @@ describe('batch command', () => {
     expect(String(output.results[2].result)).toMatch(/Read one or more notes/);
     expect(output.results[3]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
     expect(output.results[3].error?.message).toMatch(/argument missing/);
-    expect(output.results[4]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
+    expect(output.results[4]).toMatchObject({ ok: true, exitCode: 0 });
+    expect(String(output.results[4].result)).toMatch(/Plan and apply flashcards tasks/);
     expect(output.results[5]).toMatchObject({ ok: true, exitCode: 0, result: { ok: true } });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalled();
