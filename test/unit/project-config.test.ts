@@ -38,6 +38,7 @@ describe('project config', () => {
     expect(ciWorkflow).toContain('run: npm run test:coverage');
     expect(ciWorkflow).not.toContain('run: npm test');
     expect(ciWorkflow).toContain('run: npm run build');
+    expect(ciWorkflow).toContain('run: npm run test:bin');
     expect(ciWorkflow).toContain('run: git diff --exit-code');
   });
 
@@ -45,6 +46,7 @@ describe('project config', () => {
     const qualityScript = readFileSync('code-quality.sh', 'utf-8');
 
     expect(qualityScript).toContain('npm run test:coverage');
+    expect(qualityScript).toContain('npm run test:bin');
     expect(qualityScript).not.toContain('if npm test;');
   });
 

@@ -67,7 +67,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Pairing imports, HMAC challenge code, old plugin-id compatibility, product-version matching, and connection-file settings.
 
-## [Unreleased]
+## [0.28.0] - 2026-11-22
 
 ### Added
 
@@ -86,12 +86,19 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Finalize the source-only distribution path. Remove dead npm publish metadata
+  and scripts, add a built-executable smoke gate, and release version 0.28.0.
 - Route every command through one injected CLI runtime so batch no longer replaces
   global console state. Batch returns structured per-command errors and supports
   detection of unsafe unknown write outcomes.
 - Rewrite the README as a task-based usage guide covering Bridge and CLI setup,
   connection checks, representative read and task commands, preview/apply and
   unknown-write rules, knowledge-base binding, sync boundaries, and troubleshooting.
+
+### Removed
+
+- Remove npm publish-only metadata and the prepublishOnly hook. The package stays
+  private and is installed from source with link-cli.sh.
 
 ### Added
 

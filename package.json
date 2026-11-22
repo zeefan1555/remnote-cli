@@ -1,7 +1,7 @@
 {
   "name": "remnote-cli",
   "private": true,
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Direct CLI automation for RemNote through the RemNote CLI Bridge plugin",
   "type": "module",
   "main": "dist/remnote-cli/index.js",
@@ -12,10 +12,10 @@
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc && node scripts/chmod-bins.mjs",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:bin": "node scripts/smoke-built-cli.mjs",
     "test:integration": "./run-agent-integration-test.sh",
     "test:integration:cli": "tsx test/integration/cli/run-integration.ts",
     "test:ui": "vitest --ui",
@@ -30,34 +30,11 @@
     "generate:cli-contract": "node --import tsx scripts/generate-cli-contract.mjs",
     "check:cli-contract": "node --import tsx scripts/generate-cli-contract.mjs --check"
   },
-  "keywords": [
-    "remnote",
-    "knowledge-base",
-    "note-taking",
-    "ai",
-    "assistant",
-    "websocket",
-    "bridge"
-  ],
   "author": "zeefan1555",
   "contributors": [
     "Robert Spiegel"
   ],
   "license": "MIT",
-  "files": [
-    "dist/",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/zeefan1555/remnote-cli.git"
-  },
-  "bugs": {
-    "url": "https://github.com/zeefan1555/remnote-cli/issues"
-  },
-  "homepage": "https://github.com/zeefan1555/remnote-cli#readme",
   "dependencies": {
     "commander": "^15.0.0",
     "fflate": "^0.8.3",

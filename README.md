@@ -75,6 +75,10 @@ remnote-cli --version
 
 To run the build without registering a command, replace `remnote-cli` in the examples with `node dist/remnote-cli/index.js`.
 
+The repository keeps "private": true and has no npm publish path. The local quality
+gate builds the exact executable and runs npm run test:bin before completion.
+See [Source installation](docs/guides/source-install.md).
+
 ## Verify the first connection
 
 Start RemNote, then run:
