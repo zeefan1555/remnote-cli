@@ -48,6 +48,12 @@ describe('command group boundaries', () => {
     { name: 'root help', args: ['help'] },
     { name: 'targeted root help', args: ['help', 'todo'] },
     { name: 'group help', args: ['flashcards', 'help'] },
+    { name: 'global flag before group help', args: ['--text', 'flashcards', 'help'] },
+    {
+      name: 'valued global flag before group help',
+      args: ['--kb-id', 'synthetic', 'flashcards', 'help'],
+    },
+    { name: 'global flag after group help', args: ['flashcards', '--text', 'help'] },
   ])('delegates $name to Commander', async ({ args }) => {
     const result = await runCliForTest(args);
     expect(result.exitCode).toBe(0);

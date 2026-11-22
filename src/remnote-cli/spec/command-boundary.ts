@@ -159,6 +159,31 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
   return undefined;
 }
 
+export function normalizeTrailingGroupHelp(program: Command, argv: string[]): string[] {
+  if (argv.at(-1) !== 'help') return argv;
+  let command = program;
+  const prefix = argv.slice(2, -1);
+  for (let index = 0; index < prefix.length; index++) {
+    const token = prefix[index];
+    if (token === '--') return argv;
+    if (token.startsWith('-')) {
+      if (!isKnownOption(command, token) && !isKnownShortFlagCluster(command, token)) return argv;
+      if (isKnownShortFlagCluster(command, token) && token.includes('V')) return argv;
+      if (isKnownShortFlagCluster(command, token)) continue;
+      if (optionTakesValue(command, token)) {
+        if (index + 1 >= prefix.length) return argv;
+        index++;
+      }
+      continue;
+    }
+    const child = command.commands.find((candidate) => candidate.name() === token);
+    if (!child) return argv;
+    command = child;
+  }
+  if (command === program || command.commands.length === 0) return argv;
+  return [...argv.slice(0, -1), '--help'];
+}
+
 export function rootHelpRequested(program: Command, argv: string[]): boolean {
   const args = argv.slice(2);
   for (let index = 0; index < args.length; index++) {

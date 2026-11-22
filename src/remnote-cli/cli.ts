@@ -40,6 +40,7 @@ import { CommandCatalog } from './spec/command-spec.js';
 import {
   commandBoundaryFailure,
   installCommandHelpGroups,
+  normalizeTrailingGroupHelp,
   rootHelpRequested,
 } from './spec/command-boundary.js';
 
@@ -125,19 +126,6 @@ export async function runProgram(
     runtime.failure(error);
   }
   return finishProgram(runtime);
-}
-
-function normalizeTrailingGroupHelp(program: Command, argv: string[]): string[] {
-  if (argv.at(-1) !== 'help' || argv.slice(2, -1).includes('--')) return argv;
-  let command = program;
-  for (const token of argv.slice(2, -1)) {
-    if (token.startsWith('-')) return argv;
-    const child = command.commands.find((candidate) => candidate.name() === token);
-    if (!child) return argv;
-    command = child;
-  }
-  if (command === program || command.commands.length === 0) return argv;
-  return [...argv.slice(0, -1), '--help'];
 }
 
 export async function runCli(
