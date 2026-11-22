@@ -25,6 +25,7 @@ vi.mock('../../../src/remnote-cli/client/connection.js', () => ({
 vi.mock('../../../src/remnote-cli/client/remote-sdk.js', () => ({ remoteSdk: () => wire.plugin }));
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { ReadSession } from '../../../src/remnote-cli/client/session.js';
+import { LocalState } from '../../../src/remnote-cli/client/local-state.js';
 
 let directory: string, client: DirectClient;
 beforeEach(async () => {
@@ -106,6 +107,17 @@ describe('local business dispatch', () => {
     client.release();
     await client.close();
     expect(wire.close).toHaveBeenCalledOnce();
+  });
+
+  it('supports read-only clients that never persist search snapshots', async () => {
+    client.disablePersistence();
+    const persist = vi.spyOn(LocalState.prototype, 'setLocal').mockResolvedValue(undefined);
+
+    await client.execute('get_status', {});
+    await client.close();
+
+    expect(persist).not.toHaveBeenCalled();
+    expect(wire.close).toHaveBeenCalled();
   });
 
   it('passes an explicit KB requirement without product version matching', async () => {

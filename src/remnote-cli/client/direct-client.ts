@@ -62,6 +62,7 @@ export interface ClientOptions {
   kbId?: string;
   allowDestructive?: boolean;
   verbose?: boolean;
+  persist?: boolean;
   onDiagnostic?: (text: string) => void;
 }
 export class DirectClient {
@@ -72,8 +73,11 @@ export class DirectClient {
   private workspace?: SdkWorkspaceBackend;
   private startedAt = performance.now();
   private holds = 0;
+  private persist = true;
   private readonly readSession = new ReadSession();
-  constructor(private readonly options: ClientOptions = {}) {}
+  constructor(private readonly options: ClientOptions = {}) {
+    this.persist = options.persist !== false;
+  }
 
   /** Keep the bridge open while an outer batch runs inner commands. */
   retain(): void {
@@ -85,6 +89,9 @@ export class DirectClient {
   }
   release(): void {
     this.holds = Math.max(0, this.holds - 1);
+  }
+  disablePersistence(): void {
+    this.persist = false;
   }
 
   private async connect(): Promise<void> {
@@ -193,7 +200,7 @@ export class DirectClient {
   async close(): Promise<void> {
     if (this.holds > 0) return;
     try {
-      if (this.adapter && this.state)
+      if (this.adapter && this.state && this.persist)
         await this.state.setLocal('search-snapshots', this.adapter.exportSearchSnapshots());
       if (this.options.verbose && this.connection)
         this.options.onDiagnostic?.(

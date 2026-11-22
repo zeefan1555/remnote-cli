@@ -85,6 +85,17 @@ remnote-cli status --text
 
 A working connection starts with `Bridge: Connected`. The status also shows the active knowledge base, plugin ID `remnote-cli-bridge`, protocol version 2, and the live SDK version. Product versions do not need to match. Compatibility depends on protocol version 2 and the live SDK catalog.
 
+Run the aggregated read-only diagnostic when setup or state looks wrong:
+
+```bash
+remnote-cli doctor --text
+remnote-cli doctor --offline --json
+```
+
+Doctor checks Node, the CLI contract, state-directory access, the Bridge, plugin
+identity, protocol, knowledge base, SDK catalog, required capabilities and local
+journals. It never writes RemNote data or local state.
+
 You can inspect the machine-readable interface without RemNote running:
 
 ```bash
@@ -110,6 +121,8 @@ remnote-cli schema sdk rem
 
 Command options come directly from the registered Commander command, so schema
 and help cannot drift. See [Command schema](docs/guides/command-schema.md).
+
+See [Doctor](docs/guides/doctor.md) for status meanings and offline behavior.
 
 ## Find and read notes
 

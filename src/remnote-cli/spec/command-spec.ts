@@ -142,6 +142,7 @@ const COMMAND_POLICIES: Record<string, CommandPolicy> = {
   'sync diff': { risk: 'read', bridge: 'none' },
   'sync recover': { risk: 'write', bridge: 'required' },
   'sync format': { risk: 'write', bridge: 'none' },
+  doctor: { risk: 'read', bridge: 'optional' },
   contract: { risk: 'read', bridge: 'none' },
   schema: { risk: 'read', bridge: 'none' },
 };
