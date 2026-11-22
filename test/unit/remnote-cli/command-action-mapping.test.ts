@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { EXIT } from '../../../src/remnote-cli/output/errors.js';
+import * as contentInput from '../../../src/remnote-cli/commands/content-input.js';
 import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 const tempDirs: string[] = [];
@@ -34,6 +35,108 @@ async function runCommand(args: string[], result: unknown = { ok: true }): Promi
 }
 
 describe('command bridge action mapping', () => {
+  it.each(['update', 'update-answer'])('reads --content - as stdin for %s', async (command) => {
+    const read = vi
+      .spyOn(contentInput, 'readContentFileOrStdin')
+      .mockResolvedValue('From stdin\nSee [[id:source]]');
+    const args = [
+      'rem',
+      command,
+      'answer',
+      '--content',
+      '-',
+      '--expected-text-hash',
+      'a'.repeat(64),
+    ];
+    if (command === 'update-answer') args.push('--card-id', 'question');
+    const executeSpy = await runCommand(args);
+    expect(executeSpy).toHaveBeenCalledWith(
+      command === 'update' ? 'update_note' : 'update_answer',
+      expect.objectContaining({ content: 'From stdin\nSee [[id:source]]' })
+    );
+    expect(read).toHaveBeenCalledWith('-');
+    executeSpy.mockRestore();
+    read.mockRestore();
+  });
+  it('maps safe own-text updates and native reference content without a public segment format', async () => {
+    const executeSpy = await runCommand([
+      'rem',
+      'update',
+      'question',
+      '--content',
+      'See [[id:source]]',
+      '--expected-text-hash',
+      'a'.repeat(64),
+    ]);
+    expect(executeSpy).toHaveBeenCalledWith('update_note', {
+      remId: 'question',
+      content: 'See [[id:source]]',
+      expectedTextHash: 'a'.repeat(64),
+    });
+    executeSpy.mockRestore();
+  });
+
+  it('maps the answer update to its exact card-generating parent', async () => {
+    const executeSpy = await runCommand([
+      'rem',
+      'update-answer',
+      'answer',
+      '--card-id',
+      'question',
+      '--content',
+      'New answer',
+      '--expected-text-hash',
+      'a'.repeat(64),
+    ]);
+    expect(executeSpy).toHaveBeenCalledWith('update_answer', {
+      remId: 'answer',
+      cardId: 'question',
+      content: 'New answer',
+      expectedTextHash: 'a'.repeat(64),
+    });
+    executeSpy.mockRestore();
+  });
+
+  it.each([
+    ['--add-aliases', 'Added'],
+    ['--remove-aliases', 'Removed'],
+    ['--add-aliases', 'Added', '--remove-aliases', 'Removed'],
+  ])(
+    'rejects content combined with alias flags before bridge execution: %j',
+    async (...aliases) => {
+      const executeSpy = vi
+        .spyOn(DirectClient.prototype, 'execute')
+        .mockResolvedValue({ ok: true });
+      const result = await runCliForTest([
+        'rem',
+        'update',
+        'question',
+        '--content',
+        'New',
+        '--expected-text-hash',
+        'a'.repeat(64),
+        ...aliases,
+      ]);
+      expect(result.exitCode).toBe(EXIT.USAGE);
+      expect(parseFailure(result.stderr).type).toBe('usage');
+      expect(executeSpy).not.toHaveBeenCalled();
+      executeSpy.mockRestore();
+    }
+  );
+
+  it.each([
+    ['rem', 'update', 'question', '--content', 'New'],
+    ['rem', 'update', 'question', '--content', 'New', '--expected-text-hash', 'A'.repeat(64)],
+    ['rem', 'update-answer', 'answer', '--content', 'New', '--expected-text-hash', 'a'.repeat(64)],
+    ['rem', 'update-answer', 'answer', '--card-id', 'question', '--content', 'New'],
+  ])('rejects incomplete or malformed updates at the command boundary: %j', async (...args) => {
+    const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
+    const result = await runCliForTest(args);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr).type).toBe('usage');
+    expect(executeSpy).not.toHaveBeenCalled();
+    executeSpy.mockRestore();
+  });
   afterEach(async () => {
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });

@@ -34,6 +34,7 @@ const operations = {
   list_todos: ['listTodos', schemas.ListTodosSchema],
   update_todo: ['updateTodo', schemas.UpdateTodoSchema],
   update_note: ['updateNote', schemas.UpdateNoteSchema],
+  update_answer: ['updateAnswer', schemas.UpdateAnswerSchema],
   set_document_status: ['setDocumentStatus', schemas.SetDocumentStatusSchema],
   insert_children: ['insertChildren', schemas.InsertChildrenSchema],
   move_note: ['moveNote', schemas.MoveNoteSchema],

@@ -17,6 +17,7 @@ import {
   GetSdkCapabilitiesSchema,
   SdkCallSchema,
   UpdateNoteSchema,
+  UpdateAnswerSchema,
   SetDocumentStatusSchema,
   DeleteRemSchema,
   InsertChildrenSchema,
@@ -429,6 +430,55 @@ describe('SearchByTagSchema', () => {
 });
 
 describe('UpdateNoteSchema', () => {
+  it.each([
+    { addAliases: ['Added'] },
+    { removeAliases: ['Removed'] },
+    { addAliases: ['Added'], removeAliases: ['Removed'] },
+    { addAliases: [] },
+    { removeAliases: [] },
+  ])('rejects content combined with alias fields: %j', (aliases) => {
+    const result = UpdateNoteSchema.safeParse({
+      remId: 'question',
+      content: 'New',
+      expectedTextHash: 'a'.repeat(64),
+      ...aliases,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires a lowercase raw text hash for content without changing metadata-only inputs', () => {
+    const input = { remId: 'question', content: 'New', expectedTextHash: 'a'.repeat(64) };
+    expect(UpdateNoteSchema.parse(input)).toEqual(input);
+    expect(UpdateNoteSchema.parse({ remId: 'question', title: 'Title' })).toEqual({
+      remId: 'question',
+      title: 'Title',
+    });
+    for (const expectedTextHash of [undefined, 'A'.repeat(64), 'a'.repeat(63), 'no'])
+      expect(UpdateNoteSchema.safeParse({ ...input, expectedTextHash }).success).toBe(false);
+    expect(UpdateNoteSchema.safeParse({ ...input, title: 'Other' }).success).toBe(false);
+    expect(
+      UpdateNoteSchema.safeParse({ remId: 'question', expectedTextHash: input.expectedTextHash })
+        .success
+    ).toBe(false);
+  });
+
+  it('requires an exact parent card Rem, text and hash for update-answer', () => {
+    const input = {
+      remId: 'answer',
+      cardId: 'question',
+      content: 'New',
+      expectedTextHash: 'a'.repeat(64),
+    };
+    expect(UpdateAnswerSchema.parse(input)).toEqual(input);
+    for (const key of ['cardId', 'content', 'expectedTextHash'])
+      expect(UpdateAnswerSchema.safeParse({ ...input, [key]: undefined }).success).toBe(false);
+    expect(
+      UpdateAnswerSchema.safeParse({ ...input, expectedTextHash: 'A'.repeat(64) }).success
+    ).toBe(false);
+    expect(UpdateAnswerSchema.safeParse({ ...input, content: [{ rem: 'target' }] }).success).toBe(
+      false
+    );
+  });
   it('should validate title update fields', () => {
     const result = UpdateNoteSchema.parse({ remId: 'rem-456', title: 'New Title' });
     expect(result.remId).toBe('rem-456');

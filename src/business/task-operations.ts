@@ -1,6 +1,7 @@
 import type { PluginRem, ReactRNPlugin, RichTextInterface } from '@remnote/plugin-sdk';
 import { RemType } from './sdk-constants.generated.js';
 import { contentHash } from './content-hash.js';
+import { snapshotCardIdentity } from './card-identity.js';
 import { hasCardStructure } from './card-structure.js';
 import {
   inspectWithEvidence,
@@ -612,15 +613,18 @@ export class TaskOperations {
       parentRemId: (await rem.getParentRem())?._id,
       children: nativeIds(await rem.getChildrenRem()),
       tags: nativeIds(await rem.getTagRems()).sort(),
-      cards: (await rem.getCards()).map((c) => ({
-        cardId: c._id,
-        type: c.type,
-        createdAt: c.createdAt,
-        repetitionHistory: c.repetitionHistory ?? [],
-        nextRepetitionTime: c.nextRepetitionTime,
-        lastRepetitionTime: c.lastRepetitionTime,
-        timesWrongInRow: c.timesWrongInRow,
-      })),
+      cards: (await rem.getCards()).map((c) => {
+        const snapshot = snapshotCardIdentity(c, rem._id);
+        return {
+          cardId: snapshot.id,
+          type: snapshot.type,
+          createdAt: snapshot.createdAt ?? undefined,
+          repetitionHistory: snapshot.repetitionHistory ?? [],
+          nextRepetitionTime: snapshot.nextRepetitionTime ?? undefined,
+          lastRepetitionTime: snapshot.lastRepetitionTime ?? undefined,
+          timesWrongInRow: snapshot.timesWrongInRow ?? undefined,
+        };
+      }),
     };
   }
   private async facts(ids: string[], receipt: TaskReceipt): Promise<void> {

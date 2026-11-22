@@ -403,6 +403,24 @@ export const MoveNoteSchema = z
     }
   });
 
+const ExpectedTextHashSchema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/, 'Expected 64 lowercase SHA-256 hex characters');
+
+export const UpdateAnswerSchema = z
+  .object({
+    remId: z.string().min(1).describe('The answer Rem ID to update'),
+    cardId: z
+      .string()
+      .min(1)
+      .describe('Exact card-generating parent Rem ID, not a generated CardID'),
+    content: z
+      .string()
+      .describe('Replacement own text with Markdown and [[id:<remId>]] references'),
+    expectedTextHash: ExpectedTextHashSchema,
+  })
+  .strict();
+
 export const UpdateNoteSchema = z
   .object({
     remId: z.string().describe('The Rem ID to update'),
@@ -410,19 +428,53 @@ export const UpdateNoteSchema = z
       .string()
       .optional()
       .describe('New title (markdown supported, including exact references as [[id:<remId>]])'),
+    content: z
+      .string()
+      .optional()
+      .describe(
+        'Replace only this Rem own text and preserve children. Cannot combine with title or alias changes.'
+      ),
+    expectedTextHash: ExpectedTextHashSchema.optional(),
     addAliases: AliasArraySchema.describe('Aliases to add if not already present'),
     removeAliases: AliasArraySchema.describe('Aliases to remove by exact normalized match'),
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.content !== undefined && value.expectedTextHash === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expectedTextHash'],
+        message: 'content requires expectedTextHash',
+      });
+    if (value.content !== undefined && value.title !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['title'],
+        message: 'Use either title or content, not both',
+      });
+    for (const field of ['addAliases', 'removeAliases'] as const)
+      if (value.content !== undefined && value[field] !== undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `content cannot be combined with ${field}; run separate commands`,
+        });
+    if (value.expectedTextHash !== undefined && value.content === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expectedTextHash'],
+        message: 'expectedTextHash requires content',
+      });
     if (
       value.title === undefined &&
+      value.content === undefined &&
       (value.addAliases?.length ?? 0) === 0 &&
       (value.removeAliases?.length ?? 0) === 0
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'remnote_update_note requires title, addAliases, or removeAliases',
+        message:
+          'remnote_update_note requires title, addAliases, or removeAliases, or content with expectedTextHash',
       });
     }
 

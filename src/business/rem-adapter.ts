@@ -33,6 +33,8 @@ import { TaskOperations, type TaskApplyParams } from './task-operations.js';
 import type { FlashcardsPlan } from '../schemas/task-schemas.js';
 import { cardDelimiterIndex } from './card-structure.js';
 import { contentHash } from './content-hash.js';
+import { snapshotCardIdentity, type InspectedRawCard } from './card-identity.js';
+import { CliFailure } from '../remnote-cli/output/errors.js';
 import type { ReadSession } from '../remnote-cli/client/session.js';
 
 export type ContentMode = 'none' | 'markdown' | 'structured';
@@ -126,11 +128,52 @@ export interface MediaLocatorResult extends Omit<RemMediaMetadata, 'source'> {
   localToken: string;
 }
 
-export interface UpdateNoteParams {
+interface UpdateNoteMetadata {
   remId: string;
-  title?: string;
   addAliases?: string[];
   removeAliases?: string[];
+}
+
+export type UpdateNoteParams =
+  | {
+      remId: string;
+      content: string;
+      expectedTextHash: string;
+      title?: never;
+      addAliases?: never;
+      removeAliases?: never;
+    }
+  | (UpdateNoteMetadata & { content?: never; expectedTextHash?: never; title?: string });
+
+export interface UpdateAnswerParams {
+  remId: string;
+  cardId: string;
+  content: string;
+  expectedTextHash: string;
+}
+
+export interface TextUpdateReceipt {
+  status: 'verified';
+  remId: string;
+  cardRemId?: string;
+  parentRemId: string | null;
+  titles: string[];
+  remIds: string[];
+  beforeTextHash: string;
+  textHash: string;
+  isCardItem: boolean;
+  childrenRemIds: string[];
+  cardIds: string[];
+  rawCards: InspectedRawCard[];
+  verification: {
+    text: true;
+    parent: true;
+    children: true;
+    cardItem: true;
+    cardIdentity: true;
+    scheduling: true;
+    availableHistory: true;
+  };
 }
 
 export interface SetDocumentStatusParams {
@@ -3853,10 +3896,15 @@ export class RemAdapter {
   /**
    * Update an existing note
    */
-  async updateNote(params: UpdateNoteParams): Promise<{ titles: string[]; remIds: string[] }> {
+  async updateNote(
+    params: UpdateNoteParams
+  ): Promise<{ titles: string[]; remIds: string[] } | TextUpdateReceipt> {
     if (!this.settings.acceptWriteOperations) {
       throw new Error('Write operations are disabled in Automation Bridge settings');
     }
+
+    if (params.content !== undefined)
+      return this.updateOwnText(params.remId, params.content, params.expectedTextHash);
 
     const remId = this.requireString(params.remId, 'remId');
     const title =
@@ -3892,6 +3940,135 @@ export class RemAdapter {
     });
 
     return { titles: [primaryTitle], remIds: [remId] };
+  }
+
+  async updateAnswer(params: UpdateAnswerParams): Promise<TextUpdateReceipt> {
+    return this.updateOwnText(params.remId, params.content, params.expectedTextHash, params.cardId);
+  }
+
+  private async updateOwnText(
+    remId: string,
+    content: string,
+    expectedTextHash: string,
+    cardRemId?: string
+  ): Promise<TextUpdateReceipt> {
+    this.assertWriteEnabled();
+    const desired = await this.parseMarkdownWithIdReferenceTokens(content);
+    const desiredHash = await contentHash(desired);
+    const rem = await this.plugin.rem.findOne(remId);
+    if (!rem) throw new CliFailure('not_found', 'rem_not_found', `Note not found: ${remId}`);
+    if (rem._id !== remId) throw new Error('SDK returned a different target Rem');
+    const beforeTextHash = await contentHash(rem.text);
+    if (beforeTextHash !== expectedTextHash)
+      throw new CliFailure(
+        'conflict',
+        'text_hash_mismatch',
+        `Text changed for ${remId}; inspect before retrying`
+      );
+    const [parent, children, isCardItem, ownCards] = await Promise.all([
+      rem.getParentRem(),
+      rem.getChildrenRem(),
+      rem.isCardItem(),
+      rem.getCards(),
+    ]);
+    const parentRemId = parent?._id ?? null;
+    const childrenRemIds = children.map((child) => child._id);
+    if (cardRemId !== undefined && parentRemId !== cardRemId)
+      throw new CliFailure(
+        'conflict',
+        'answer_parent_mismatch',
+        'Answer must be a direct child of the exact card Rem'
+      );
+    if (cardRemId !== undefined && !isCardItem)
+      throw new CliFailure(
+        'conflict',
+        'answer_not_card_item',
+        'Target is not an existing card-item answer'
+      );
+    const cardOwner = isCardItem && parent ? parent : rem;
+    const cards = cardOwner === rem ? ownCards : await cardOwner.getCards();
+    if (cardRemId !== undefined && cards.length === 0)
+      throw new CliFailure(
+        'conflict',
+        'parent_not_card',
+        'The exact parent Rem does not generate cards'
+      );
+    const beforeCards = cards.map((card) => snapshotCardIdentity(card, cardOwner._id));
+    const ownBeforeCards = ownCards.map((card) => snapshotCardIdentity(card, remId));
+    const cardHash = await contentHash(beforeCards);
+    const ownCardHash = await contentHash(ownBeforeCards);
+
+    this.assertWriteEnabled();
+    try {
+      await rem.setText(desired);
+      const after = await this.plugin.rem.findOne(remId);
+      if (!after) throw new Error('Target disappeared after write');
+      if (after._id !== remId) throw new Error('SDK returned a different target after write');
+      const [textHash, afterParent, afterChildren, afterCardItem, afterOwnCards] =
+        await Promise.all([
+          contentHash(after.text),
+          after.getParentRem(),
+          after.getChildrenRem(),
+          after.isCardItem(),
+          after.getCards(),
+        ]);
+      const ownerAfter = cardOwner === rem ? after : await this.plugin.rem.findOne(cardOwner._id);
+      if (!ownerAfter) throw new Error('Card owner disappeared after write');
+      const rawCards = (cardOwner === rem ? afterOwnCards : await ownerAfter.getCards()).map(
+        (card) => snapshotCardIdentity(card, ownerAfter._id)
+      );
+      if (
+        textHash !== desiredHash ||
+        (afterParent?._id ?? null) !== parentRemId ||
+        (await contentHash(afterChildren.map((child) => child._id))) !==
+          (await contentHash(childrenRemIds)) ||
+        afterCardItem !== isCardItem ||
+        (await contentHash(rawCards)) !== cardHash ||
+        (await contentHash(afterOwnCards.map((card) => snapshotCardIdentity(card, remId)))) !==
+          ownCardHash
+      )
+        throw new Error(
+          'Text, parent, children, card-item, card identity, scheduling or available history changed'
+        );
+      return {
+        status: 'verified',
+        remId,
+        ...(beforeCards.length ? { cardRemId: ownerAfter._id } : {}),
+        parentRemId,
+        remIds: [remId],
+        titles: [await this.extractText(after.text)],
+        beforeTextHash,
+        textHash,
+        isCardItem,
+        childrenRemIds,
+        cardIds: rawCards.map((card) => card.id),
+        rawCards,
+        verification: {
+          text: true,
+          parent: true,
+          children: true,
+          cardItem: true,
+          cardIdentity: true,
+          scheduling: true,
+          availableHistory: true,
+        },
+      };
+    } catch (cause) {
+      throw new CliFailure(
+        'unknown_outcome',
+        'text_update_unverified',
+        `Text write attempted for ${remId}; readback did not verify. Inspect exact IDs before another write.`,
+        {
+          details: {
+            remId,
+            cardRemId: cardOwner?._id,
+            beforeTextHash,
+            expectedTextHash: desiredHash,
+          },
+          cause,
+        }
+      );
+    }
   }
 
   async setDocumentStatus(params: SetDocumentStatusParams): Promise<SetDocumentStatusResult> {
