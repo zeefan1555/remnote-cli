@@ -88,6 +88,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Finalize the source-only distribution path. Remove dead npm publish metadata
   and scripts, add a built-executable smoke gate, and release version 0.28.0.
+- Align the repository Agent Skill with the version 2 envelope, structured
+  error types, offline doctor, command schema and complete pagination metadata.
 - Route every command through one injected CLI runtime so batch no longer replaces
   global console state. Batch returns structured per-command errors and supports
   detection of unsafe unknown write outcomes.
