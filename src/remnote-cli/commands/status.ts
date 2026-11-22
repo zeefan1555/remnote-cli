@@ -2,11 +2,15 @@ import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerStatusCommand(program: Command): void {
-  program
-    .command('status')
-    .description('Check bridge connection status')
+export function registerStatusCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'status', {
+      description: 'Check bridge connection status',
+      risk: 'read',
+      bridge: 'required',
+    })
     .action(async () => {
       const globalOpts = program.opts();
       const format: OutputFormat = globalOpts.text ? 'text' : 'json';

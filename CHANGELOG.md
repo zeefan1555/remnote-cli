@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] - 2026-11-22
+
+### Changed
+
+- Replace the separate command-policy path map with `CommandCatalog`. Every Commander command registers its path and execution metadata through one entry, and undeclared paths now fail schema generation.
+- Distinguish navigation groups from executable actions in command schema and contract output. Groups no longer carry misleading risk or Bridge policy.
+- Bump command schema and contract versions to 2 while retaining the version 2 output envelope.
+
 ## [0.27.0] - 2026-11-22
 
 ### Changed

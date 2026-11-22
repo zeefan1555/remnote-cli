@@ -4,13 +4,17 @@ import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { resolveJournalContent } from './content-input.js';
 import { checkPayloadForFlags, validateNotFlag } from './arg-utils.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerJournalCommand(program: Command): void {
-  const subprogram = program.command('journal [content]');
+export function registerJournalCommand(program: Command, catalog: CommandCatalog): void {
+  const subprogram = catalog.action(program, 'journal [content]', {
+    description: "Append to today's journal; new non-leaf Rems are collapsed automatically",
+    risk: 'write',
+    bridge: 'required',
+  });
   const validate = (val: string) => validateNotFlag(val, subprogram);
 
   subprogram
-    .description("Append to today's journal; new non-leaf Rems are collapsed automatically")
     .option(
       '--content <text>',
       'Journal entry content (use [[id:<remId>]] for exact references)',

@@ -12,6 +12,7 @@ import { createCommandClient } from '../client/command-client.js';
 import { CliFailure } from '../output/errors.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 const RULES_BYTES = 1024 * 1024;
 
@@ -85,10 +86,13 @@ function formatRulesText(data: unknown): string {
     .join('\n');
 }
 
-export function registerInspectCommand(program: Command): void {
-  program
-    .command('inspect [ids...]')
-    .description('Read generic Rem state as JSON in one bridge session')
+export function registerInspectCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'inspect [ids...]', {
+      description: 'Read generic Rem state as JSON in one bridge session',
+      risk: 'read',
+      bridge: 'required',
+    })
     .option('--from-file <path|->', 'JSON array or whitespace-separated Rem IDs')
     .option('--descendants <n>', 'Include descendants to this depth (0-20)', '0')
     .option('--fields <list>', `Comma-separated fields: ${INSPECT_FIELDS.join(', ')}`)
@@ -153,10 +157,13 @@ export function registerInspectCommand(program: Command): void {
     });
 }
 
-export function registerAssertCommand(program: Command): void {
-  program
-    .command('assert')
-    .description('Evaluate generic rules against inspect JSON')
+export function registerAssertCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'assert', {
+      description: 'Evaluate generic rules against inspect JSON',
+      risk: 'read',
+      bridge: 'optional',
+    })
     .requiredOption('--file <path|->', 'Rules JSON (schemaVersion 1)')
     .option('--against <path>', 'Evaluate an existing inspect JSON file instead of reading RemNote')
     .option('--strict', 'Exit 1 when any rule fails or a live read is incomplete')

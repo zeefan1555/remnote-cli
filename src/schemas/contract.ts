@@ -60,7 +60,7 @@ const requiredCapabilities = {
 
 export function buildCliContract(commands: CommandSpec[] = []) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     protocolVersion: PROTOCOL_VERSION,
     bridgeActions: Object.values(REMOTE_ACTION_NAMES),
     plans: planSchemas,
@@ -81,13 +81,18 @@ export function buildCliContract(commands: CommandSpec[] = []) {
       unknownOutcome: EXIT.UNKNOWN_OUTCOME,
       unsupported: EXIT.UNSUPPORTED,
     },
-    commands: commands.map((command) => ({
-      path: command.path,
-      risk: command.risk,
-      bridge: command.bridge,
-      dynamic: command.dynamic,
-      ...(command.pagination === undefined ? {} : { pagination: command.pagination }),
-    })),
+    commands: commands.map((command) =>
+      command.kind === 'group'
+        ? { path: command.path, kind: command.kind }
+        : {
+            path: command.path,
+            kind: command.kind,
+            risk: command.risk,
+            bridge: command.bridge,
+            dynamic: command.dynamic,
+            ...(command.pagination === undefined ? {} : { pagination: command.pagination }),
+          }
+    ),
     workspace: {
       requiresBridge: {
         plan: false,

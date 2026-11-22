@@ -2,11 +2,15 @@ import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerReadTableCommand(program: Command): void {
-  program
-    .command('read-table')
-    .description('Read an Advanced Table (columns and row data)')
+export function registerReadTableCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'read-table', {
+      description: 'Read an Advanced Table (columns and row data)',
+      risk: 'read',
+      bridge: 'required',
+    })
     .option('--title <title>', 'Exact Advanced Table title')
     .option('--rem-id <id>', 'Table Rem ID')
     .option('-l, --limit <n>', 'Maximum rows to return (default: 50)', '50')

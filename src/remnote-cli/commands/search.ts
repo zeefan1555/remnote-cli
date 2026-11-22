@@ -4,6 +4,7 @@ import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { CliFailure } from '../output/errors.js';
 import { collectPages, paginationOptions, registerPaginationOptions } from './pagination.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 /** Default number of search results. */
 const DEFAULT_SEARCH_LIMIT = 50;
@@ -151,9 +152,18 @@ function registerCommonSearchOptions(command: Command): Command {
   return registerPaginationOptions(configured);
 }
 
-export function registerSearchCommand(program: Command): void {
+export function registerSearchCommand(program: Command, catalog: CommandCatalog): void {
   registerCommonSearchOptions(
-    program.command('search <query>').description('Search for notes in RemNote')
+    catalog.action(program, 'search <query>', {
+      description: 'Search for notes in RemNote',
+      risk: 'read',
+      bridge: 'required',
+      pagination: {
+        kind: 'cursor',
+        automatic: true,
+        arguments: ['all', 'max-pages', 'page-delay'],
+      },
+    })
   )
     .option('--cursor <cursor>', 'Opaque cursor returned by a previous search page')
     .option('--parent-id <remId>', "Optional. Scope search to within this Rem's subtree")
@@ -192,11 +202,19 @@ export function registerSearchCommand(program: Command): void {
     });
 }
 
-export function registerSearchByTagCommand(program: Command): void {
+export function registerSearchByTagCommand(program: Command, catalog: CommandCatalog): void {
   registerCommonSearchOptions(
-    program
-      .command('search-by-tag')
-      .description('Search notes by exact tag Rem ID with ancestor-context resolution')
+    catalog
+      .action(program, 'search-by-tag', {
+        description: 'Search notes by exact tag Rem ID with ancestor-context resolution',
+        risk: 'read',
+        bridge: 'required',
+        pagination: {
+          kind: 'cursor',
+          automatic: true,
+          arguments: ['all', 'max-pages', 'page-delay'],
+        },
+      })
       .requiredOption('--tag-id <tagRemId>', 'Exact tag Rem ID to search')
       .option(
         '--result-mode <mode>',
@@ -234,10 +252,18 @@ export function registerSearchByTagCommand(program: Command): void {
   });
 }
 
-export function registerListChildrenCommand(program: Command): void {
-  const command = program
-    .command('list-children <parent-rem-id...>')
-    .description('List direct child Rems under one or more parents')
+export function registerListChildrenCommand(program: Command, catalog: CommandCatalog): void {
+  const command = catalog
+    .action(program, 'list-children <parent-rem-id...>', {
+      description: 'List direct child Rems under one or more parents',
+      risk: 'read',
+      bridge: 'required',
+      pagination: {
+        kind: 'cursor',
+        automatic: true,
+        arguments: ['all', 'max-pages', 'page-delay'],
+      },
+    })
     .option('-l, --limit <n>', 'Maximum direct children (default: 50)', '50')
     .option('--cursor <cursor>', 'Opaque cursor returned by a previous list-children page')
     .option('--view <view>', 'Output detail level: compact, standard, or full')

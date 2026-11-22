@@ -18,6 +18,7 @@ import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult } from '../output/formatter.js';
 import { CliFailure } from '../output/errors.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 interface SyncOptions {
   apply?: boolean;
@@ -49,10 +50,10 @@ function pathOptions(command: Command): Command {
   );
 }
 
-export function registerSyncCommands(program: Command): void {
-  const workspace = program
-    .command('sync')
-    .description('Synchronize local Markdown and RemNote through explicit bounded commands');
+export function registerSyncCommands(program: Command, catalog: CommandCatalog): void {
+  const workspace = catalog.group(program, 'sync', {
+    description: 'Synchronize local Markdown and RemNote through explicit bounded commands',
+  });
 
   async function execute(
     name:
@@ -131,28 +132,33 @@ export function registerSyncCommands(program: Command): void {
   }
 
   for (const name of ['plan', 'apply'] as const) {
-    const command = pathOptions(workspace.command(name + ' <directory>'))
-      .description(
-        name === 'plan'
-          ? 'Preview bidirectional synchronization with zero native writes'
-          : 'Plan, check, apply and verify synchronization in one invocation'
-      )
-      .addOption(
-        new Option('--scope <scope>', 'Reconcile local changes or all bound IDs in selected paths')
-          .choices(['changed', 'all'])
-          .default('changed')
-      );
+    const command = pathOptions(
+      catalog.action(workspace, name + ' <directory>', {
+        description:
+          name === 'plan'
+            ? 'Preview bidirectional synchronization with zero native writes'
+            : 'Plan, check, apply and verify synchronization in one invocation',
+        risk: name === 'plan' ? 'read' : 'write',
+        bridge: 'required',
+      })
+    ).addOption(
+      new Option('--scope <scope>', 'Reconcile local changes or all bound IDs in selected paths')
+        .choices(['changed', 'all'])
+        .default('changed')
+    );
     if (name === 'apply')
       command.option('--plan-hash <sha256>', 'Require this exact previous preview when applying');
     command.action(async (directory: string, { path, ...options }: SelectionOptions) =>
       execute('sync', directory, { ...options, paths: path, apply: name === 'apply' })
     );
   }
-  workspace
-    .command('resume <directory>')
-    .description(
-      'Reconcile exact IDs for the original interrupted plan, then continue only unattempted writes'
-    )
+  catalog
+    .action(workspace, 'resume <directory>', {
+      description:
+        'Reconcile exact IDs for the original interrupted plan, then continue only unattempted writes',
+      risk: 'write',
+      bridge: 'required',
+    })
     .requiredOption(
       '--plan-hash <sha256>',
       'Exact original interrupted plan hash; no selector changes'
@@ -160,9 +166,12 @@ export function registerSyncCommands(program: Command): void {
     .action(async (directory: string, options: SyncOptions) =>
       execute('resume', directory, options)
     );
-  workspace
-    .command('delete <directory>')
-    .description('Preview explicit deletion of an exact note/card and its bounded descendants')
+  catalog
+    .action(workspace, 'delete <directory>', {
+      description: 'Preview explicit deletion of an exact note/card and its bounded descendants',
+      risk: 'destructive',
+      bridge: 'required',
+    })
     .requiredOption('--id <id>', 'Exact note/card to delete')
     .requiredOption('--scope-root <id>', 'Exact ancestor boundary for deletion')
     .option('--apply', 'Apply the reviewed deletion with destructive authorization and live gates')
@@ -184,35 +193,46 @@ export function registerSyncCommands(program: Command): void {
         });
       }
     );
-  workspace
-    .command('relocate <directory> <destination>')
-    .description('Relocate a bound private workspace offline without changing note identities')
+  catalog
+    .action(workspace, 'relocate <directory> <destination>', {
+      description: 'Relocate a bound private workspace offline without changing note identities',
+      risk: 'write',
+      bridge: 'none',
+    })
     .action(async (directory: string, destination: string) =>
       execute('relocate', directory, {}, destination)
     );
-  workspace
-    .command('read <directory> <path>')
-    .description('Read local Markdown and its exact fileHash offline')
+  catalog
+    .action(workspace, 'read <directory> <path>', {
+      description: 'Read local Markdown and its exact fileHash offline',
+      risk: 'read',
+      bridge: 'none',
+    })
     .action(async (directory: string, path: string) => execute('read', directory, {}, path));
-  workspace
-    .command('save <directory> <path>')
-    .description('Save local Markdown offline and bind changed Rem content to this save time')
+  catalog
+    .action(workspace, 'save <directory> <path>', {
+      description: 'Save local Markdown offline and bind changed Rem content to this save time',
+      risk: 'write',
+      bridge: 'none',
+    })
     .requiredOption('--content-file <path|->', 'Complete edited Markdown file, or - for stdin')
     .requiredOption('--expected-file-hash <sha256>', 'Exact fileHash returned by sync read')
     .action(async (directory: string, path: string, options: SyncOptions) =>
       execute('save', directory, options, path)
     );
   for (const name of ['import', 'status', 'lint', 'diff', 'recover', 'format'] as const) {
-    const command = workspace.command(name + ' <directory>').description(
-      {
+    const command = catalog.action(workspace, name + ' <directory>', {
+      description: {
         import: 'Create the first baseline in an empty directory; use sync apply for later changes',
         status: 'Offline local-source status',
         lint: 'Offline native metadata, outline, card and identity validation',
         diff: 'Offline supported changes; never infer deletion or movement',
         recover: 'Finish staged local publication without remote writes',
         format: 'Offline canonical formatting of a clean sealed publication as human Markdown',
-      }[name]
-    );
+      }[name],
+      risk: name === 'status' || name === 'lint' || name === 'diff' ? 'read' : 'write',
+      bridge: name === 'import' || name === 'recover' ? 'required' : 'none',
+    });
     if (name === 'import')
       command
         .option('--root-id <id>', 'Import only this exact subtree into a new dedicated directory')

@@ -4,6 +4,7 @@ import { runDoctor, type DoctorReport } from '../diagnostics/doctor.js';
 import { CliFailure } from '../output/errors.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { emit, fail } from '../output/runtime.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 function formatDoctorText(data: unknown): string {
   const report = data as DoctorReport;
@@ -23,10 +24,13 @@ function formatDoctorText(data: unknown): string {
   ].join('\n');
 }
 
-export function registerDoctorCommand(program: Command): void {
-  program
-    .command('doctor')
-    .description('Run read-only CLI, Bridge, SDK, state and journal diagnostics')
+export function registerDoctorCommand(program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(program, 'doctor', {
+      description: 'Run read-only CLI, Bridge, SDK, state and journal diagnostics',
+      risk: 'read',
+      bridge: 'optional',
+    })
     .option('--offline', 'Check local installation and state without opening the Bridge')
     .addHelpText(
       'after',

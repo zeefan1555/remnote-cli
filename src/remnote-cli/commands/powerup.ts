@@ -2,12 +2,16 @@ import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
-export function registerPowerupCommand(program: Command): void {
-  const powerup = program.command('powerup').description('Read powerup slots by code');
-  powerup
-    .command('get')
-    .description('Read one powerup slot from a Rem')
+export function registerPowerupCommand(program: Command, catalog: CommandCatalog): void {
+  const powerup = catalog.group(program, 'powerup', { description: 'Read powerup slots by code' });
+  catalog
+    .action(powerup, 'get', {
+      description: 'Read one powerup slot from a Rem',
+      risk: 'read',
+      bridge: 'required',
+    })
     .requiredOption('--rem <id>', 'Rem that carries the powerup')
     .requiredOption('--powerup <code>', 'Powerup code, for example sp')
     .requiredOption('--slot <code>', 'Slot code, for example q or f')

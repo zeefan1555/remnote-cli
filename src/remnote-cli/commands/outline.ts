@@ -2,6 +2,7 @@ import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import type { CommandCatalog } from '../spec/command-spec.js';
 
 function formatOutlineText(data: unknown): string {
   const result = data as Record<string, unknown>;
@@ -13,14 +14,16 @@ function formatOutlineText(data: unknown): string {
 function registerOutlineAction(
   outline: Command,
   program: Command,
+  catalog: CommandCatalog,
   name: 'collapse' | 'expand',
   collapsed: boolean
 ): void {
-  outline
-    .command(name)
-    .description(
-      `${name === 'collapse' ? 'Collapse' : 'Expand'} every non-leaf Rem below a root Rem`
-    )
+  catalog
+    .action(outline, name, {
+      description: `${name === 'collapse' ? 'Collapse' : 'Expand'} every non-leaf Rem below a root Rem`,
+      risk: 'write',
+      bridge: 'required',
+    })
     .option('--today', "Use today's daily document as the root")
     .option('--root-id <remId>', 'Root Rem ID')
     .option('--apply', 'Apply the change; otherwise preview only')
@@ -42,9 +45,11 @@ function registerOutlineAction(
     });
 }
 
-export function registerOutlineCommand(program: Command): void {
-  const outline = program.command('outline').description('Preview or change outline folding');
-  outline.action(() => outline.outputHelp());
-  registerOutlineAction(outline, program, 'collapse', true);
-  registerOutlineAction(outline, program, 'expand', false);
+export function registerOutlineCommand(program: Command, catalog: CommandCatalog): void {
+  const outline = catalog.group(program, 'outline', {
+    description: 'Preview or change outline folding',
+    bareHelp: true,
+  });
+  registerOutlineAction(outline, program, catalog, 'collapse', true);
+  registerOutlineAction(outline, program, catalog, 'expand', false);
 }

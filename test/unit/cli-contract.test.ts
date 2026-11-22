@@ -35,11 +35,23 @@ describe('generated CLI contract', () => {
       failureStream: 'stderr',
     });
     expect(contract.exitCodes.unknownOutcome).toBe(5);
+    expect(contract.schemaVersion).toBe(2);
     expect(contract.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: 'search', risk: 'read', bridge: 'required' }),
-        expect.objectContaining({ path: 'move-note', risk: 'destructive', bridge: 'required' }),
-        expect.objectContaining({ path: 'schema', risk: 'read', bridge: 'none' }),
+        expect.objectContaining({
+          path: 'search',
+          kind: 'action',
+          risk: 'read',
+          bridge: 'required',
+        }),
+        expect.objectContaining({ path: 'sync', kind: 'group' }),
+        expect.objectContaining({
+          path: 'move-note',
+          kind: 'action',
+          risk: 'destructive',
+          bridge: 'required',
+        }),
+        expect.objectContaining({ path: 'schema', kind: 'action', risk: 'read', bridge: 'none' }),
       ])
     );
   });

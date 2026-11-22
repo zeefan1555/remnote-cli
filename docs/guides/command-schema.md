@@ -2,8 +2,10 @@
 
 `remnote-cli schema` is the offline source for command discovery.
 
-The command reads the actual Commander command tree after registration. Positional
-arguments, options and defaults are not copied into a second registry.
+Every command registers through `CommandCatalog`. The catalog records each path once
+and separates navigation groups from executable actions. Positional arguments,
+options and defaults are read from the Commander command created by that same
+registration, so help and schema cannot drift.
 
 ## List commands
 
@@ -11,8 +13,9 @@ arguments, options and defaults are not copied into a second registry.
 remnote-cli schema
 ```
 
-Each summary contains the exact command path, risk, Bridge requirement, dynamic
-SDK marker and cursor pagination metadata when applicable.
+Each summary contains the exact command path and its `group` or `action` kind.
+Actions also include risk, Bridge requirement, dynamic SDK marker and cursor
+pagination metadata when applicable.
 
 ## Inspect one command
 
@@ -30,8 +33,8 @@ global options, output streams and the command risk policy.
 `remnote-cli contract` includes the command summary. The complete per-command
 input schema stays available through `remnote-cli schema PATH`.
 
-The checked-in generated contract test fails when an added Commander command has
-no policy or when generated output is stale.
+The checked-in generated contract test fails when a Commander command bypasses the
+catalog, when an action lacks policy, or when generated output is stale.
 
 ## Dynamic SDK commands
 
