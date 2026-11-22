@@ -1,10 +1,10 @@
+import { emit } from '../output/runtime.js';
 import { constants } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 
 interface MediaResult extends Record<string, unknown> {
   data: string;
@@ -64,17 +64,14 @@ export function registerGetMediaCommand(program: Command): void {
 
         const { data: _data, ...metadata } = media;
         const output = { ...metadata, outputPath };
-        console.log(
+        emit(
+          program,
           formatResult(
             output,
             format,
             () => `Saved ${media.mimeType} (${media.sizeBytes} bytes) to ${outputPath}`
           )
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }

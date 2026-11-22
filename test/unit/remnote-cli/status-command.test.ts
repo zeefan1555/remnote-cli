@@ -1,20 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
-import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { runCliForTest } from '../../helpers/run-cli.js';
 
 describe('status command', () => {
   it('uses get_status bridge action', async () => {
     const executeSpy = vi
       .spyOn(DirectClient.prototype, 'execute')
       .mockResolvedValue({ connected: true, pluginVersion: '0.0.0-test' });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const program = createProgram('0.1.0-test');
-
-    await program.parseAsync(['node', 'remnote-cli', 'status'], { from: 'node' });
+    await runCliForTest(['status']);
 
     expect(executeSpy).toHaveBeenCalledWith('get_status', {});
     executeSpy.mockRestore();
-    logSpy.mockRestore();
   });
   it('prints the independent plugin identity, protocol, SDK and exact KB', async () => {
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
@@ -26,15 +22,13 @@ describe('status command', () => {
       knowledgeBaseId: 'kb',
       knowledgeBaseName: 'Test',
     });
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      await createProgram('test').parseAsync(['node', 'remnote-cli', '--text', 'status']);
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('Plugin ID: remnote-cli-bridge'));
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('SDK: 0.0.46'));
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('KB: Test (kb)'));
+      const output = await runCliForTest(['--text', 'status']);
+      expect(output.stdout).toContain('Plugin ID: remnote-cli-bridge');
+      expect(output.stdout).toContain('SDK: 0.0.46');
+      expect(output.stdout).toContain('KB: Test (kb)');
     } finally {
       execute.mockRestore();
-      log.mockRestore();
     }
   });
 });

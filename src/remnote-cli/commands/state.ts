@@ -1,3 +1,4 @@
+import { emit, fail as emitFailure } from '../output/runtime.js';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { Command } from 'commander';
@@ -8,19 +9,14 @@ import {
   type StateRulesFile,
 } from '../../business/state-rules.js';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
 
 const RULES_BYTES = 1024 * 1024;
 
 function formatOf(program: Command): OutputFormat {
   return program.opts().text ? 'text' : 'json';
-}
-
-function fail(format: OutputFormat, error: unknown): void {
-  console.error(formatError(error instanceof Error ? error.message : String(error), format));
-  process.exitCode = EXIT.ERROR;
 }
 
 export function parseIdSource(text: string): string[] {
@@ -133,16 +129,24 @@ export function registerInspectCommand(program: Command): void {
           ...(opts.summary ? { summary: true } : {}),
         })) as { complete?: boolean };
         let output: unknown = result;
+        let assertionsOk: boolean | undefined;
         if (opts.expect) {
           const { file, directory } = await readRules(opts.expect);
           const assertions = await evaluateRules(result, file.rules, directory);
           output = { ...result, assertions };
-          if (opts.strict && (!assertions.ok || result.complete === false))
-            process.exitCode = EXIT.ERROR;
-        } else if (opts.strict && result.complete === false) process.exitCode = EXIT.ERROR;
-        console.log(formatResult(output, format, formatInspectText));
+          assertionsOk = assertions.ok;
+        }
+        const strictFailed = opts.strict && (result.complete === false || assertionsOk === false);
+        if (strictFailed)
+          emitFailure(
+            program,
+            new CliFailure('conflict', 'strict_inspection_failed', 'Inspection is incomplete', {
+              details: output,
+            })
+          );
+        else emit(program, formatResult(output, format, formatInspectText));
       } catch (error) {
-        fail(format, error);
+        emitFailure(program, error);
       } finally {
         await client.close();
       }
@@ -184,8 +188,14 @@ export function registerAssertCommand(program: Command): void {
           if (Buffer.byteLength(text) > RULES_BYTES) throw new Error('Inspect file exceeds 1 MB');
           const document = JSON.parse(text) as unknown;
           const report = await evaluateRules(document, file.rules, directory);
-          console.log(formatResult(report, format, formatRulesText));
-          if (opts.strict && !report.ok) process.exitCode = EXIT.ERROR;
+          if (opts.strict && !report.ok)
+            emitFailure(
+              program,
+              new CliFailure('conflict', 'strict_assertion_failed', 'Assertion rules failed', {
+                details: report,
+              })
+            );
+          else emit(program, formatResult(report, format, formatRulesText));
           return;
         }
         if (!file.remIds?.length) throw new Error('Live assert needs remIds, or pass --against');
@@ -198,14 +208,19 @@ export function registerAssertCommand(program: Command): void {
             ...(file.summary ? { summary: true } : {}),
           })) as { complete?: boolean };
           const report = await evaluateRules(result, file.rules, directory);
-          console.log(formatResult(report, format, formatRulesText));
           if (opts.strict && (!report.ok || result.complete === false))
-            process.exitCode = EXIT.ERROR;
+            emitFailure(
+              program,
+              new CliFailure('conflict', 'strict_assertion_failed', 'Assertion rules failed', {
+                details: report,
+              })
+            );
+          else emit(program, formatResult(report, format, formatRulesText));
         } finally {
           await client.close();
         }
       } catch (error) {
-        fail(format, error);
+        emitFailure(program, error);
       }
     });
 }

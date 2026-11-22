@@ -1,8 +1,9 @@
+import { emit, fail } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { readContentFileOrStdin } from './content-input.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
+import { formatResult } from '../output/formatter.js';
 import { summarizeReceipt } from '../output/receipt-summary.js';
 const commonHelp = [
   'The file contains the inner plan, not a request envelope. schemaVersion must be 1.',
@@ -97,19 +98,28 @@ export function registerTaskCommands(program: Command): void {
               dryRun: !opts.apply,
             })) as Record<string, unknown>;
             const output = opts.summary ? summarizeReceipt(result) : result;
-            console.log(formatResult(output, format, () => JSON.stringify(output, null, 2)));
             if (
               result.complete !== true ||
               result.status !== (opts.apply ? 'verified' : 'preview') ||
               !Array.isArray(result.errors) ||
               result.errors.length > 0
             )
-              process.exitCode = EXIT.ERROR;
-          } catch (error) {
-            console.error(
-              formatError(error instanceof Error ? error.message : String(error), format)
-            );
-            process.exitCode = EXIT.ERROR;
+              fail(
+                program,
+                new CliFailure(
+                  'conflict',
+                  'task_receipt_incomplete',
+                  'Task receipt is incomplete',
+                  {
+                    details: output,
+                  }
+                )
+              );
+            else
+              emit(
+                program,
+                formatResult(output, format, () => JSON.stringify(output, null, 2))
+              );
           } finally {
             await client.close();
           }

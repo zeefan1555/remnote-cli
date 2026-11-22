@@ -1,21 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { formatResult, formatError } from '../../../src/remnote-cli/output/formatter.js';
+import { formatResult, sanitizeTerminalText } from '../../../src/remnote-cli/output/formatter.js';
 
 describe('formatResult', () => {
-  it('formats as JSON by default', () => {
+  it('wraps JSON results in the version 2 success envelope', () => {
     const result = formatResult({ key: 'value' }, 'json');
-    expect(JSON.parse(result)).toEqual({ key: 'value' });
+    expect(JSON.parse(result)).toEqual({
+      schemaVersion: 2,
+      ok: true,
+      data: { key: 'value' },
+    });
   });
 
-  it('formats JSON with indentation', () => {
-    const result = formatResult({ a: 1 }, 'json');
-    expect(result).toContain('\n');
-  });
-
-  it('uses text formatter when provided', () => {
+  it('uses text formatters without a JSON envelope', () => {
     const result = formatResult({ name: 'test' }, 'text', (data) => {
-      const d = data as Record<string, unknown>;
-      return `Name: ${d.name}`;
+      const value = data as { name: string };
+      return 'Name: ' + value.name;
     });
     expect(result).toBe('Name: test');
   });
@@ -27,28 +26,16 @@ describe('formatResult', () => {
   });
 
   it('handles primitive values in text mode', () => {
-    const result = formatResult('hello', 'text');
-    expect(result).toBe('hello');
+    expect(formatResult('hello', 'text')).toBe('hello');
   });
 });
 
-describe('formatError', () => {
-  it('formats error as JSON', () => {
-    const result = formatError('Something failed', 'json', 1);
-    const parsed = JSON.parse(result);
-    expect(parsed.error).toBe('Something failed');
-    expect(parsed.code).toBe(1);
+describe('sanitizeTerminalText', () => {
+  it('removes ANSI sequences and terminal control characters', () => {
+    expect(sanitizeTerminalText('\u001b[31mred\u001b[0m\u0007\nnext')).toBe('red\nnext');
   });
 
-  it('formats error as JSON without code', () => {
-    const result = formatError('Something failed', 'json');
-    const parsed = JSON.parse(result);
-    expect(parsed.error).toBe('Something failed');
-    expect(parsed.code).toBeUndefined();
-  });
-
-  it('formats error as text', () => {
-    const result = formatError('Something failed', 'text');
-    expect(result).toBe('Error: Something failed');
+  it('does not alter normal Unicode text', () => {
+    expect(sanitizeTerminalText('RemNote 中文 ✓')).toBe('RemNote 中文 ✓');
   });
 });

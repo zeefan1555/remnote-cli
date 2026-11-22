@@ -3,22 +3,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
-import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { EXIT } from '../../../src/remnote-cli/output/errors.js';
 import { InspectStateSchema } from '../../../src/schemas/state-schemas.js';
+import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
+
+interface RuleResult {
+  id: string;
+  status: string;
+  actual: unknown;
+  expected: unknown;
+}
+
+interface RuleReport {
+  ok?: boolean;
+  complete?: boolean;
+  errors?: unknown[];
+  assertions?: { rules: RuleResult[] };
+  rules?: RuleResult[];
+}
 
 afterEach(() => {
-  process.exitCode = undefined;
   vi.restoreAllMocks();
 });
-
-function capture() {
-  const logs: string[] = [];
-  vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
-    logs.push(String(line));
-  });
-  vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
-  return logs;
-}
 
 describe('inspect and assert commands', () => {
   it('accepts explicit native audit fields through the CLI and strict schema', async () => {
@@ -42,19 +48,25 @@ describe('inspect and assert commands', () => {
       rems: [{ id: 'root', rawCards: [] }],
       errors: [],
     });
-    capture();
-    await createProgram('0.1.0-test').parseAsync(
-      ['node', 'remnote-cli', 'inspect', 'root', '--fields', fields.join(','), '--strict'],
-      { from: 'node' }
-    );
+    vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
+
+    const result = await runCliForTest([
+      'inspect',
+      'root',
+      '--fields',
+      fields.join(','),
+      '--strict',
+    ]);
+
+    expect(result.exitCode).toBe(0);
     expect(execute).toHaveBeenCalledWith('inspect_state', {
       remIds: ['root'],
       descendants: 0,
       fields,
     });
-    expect(process.exitCode).toBeUndefined();
   });
-  it('inspects many ids in one execute and exits 0 when a rule fails without --strict', async () => {
+
+  it('inspects many ids and succeeds without --strict when a rule fails', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-state-cmd-'));
     const rules = join(directory, 'rules.json');
     await writeFile(
@@ -79,38 +91,34 @@ describe('inspect and assert commands', () => {
       rems: [{ id: 'answer', elements: { backText: { counts: { code: 0 } } } }],
       errors: [],
     });
-    const logs = capture();
-    await createProgram('0.1.0-test').parseAsync(
-      [
-        'node',
-        'remnote-cli',
-        'inspect',
-        'answer',
-        'other',
-        '--expect',
-        rules,
-        '--fields',
-        'elements',
-      ],
-      { from: 'node' }
-    );
-    expect(execute).toHaveBeenCalledTimes(1);
+    vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
+
+    const result = await runCliForTest([
+      'inspect',
+      'answer',
+      'other',
+      '--expect',
+      rules,
+      '--fields',
+      'elements',
+    ]);
+    const output = parseSuccess(result.stdout) as RuleReport;
+
+    expect(result.exitCode).toBe(0);
     expect(execute).toHaveBeenCalledWith('inspect_state', {
       remIds: ['answer', 'other'],
       descendants: 0,
       fields: ['elements'],
     });
-    const output = JSON.parse(logs.join('\n'));
-    expect(output.assertions.rules[0]).toEqual({
+    expect(output.assertions?.rules[0]).toEqual({
       id: 'code-line',
       status: 'fail',
       actual: 0,
       expected: 1,
     });
-    expect(process.exitCode).toBeUndefined();
   });
 
-  it('exits 1 for a failed rule only when --strict is set', async () => {
+  it('fails with a conflict only when --strict is set', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-state-strict-'));
     const rules = join(directory, 'rules.json');
     await writeFile(
@@ -126,21 +134,18 @@ describe('inspect and assert commands', () => {
       complete: true,
       rems: [{ id: 'answer', cards: [{ hash: 'changed' }] }],
     });
-    capture();
-    await createProgram('0.1.0-test').parseAsync(
-      ['node', 'remnote-cli', 'assert', '--file', rules, '--strict'],
-      { from: 'node' }
-    );
-    expect(process.exitCode).toBe(1);
-    process.exitCode = undefined;
-    await createProgram('0.1.0-test').parseAsync(
-      ['node', 'remnote-cli', 'assert', '--file', rules],
-      { from: 'node' }
-    );
-    expect(process.exitCode).toBeUndefined();
+    vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
+
+    const strict = await runCliForTest(['assert', '--file', rules, '--strict']);
+    expect(strict.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+    expect(parseFailure(strict.stderr).subtype).toBe('strict_assertion_failed');
+
+    const normal = await runCliForTest(['assert', '--file', rules]);
+    expect(normal.exitCode).toBe(0);
+    expect((parseSuccess(normal.stdout) as RuleReport).rules?.[0]?.status).toBe('fail');
   });
 
-  it('evaluates --against without opening a bridge and still exits 1 on a bad rules file', async () => {
+  it('evaluates --against without opening a bridge and reports a missing input', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-state-against-'));
     const rules = join(directory, 'rules.json');
     const inspect = join(directory, 'inspect.json');
@@ -160,21 +165,17 @@ describe('inspect and assert commands', () => {
       'utf8'
     );
     const execute = vi.spyOn(DirectClient.prototype, 'execute');
-    const logs = capture();
-    await createProgram('0.1.0-test').parseAsync(
-      ['node', 'remnote-cli', 'assert', '--file', rules, '--against', inspect],
-      { from: 'node' }
-    );
+
+    const passed = await runCliForTest(['assert', '--file', rules, '--against', inspect]);
     expect(execute).not.toHaveBeenCalled();
-    expect(JSON.parse(logs.join('\n')).rules[0].status).toBe('pass');
-    await createProgram('0.1.0-test').parseAsync(
-      ['node', 'remnote-cli', 'assert', '--file', join(directory, 'missing.json')],
-      { from: 'node' }
-    );
-    expect(process.exitCode).toBe(1);
+    expect((parseSuccess(passed.stdout) as RuleReport).rules?.[0]?.status).toBe('pass');
+
+    const missing = await runCliForTest(['assert', '--file', join(directory, 'missing.json')]);
+    expect(missing.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+    expect(missing.stderr).toContain('ENOENT');
   });
 
-  it('reports an incomplete read and exits 1 under --strict even when rules pass', async () => {
+  it('reports an incomplete strict read in error details', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remnote-state-incomplete-'));
     const rules = join(directory, 'rules.json');
     await writeFile(
@@ -191,20 +192,20 @@ describe('inspect and assert commands', () => {
       errors: [{ message: 'batch_read_failed: timeout' }],
       rems: [{ id: 'answer', markdown: 'See', errors: [{ field: 'cards', message: 'nope' }] }],
     });
-    const logs = capture();
-    await createProgram('0.1.0-test').parseAsync(
-      ['node', 'remnote-cli', 'assert', '--file', rules, '--strict'],
-      { from: 'node' }
-    );
-    const report = JSON.parse(logs.join('\n'));
+    vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
+
+    const result = await runCliForTest(['assert', '--file', rules, '--strict']);
+    const failure = parseFailure(result.stderr);
+    const report = failure.details as RuleReport;
+
+    expect(result.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
     expect(report.ok).toBe(false);
     expect(report.complete).toBe(false);
     expect(report.errors).toEqual([
       { message: 'batch_read_failed: timeout' },
       { id: 'answer', field: 'cards', message: 'nope' },
     ]);
-    expect(report.rules[0].status).toBe('pass');
-    expect(process.exitCode).toBe(1);
+    expect(report.rules?.[0]?.status).toBe('pass');
   });
 
   it('sends powerup and slot codes from powerup get', async () => {
@@ -215,22 +216,19 @@ describe('inspect and assert commands', () => {
       as: 'value',
       value: ['open'],
     });
-    capture();
-    await createProgram('0.1.0-test').parseAsync(
-      [
-        'node',
-        'remnote-cli',
-        'powerup',
-        'get',
-        '--rem',
-        'portal',
-        '--powerup',
-        'sp',
-        '--slot',
-        'f',
-      ],
-      { from: 'node' }
-    );
+
+    const result = await runCliForTest([
+      'powerup',
+      'get',
+      '--rem',
+      'portal',
+      '--powerup',
+      'sp',
+      '--slot',
+      'f',
+    ]);
+
+    expect(result.exitCode).toBe(0);
     expect(execute).toHaveBeenCalledWith('powerup_get', {
       remId: 'portal',
       powerup: 'sp',

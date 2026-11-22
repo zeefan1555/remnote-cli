@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatResult, formatError, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { validateNotFlag } from './arg-utils.js';
 
 export function registerUpdateCommand(program: Command): void {
@@ -35,7 +35,8 @@ export function registerUpdateCommand(program: Command): void {
         if (opts.removeAliases?.length > 0) payload.removeAliases = opts.removeAliases;
 
         const result = await client.execute('update_note', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const r = data as { remIds?: string[]; titles?: string[] };
             const ids = r.remIds || [];
@@ -46,10 +47,6 @@ export function registerUpdateCommand(program: Command): void {
               .join('\n');
           })
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }

@@ -1,7 +1,8 @@
+import { emit, fail } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatResult, formatError, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
 
 function formatTags(tags: unknown): string {
   if (!Array.isArray(tags)) return '';
@@ -124,20 +125,23 @@ export function registerReadCommand(program: Command): void {
         if (opts.includeMediaMetadata) payload.includeMediaMetadata = true;
 
         const result = await client.execute('read_note', payload);
-        console.log(
-          formatResult(
-            result,
-            format,
-            (data) => formatManyText(data, formatReadText) ?? formatReadText(data)
-          )
-        );
         const many = (result as { results?: Record<string, { error?: string }> }).results;
         if (many && Object.values(many).some((value) => typeof value?.error === 'string'))
-          process.exitCode = EXIT.ERROR;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
+          fail(
+            program,
+            new CliFailure('not_found', 'partial_read', 'One or more exact reads failed', {
+              details: result,
+            })
+          );
+        else
+          emit(
+            program,
+            formatResult(
+              result,
+              format,
+              (data) => formatManyText(data, formatReadText) ?? formatReadText(data)
+            )
+          );
       } finally {
         await client.close();
       }

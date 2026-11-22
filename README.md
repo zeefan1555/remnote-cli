@@ -4,6 +4,39 @@
 
 The CLI has no MCP server, background daemon, or cloud relay. Command output is JSON by default. Add the global `--text` option for human-readable output.
 
+## Output contract
+
+Every JSON command returns one versioned envelope.
+
+```json
+{
+  "schemaVersion": 2,
+  "ok": true,
+  "data": {}
+}
+```
+
+Success goes to stdout. A structured failure goes to stderr and keeps stdout empty.
+
+```json
+{
+  "schemaVersion": 2,
+  "ok": false,
+  "error": {
+    "type": "unknown_outcome",
+    "subtype": "write_response_lost",
+    "message": "SDK timeout; write outcome unknown. Do not blindly replay.",
+    "hint": "Read the exact affected IDs before making another write.",
+    "retryable": false
+  }
+}
+```
+
+Exit codes distinguish usage, connection, target conflicts, unsupported
+capabilities and unknown write outcomes. `unknown_outcome` is never safe to retry
+automatically. Text mode remains human-readable and strips terminal control
+characters. See [Output and errors](docs/guides/output-and-errors.md).
+
 ## Requirements
 
 - Node.js 22.13.0 or newer. Node.js 24 is recommended.
@@ -59,7 +92,9 @@ remnote-cli --help
 remnote-cli contract
 ```
 
-`contract` prints protocol, plan schemas, required SDK capabilities, receipt statuses, and exit codes. Use `--schema flashcards`, `--schema wiki`, or `--schema workspace` to inspect one plan schema.
+`contract` prints protocol, output and error contracts, plan schemas, required SDK
+capabilities, receipt statuses, and exit codes. Use `--schema flashcards`,
+`--schema wiki`, or `--schema workspace` to inspect one plan schema.
 
 ## Find and read notes
 

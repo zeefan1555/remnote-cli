@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatResult, formatError, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 
 export function registerReadTableCommand(program: Command): void {
   program
@@ -34,7 +34,8 @@ export function registerReadTableCommand(program: Command): void {
         }
 
         const result = await client.execute('read_table', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const r = data as Record<string, unknown>;
             const lines: string[] = [];
@@ -74,10 +75,6 @@ export function registerReadTableCommand(program: Command): void {
             return lines.join('\n');
           })
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }

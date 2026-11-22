@@ -1,8 +1,9 @@
+import { emit, fail } from '../output/runtime.js';
 import { Command } from 'commander';
 import { InspectManySchema, VerifyScopeSchema } from '../../schemas/composite-schemas.js';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
+import { formatResult } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { summarizeReceipt } from '../output/receipt-summary.js';
 export function registerCompositeCommands(program: Command): void {
@@ -18,17 +19,23 @@ export function registerCompositeCommands(program: Command): void {
       const schema = action === 'inspect_many' ? InspectManySchema : VerifyScopeSchema;
       const result = (await client.execute(action, schema.parse(input))) as Record<string, unknown>;
       const output = summary ? summarizeReceipt(result) : result;
-      console.log(formatResult(output, format, () => JSON.stringify(output, null, 2)));
       if (
         result.complete !== true ||
         !Array.isArray(result.errors) ||
         result.errors.length > 0 ||
         (action === 'verify_scope' && result.status !== 'passed')
       )
-        process.exitCode = EXIT.ERROR;
-    } catch (error) {
-      console.error(formatError(error instanceof Error ? error.message : String(error), format));
-      process.exitCode = EXIT.ERROR;
+        fail(
+          program,
+          new CliFailure('conflict', 'receipt_incomplete', 'Receipt is failed or incomplete', {
+            details: output,
+          })
+        );
+      else
+        emit(
+          program,
+          formatResult(output, format, () => JSON.stringify(output, null, 2))
+        );
     } finally {
       await client.close();
     }

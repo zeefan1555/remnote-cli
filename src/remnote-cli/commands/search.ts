@@ -1,7 +1,8 @@
+import { emit, fail } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatResult, formatError, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
 
 /** Default number of search results. */
 const DEFAULT_SEARCH_LIMIT = 50;
@@ -154,11 +155,10 @@ export function registerSearchCommand(program: Command): void {
         applySearchOptions(payload, opts);
 
         const result = await client.execute('search', payload);
-        console.log(formatResult(result, format, (data) => formatSearchText(data)));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
+        emit(
+          program,
+          formatResult(result, format, (data) => formatSearchText(data))
+        );
       } finally {
         await client.close();
       }
@@ -191,11 +191,10 @@ export function registerSearchByTagCommand(program: Command): void {
       applySearchOptions(payload, opts);
 
       const result = await client.execute('search_by_tag', payload);
-      console.log(formatResult(result, format, (data) => formatSearchText(data)));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(formatError(message, format));
-      process.exitCode = EXIT.ERROR;
+      emit(
+        program,
+        formatResult(result, format, (data) => formatSearchText(data))
+      );
     } finally {
       await client.close();
     }
@@ -230,36 +229,44 @@ export function registerListChildrenCommand(program: Command): void {
         if (opts.ancestorDepth) payload.ancestorDepth = parseInt(opts.ancestorDepth, 10);
 
         const result = await client.execute('list_children', payload);
-        console.log(
-          formatResult(result, format, (data) => {
-            const many = (data as { results?: Record<string, Record<string, unknown>> }).results;
-            if (many && typeof many === 'object') {
-              return Object.entries(many)
-                .map(([id, value]) => {
-                  if (typeof value.error === 'string') return `# ${id}\nError: ${value.error}`;
-                  return `# ${id}\n${formatSearchText({
-                    results: value.children,
-                    hasMore: value.hasMore,
-                    nextCursor: value.nextCursor,
-                  })}`;
-                })
-                .join('\n\n');
-            }
-            const r = data as Record<string, unknown>;
-            return formatSearchText({
-              results: r.children,
-              hasMore: r.hasMore,
-              nextCursor: r.nextCursor,
-            });
-          })
-        );
         const many = (result as { results?: Record<string, { error?: string }> }).results;
         if (many && Object.values(many).some((value) => typeof value?.error === 'string'))
-          process.exitCode = EXIT.ERROR;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
+          fail(
+            program,
+            new CliFailure(
+              'not_found',
+              'partial_list_children',
+              'One or more parent reads failed',
+              {
+                details: result,
+              }
+            )
+          );
+        else
+          emit(
+            program,
+            formatResult(result, format, (data) => {
+              const many = (data as { results?: Record<string, Record<string, unknown>> }).results;
+              if (many && typeof many === 'object') {
+                return Object.entries(many)
+                  .map(([id, value]) => {
+                    if (typeof value.error === 'string') return `# ${id}\nError: ${value.error}`;
+                    return `# ${id}\n${formatSearchText({
+                      results: value.children,
+                      hasMore: value.hasMore,
+                      nextCursor: value.nextCursor,
+                    })}`;
+                  })
+                  .join('\n\n');
+              }
+              const r = data as Record<string, unknown>;
+              return formatSearchText({
+                results: r.children,
+                hasMore: r.hasMore,
+                nextCursor: r.nextCursor,
+              });
+            })
+          );
       } finally {
         await client.close();
       }

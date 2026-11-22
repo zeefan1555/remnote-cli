@@ -9,7 +9,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
-import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { EXIT } from '../../../src/remnote-cli/output/errors.js';
+import { runCliForTest } from '../../helpers/run-cli.js';
 
 const tempDirs: string[] = [];
 
@@ -23,12 +24,7 @@ async function createTempContentFile(content: string): Promise<string> {
 
 async function runCommand(args: string[], result: unknown = { ok: true }): Promise<MockInstance> {
   const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
-  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const program = createProgram('0.1.0-test');
-
-  await program.parseAsync(['node', 'remnote-cli', ...args], { from: 'node' });
-
-  logSpy.mockRestore();
+  await runCliForTest(args);
   return executeSpy;
 }
 
@@ -343,36 +339,20 @@ describe('command bridge action mapping', () => {
         },
       ],
     });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const originalExit = process.exitCode;
-    process.exitCode = 0;
-    const program = createProgram('0.1.0-test');
-
     try {
-      await program.parseAsync(
-        [
-          'node',
-          'remnote-cli',
-          'sdk',
-          'app',
-          'get-platform',
-          '--args-json',
-          '[]',
-          '--args-file',
-          filePath,
-        ],
-        { from: 'node' }
-      );
+      const output = await runCliForTest([
+        'sdk',
+        'app',
+        'get-platform',
+        '--args-json',
+        '[]',
+        '--args-file',
+        filePath,
+      ]);
       expect(executeSpy).toHaveBeenCalledTimes(1);
-      expect(errSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Cannot use --args-json and --args-file together')
-      );
-      expect(process.exitCode).toBe(1);
+      expect(output.stderr).toContain('Cannot use --args-json and --args-file together');
+      expect(output.exitCode).toBe(EXIT.USAGE);
     } finally {
-      process.exitCode = originalExit;
-      logSpy.mockRestore();
-      errSpy.mockRestore();
       executeSpy.mockRestore();
     }
   });
@@ -767,105 +747,70 @@ describe('command bridge action mapping', () => {
       propertyRemId: 'prop1',
       valueKind: 'rem_reference',
     });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const program = createProgram('0.1.0-test');
-
     try {
-      await program.parseAsync(
-        [
-          'node',
-          'remnote-cli',
-          '--text',
-          'set-property',
-          'abc123',
-          '--tag-id',
-          'tag1',
-          '--property-id',
-          'prop1',
-          '--rem-reference-id',
-          'option1',
-        ],
-        { from: 'node' }
-      );
+      const output = await runCliForTest([
+        '--text',
+        'set-property',
+        'abc123',
+        '--tag-id',
+        'tag1',
+        '--property-id',
+        'prop1',
+        '--rem-reference-id',
+        'option1',
+      ]);
 
-      expect(logSpy).toHaveBeenCalledWith('Set property: prop1 on abc123 (rem_reference)');
+      expect(output.stdout.trimEnd()).toBe('Set property: prop1 on abc123 (rem_reference)');
     } finally {
-      logSpy.mockRestore();
       executeSpy.mockRestore();
     }
   });
 
   it('rejects set-property without a value option', async () => {
     const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const originalExit = process.exitCode;
-    process.exitCode = 0;
-    const program = createProgram('0.1.0-test');
 
     try {
-      await program.parseAsync(
-        [
-          'node',
-          'remnote-cli',
-          'set-property',
-          'abc123',
-          '--tag-id',
-          'tag1',
-          '--property-id',
-          'prop1',
-        ],
-        { from: 'node' }
-      );
+      const output = await runCliForTest([
+        'set-property',
+        'abc123',
+        '--tag-id',
+        'tag1',
+        '--property-id',
+        'prop1',
+      ]);
 
       expect(executeSpy).not.toHaveBeenCalled();
-      expect(errSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Provide exactly one of --value, --rem-reference-id, or --clear')
+      expect(output.stderr).toContain(
+        'Provide exactly one of --value, --rem-reference-id, or --clear'
       );
-      expect(process.exitCode).toBe(1);
+      expect(output.exitCode).toBe(EXIT.USAGE);
     } finally {
-      process.exitCode = originalExit;
-      logSpy.mockRestore();
-      errSpy.mockRestore();
       executeSpy.mockRestore();
     }
   });
 
   it('rejects set-property with multiple value options', async () => {
     const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const originalExit = process.exitCode;
-    process.exitCode = 0;
-    const program = createProgram('0.1.0-test');
 
     try {
-      await program.parseAsync(
-        [
-          'node',
-          'remnote-cli',
-          'set-property',
-          'abc123',
-          '--tag-id',
-          'tag1',
-          '--property-id',
-          'prop1',
-          '--value',
-          'People',
-          '--clear',
-        ],
-        { from: 'node' }
-      );
+      const output = await runCliForTest([
+        'set-property',
+        'abc123',
+        '--tag-id',
+        'tag1',
+        '--property-id',
+        'prop1',
+        '--value',
+        'People',
+        '--clear',
+      ]);
 
       expect(executeSpy).not.toHaveBeenCalled();
-      expect(errSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Provide exactly one of --value, --rem-reference-id, or --clear')
+      expect(output.stderr).toContain(
+        'Provide exactly one of --value, --rem-reference-id, or --clear'
       );
-      expect(process.exitCode).toBe(1);
+      expect(output.exitCode).toBe(EXIT.USAGE);
     } finally {
-      process.exitCode = originalExit;
-      logSpy.mockRestore();
-      errSpy.mockRestore();
       executeSpy.mockRestore();
     }
   });
@@ -947,26 +892,14 @@ describe('command bridge action mapping', () => {
 
   it('rejects set-document-status without an explicit target status', async () => {
     const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const originalExit = process.exitCode;
-    process.exitCode = 0;
-    const program = createProgram('0.1.0-test');
 
     try {
-      await program.parseAsync(['node', 'remnote-cli', 'set-document-status', 'rem123'], {
-        from: 'node',
-      });
+      const output = await runCliForTest(['set-document-status', 'rem123']);
 
       expect(executeSpy).not.toHaveBeenCalled();
-      expect(errSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Provide --document or --no-document')
-      );
-      expect(process.exitCode).toBe(1);
+      expect(output.stderr).toContain('Provide --document or --no-document');
+      expect(output.exitCode).toBe(EXIT.USAGE);
     } finally {
-      process.exitCode = originalExit;
-      logSpy.mockRestore();
-      errSpy.mockRestore();
       executeSpy.mockRestore();
     }
   });

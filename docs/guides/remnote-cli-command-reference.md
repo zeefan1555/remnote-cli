@@ -39,6 +39,13 @@ commands for stable-key replay. See [ADR 0003](../adr/0003-disable-unsafe-native
 
 - JSON is the default when no output flag is provided.
 - If both `--json` and `--text` are passed, `--text` wins.
+- JSON success is written to stdout as `{schemaVersion:2,ok:true,data}`.
+- JSON failure is written to stderr as `{schemaVersion:2,ok:false,error}`.
+- Text output is human-readable and removes ANSI and terminal control characters.
+- `--verbose` diagnostics use stderr only and never corrupt JSON stdout.
+
+See [Output and errors](output-and-errors.md) for the error types and batch
+behavior.
 
 ### Argument Quoting and Shifting
 
@@ -55,7 +62,12 @@ To prevent this:
 | Code | Meaning                                 |
 | ---- | --------------------------------------- |
 | `0`  | Success                                 |
-| `1` | Validation, connection, command error or incomplete receipt |
+| `1` | Internal failure |
+| `2` | Invalid command or input |
+| `3` | Configuration or connection unavailable |
+| `4` | Missing target or state conflict |
+| `5` | Write outcome unknown; reconcile before retrying |
+| `6` | Unsupported capability |
 
 ## sync
 

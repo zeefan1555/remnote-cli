@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatResult, formatError, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { resolveOptionalInlineOrFileContent } from './content-input.js';
 import { checkPayloadForFlags, validateNotFlag } from './arg-utils.js';
 
@@ -49,7 +49,8 @@ export function registerCreateCommand(program: Command): void {
         if (opts.aliases && opts.aliases.length > 0) payload.aliases = opts.aliases;
 
         const result = await client.execute('create_note', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const r = data as { remIds?: string[]; titles?: string[] };
             const ids = r.remIds || [];
@@ -60,10 +61,6 @@ export function registerCreateCommand(program: Command): void {
               .join('\n');
           })
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }
