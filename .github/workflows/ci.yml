@@ -20,7 +20,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run check:sdk-constants
+      - run: npm run check:cli-contract
       - run: npm run lint
       - run: npm run format:check
-      - run: npm test
+      - run: npm run test:coverage
       - run: npm run build
+      - run: git diff --exit-code
