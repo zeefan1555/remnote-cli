@@ -69,8 +69,17 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Add a version 2 command output envelope, structured error types, stable exit
+  codes and a dedicated `unknown_outcome` exit. JSON errors go to stderr and
+  text output strips terminal control characters.
+
 ### Changed
 
+- Route every command through one injected CLI runtime so batch no longer replaces
+  global console state. Batch returns structured per-command errors and supports
+  detection of unsafe unknown write outcomes.
 - Rewrite the README as a task-based usage guide covering Bridge and CLI setup,
   connection checks, representative read and task commands, preview/apply and
   unknown-write rules, knowledge-base binding, sync boundaries, and troubleshooting.

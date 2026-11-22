@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 
 export function registerPowerupCommand(program: Command): void {
   const powerup = program.command('powerup').description('Read powerup slots by code');
@@ -35,15 +35,13 @@ export function registerPowerupCommand(program: Command): void {
           slot: opts.slot,
           as: opts.as,
         });
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const row = data as { powerup?: string; slot?: string; value?: unknown };
             return `${row.powerup ?? ''}.${row.slot ?? ''} ${JSON.stringify(row.value)}`;
           })
         );
-      } catch (error) {
-        console.error(formatError(error instanceof Error ? error.message : String(error), format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }

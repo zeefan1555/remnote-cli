@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemAdapter } from '../../../src/business/rem-adapter.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
-import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { EXIT } from '../../../src/remnote-cli/output/errors.js';
+import { parseFailure, runCliForTest } from '../../helpers/run-cli.js';
 import { MockRemNotePlugin } from '../../helpers/business-mocks.js';
 
 function adapter(plugin: MockRemNotePlugin): RemAdapter {
@@ -62,15 +63,11 @@ describe('multi-id reads', () => {
       },
     });
     vi.spyOn(DirectClient.prototype, 'close').mockResolvedValue(undefined);
-    const logs: string[] = [];
-    vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
-      logs.push(String(line));
-    });
-    await createProgram('0.1.0-test').parseAsync(['node', 'remnote-cli', 'read', 'a', 'b'], {
-      from: 'node',
-    });
-    expect(process.exitCode).toBe(1);
-    expect(JSON.parse(logs.join('\n')).results).toMatchObject({
+    const output = await runCliForTest(['read', 'a', 'b']);
+    expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+    const failure = parseFailure(output.stderr);
+    expect(failure.type).toBe('not_found');
+    expect((failure.details as { results: unknown }).results).toMatchObject({
       a: { title: 'A' },
       b: { error: 'Note not found: b' },
     });

@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 
 function formatTodoListText(data: unknown): string {
   const todos = (data as { todos?: Array<Record<string, unknown>> }).todos ?? [];
@@ -44,10 +44,7 @@ function registerTodoUpdate(
           doneTagRemId: opts.doneTagId,
           dryRun: opts.apply !== true,
         });
-        console.log(formatResult(result, format, formatTodoUpdateText));
-      } catch (error) {
-        console.error(formatError(error instanceof Error ? error.message : String(error), format));
-        process.exitCode = EXIT.ERROR;
+        emit(program, formatResult(result, format, formatTodoUpdateText));
       } finally {
         await client.close();
       }
@@ -67,10 +64,7 @@ export function registerTodoCommand(program: Command): void {
       const client = createCommandClient(program);
       try {
         const result = await client.execute('list_todos', { tagRemId: opts.tagId });
-        console.log(formatResult(result, format, formatTodoListText));
-      } catch (error) {
-        console.error(formatError(error instanceof Error ? error.message : String(error), format));
-        process.exitCode = EXIT.ERROR;
+        emit(program, formatResult(result, format, formatTodoListText));
       } finally {
         await client.close();
       }

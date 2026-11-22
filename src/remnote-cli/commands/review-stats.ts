@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 
 function formatCardType(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -62,11 +62,7 @@ export function registerReviewStatsCommand(program: Command): void {
         if (opts.rootId) payload.rootRemId = opts.rootId;
         if (opts.tagId) payload.tagRemId = opts.tagId;
         const result = await client.execute('get_review_stats', payload);
-        console.log(formatResult(result, format, formatReviewStatsText));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
+        emit(program, formatResult(result, format, formatReviewStatsText));
       } finally {
         await client.close();
       }

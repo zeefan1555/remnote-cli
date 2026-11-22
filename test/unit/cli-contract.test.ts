@@ -21,5 +21,11 @@ describe('generated CLI contract', () => {
     );
     expect(contract.requiredCapabilities.wiki.pages).toContain('namespace:rem.createRem');
     expect(contract.bridgeActions).not.toContain('transaction_begin');
+    expect(contract.output).toMatchObject({
+      schemaVersion: 2,
+      successStream: 'stdout',
+      failureStream: 'stderr',
+    });
+    expect(contract.exitCodes.unknownOutcome).toBe(5);
   });
 });

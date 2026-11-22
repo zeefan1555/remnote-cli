@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Command } from 'commander';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { EXIT } from '../../../src/remnote-cli/output/errors.js';
+import { runCliForTest } from '../../helpers/run-cli.js';
 
 describe('createProgram', () => {
   it('creates a configured Command instance', () => {
@@ -83,5 +85,20 @@ describe('createProgram', () => {
         '30000',
       ])
     ).rejects.toMatchObject({ code: 'commander.unknownOption' });
+  });
+
+  it('returns one structured usage error without leaking Commander stderr', async () => {
+    const result = await runCliForTest(['read', '--depth']);
+
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(result.stdout).toBe('');
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      schemaVersion: 2,
+      ok: false,
+      error: {
+        type: 'usage',
+        subtype: 'commander.optionMissingArgument',
+      },
+    });
   });
 });

@@ -6,25 +6,15 @@ vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js', () => ({
 }));
 import { describe, expect, it, vi, type MockInstance } from 'vitest';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
-import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { runCliForTest } from '../../helpers/run-cli.js';
 
 async function runTextCommand(
   args: string[],
   result: unknown
 ): Promise<{ output: string; executeSpy: MockInstance }> {
   const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
-  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const program = createProgram('0.1.0-test');
-
-  try {
-    await program.parseAsync(['node', 'remnote-cli', '--text', ...args], { from: 'node' });
-    const output = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    return { output, executeSpy };
-  } finally {
-    logSpy.mockRestore();
-    errSpy.mockRestore();
-  }
+  const cliResult = await runCliForTest(['--text', ...args]);
+  return { output: cliResult.stdout.trimEnd(), executeSpy };
 }
 
 describe('command text output', () => {

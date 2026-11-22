@@ -31,11 +31,17 @@ import { registerOutlineCommand } from './commands/outline.js';
 import { registerTodoCommand } from './commands/todo.js';
 import { registerSyncCommands } from './commands/sync.js';
 import { registerContractCommand } from './commands/contract.js';
+import { CommanderError } from 'commander';
+import type { CliRuntime } from './output/runtime.js';
+import { bindRuntime, createProcessRuntime, finishProgram, runtimeFor } from './output/runtime.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version: string };
 
-export function createProgram(version: string): Command {
+export function createProgram(
+  version: string,
+  runtime: CliRuntime = createProcessRuntime()
+): Command {
   const program = new Command();
 
   program
@@ -77,10 +83,31 @@ export function createProgram(version: string): Command {
   registerSyncCommands(program);
   registerContractCommand(program);
 
+  bindRuntime(program, runtime);
   return program;
 }
 
-export async function runCli(argv = process.argv): Promise<void> {
-  const program = createProgram(packageJson.version);
-  await program.parseAsync(argv);
+export async function runProgram(
+  program: Command,
+  argv: string[],
+  runtime: CliRuntime = runtimeFor(program)
+): Promise<number> {
+  try {
+    await program.parseAsync(argv);
+  } catch (error) {
+    if (error instanceof CommanderError && error.exitCode === 0) {
+      runtime.setExitCode(0);
+      return 0;
+    }
+    runtime.failure(error);
+  }
+  return finishProgram(runtime);
+}
+
+export async function runCli(
+  argv = process.argv,
+  runtime: CliRuntime = createProcessRuntime()
+): Promise<number> {
+  const program = createProgram(packageJson.version, runtime);
+  return runProgram(program, argv, runtime);
 }

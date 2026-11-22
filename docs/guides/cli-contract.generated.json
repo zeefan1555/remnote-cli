@@ -772,9 +772,29 @@
     "complete": "boolean",
     "errors": "array<{code,message,remId?}>"
   },
+  "output": {
+    "schemaVersion": 2,
+    "successStream": "stdout",
+    "failureStream": "stderr",
+    "errorTypes": [
+      "usage",
+      "configuration",
+      "unavailable",
+      "not_found",
+      "conflict",
+      "unsupported",
+      "unknown_outcome",
+      "internal"
+    ]
+  },
   "exitCodes": {
     "success": 0,
-    "validationConnectionOrIncomplete": 1
+    "internal": 1,
+    "usage": 2,
+    "configurationOrUnavailable": 3,
+    "notFoundOrConflict": 4,
+    "unknownOutcome": 5,
+    "unsupported": 6
   },
   "workspace": {
     "requiresBridge": {

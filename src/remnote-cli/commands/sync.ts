@@ -1,3 +1,4 @@
+import { emit, fail } from '../output/runtime.js';
 import { Option, type Command } from 'commander';
 import {
   diffWorkspace,
@@ -15,7 +16,8 @@ import { formatWorkspace } from '../../business/workspace/format.js';
 import { relocateWorkspace } from '../../business/workspace/relocate.js';
 import { readContentFileOrStdin } from './content-input.js';
 import { createCommandClient } from '../client/command-client.js';
-import { formatError, formatResult } from '../output/formatter.js';
+import { formatResult } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
 
 interface SyncOptions {
   apply?: boolean;
@@ -99,26 +101,30 @@ export function registerSyncCommands(program: Command): void {
       else if (name === 'lint') result = await lintWorkspace(directory);
       else if (name === 'diff') result = await diffWorkspace(directory, options);
       else result = await pushWorkspace(directory, () => client.workspaceBackend(), options);
-      console.log(
-        formatResult(result, format, (data) => {
-          const value = data as {
-            diagnostics?: Array<{ path: string; line: number; code: string; message: string }>;
-          };
-          return value.diagnostics?.length
-            ? value.diagnostics
-                .map((d) => d.path + ':' + d.line + ' / ' + d.code + ' / ' + d.message)
-                .join('\n')
-            : JSON.stringify(data, null, 2);
-        })
-      );
-      if (
+      const failed =
         (result as { ok?: boolean; complete?: boolean }).ok === false ||
-        (result as { complete?: boolean }).complete === false
-      )
-        process.exitCode = 1;
-    } catch (error) {
-      console.error(formatError(error instanceof Error ? error.message : String(error), format));
-      process.exitCode = 1;
+        (result as { complete?: boolean }).complete === false;
+      if (failed)
+        fail(
+          program,
+          new CliFailure('conflict', 'sync_incomplete', 'Sync result is incomplete', {
+            details: result,
+          })
+        );
+      else
+        emit(
+          program,
+          formatResult(result, format, (data) => {
+            const value = data as {
+              diagnostics?: Array<{ path: string; line: number; code: string; message: string }>;
+            };
+            return value.diagnostics?.length
+              ? value.diagnostics
+                  .map((d) => d.path + ':' + d.line + ' / ' + d.code + ' / ' + d.message)
+                  .join('\n')
+              : JSON.stringify(data, null, 2);
+          })
+        );
     } finally {
       await client.close();
     }

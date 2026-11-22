@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseBatchInput } from '../../../src/remnote-cli/commands/batch.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
+import { EXIT } from '../../../src/remnote-cli/output/errors.js';
 import { MockRemNotePlugin } from '../../helpers/business-mocks.js';
+import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 const wire = vi.hoisted(() => ({
   open: vi.fn(),
@@ -26,8 +28,6 @@ vi.mock('../../../src/remnote-cli/client/connection.js', () => ({
   },
 }));
 vi.mock('../../../src/remnote-cli/client/remote-sdk.js', () => ({ remoteSdk: () => wire.plugin }));
-
-import { createProgram } from '../../../src/remnote-cli/cli.js';
 
 const directories: string[] = [];
 
@@ -54,7 +54,6 @@ describe('batch input', () => {
 
 describe('batch command', () => {
   afterEach(async () => {
-    process.exitCode = undefined;
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await Promise.all(
@@ -63,15 +62,12 @@ describe('batch command', () => {
   });
 
   async function runBatch(args: string[]): Promise<Record<string, unknown>> {
-    const logs: string[] = [];
-    vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
-      logs.push(String(line));
-    });
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    await createProgram('0.1.0-test').parseAsync(['node', 'remnote-cli', 'batch', ...args], {
-      from: 'node',
-    });
-    return JSON.parse(logs.at(-1) ?? '{}') as Record<string, unknown>;
+    const result = await runCliForTest(['batch', ...args]);
+    if (result.exitCode === 0) return parseSuccess(result.stdout) as Record<string, unknown>;
+    const failure = parseFailure(result.stderr);
+    if (!failure.details || typeof failure.details !== 'object')
+      throw new Error('Batch failure did not include the batch result');
+    return failure.details as Record<string, unknown>;
   }
 
   it('runs every command on one retained client and can stop on error', async () => {
@@ -177,14 +173,6 @@ describe('batch command', () => {
   });
 
   it('keeps help and usage errors inside the envelope and continues', async () => {
-    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`process.exit ${String(code)}`);
-    }) as typeof process.exit);
-    const leaked: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      leaked.push(String(chunk));
-      return true;
-    });
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ok: true });
     const close = vi.spyOn(DirectClient.prototype, 'close');
     const path = await batchFile(
@@ -200,9 +188,13 @@ describe('batch command', () => {
     const output = (await runBatch(['--file', path])) as {
       ok: boolean;
       count: number;
-      results: Array<{ ok: boolean; exitCode: number; result?: unknown; error?: string }>;
+      results: Array<{
+        ok: boolean;
+        exitCode: number;
+        result?: unknown;
+        error?: { message: string };
+      }>;
     };
-    expect(exit).not.toHaveBeenCalled();
     expect(output.count).toBe(6);
     expect(output.results[0]).toMatchObject({ ok: true, exitCode: 0, result: '0.1.0-test' });
     expect(output.results[1]).toMatchObject({ ok: true, exitCode: 0 });
@@ -210,15 +202,12 @@ describe('batch command', () => {
     expect(output.results[1]).not.toHaveProperty('error');
     expect(output.results[2]).toMatchObject({ ok: true, exitCode: 0 });
     expect(String(output.results[2].result)).toMatch(/Read one or more notes/);
-    expect(output.results[3]).toMatchObject({ ok: false, exitCode: 1 });
-    expect(output.results[3].error).toMatch(/argument missing/);
-    expect(output.results[4]).toMatchObject({ ok: false, exitCode: 1 });
+    expect(output.results[3]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
+    expect(output.results[3].error?.message).toMatch(/argument missing/);
+    expect(output.results[4]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
     expect(output.results[5]).toMatchObject({ ok: true, exitCode: 0, result: { ok: true } });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalled();
-    expect(leaked.join('')).not.toMatch(
-      /Direct RemNote SDK automation|0\.1\.0-test|argument missing/
-    );
   });
 
   it('passes batch --allow-destructive to inner sdk calls and rejects the inner flag', async () => {
@@ -267,10 +256,10 @@ describe('batch command', () => {
     calls.length = 0;
     const rejected = (await runBatch(['--allow-destructive', '--file', inner])) as {
       ok: boolean;
-      results: Array<{ error?: string }>;
+      results: Array<{ error?: { message: string } }>;
     };
     expect(rejected.ok).toBe(false);
-    expect(rejected.results[0].error).toMatch(/belongs on the batch command/);
+    expect(rejected.results[0].error?.message).toMatch(/belongs on the batch command/);
     expect(calls).toEqual([]);
   });
 });

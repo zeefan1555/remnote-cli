@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { readContentFileOrStdin } from './content-input.js';
 
 import {
@@ -49,11 +49,6 @@ function parseArgsJson(value: string): unknown[] {
 
 function outputFormat(program: Command): OutputFormat {
   return program.opts().text ? 'text' : 'json';
-}
-
-function reportError(error: unknown, format: OutputFormat): void {
-  console.error(formatError(error instanceof Error ? error.message : String(error), format));
-  process.exitCode = EXIT.ERROR;
 }
 
 function groupHelp(result: CapabilityResult, group: string): string {
@@ -153,7 +148,8 @@ function registerCapabilityCatalog(sdk: Command, program: Command): void {
                 .toLowerCase()
                 .includes(query))
         );
-        console.log(
+        emit(
+          program,
           formatResult({ ...result, capabilities }, format, () =>
             [
               `RemNote SDK ${result.sdkVersion}: ${capabilities.length} capabilities`,
@@ -161,8 +157,6 @@ function registerCapabilityCatalog(sdk: Command, program: Command): void {
             ].join('\n')
           )
         );
-      } catch (error) {
-        reportError(error, format);
       } finally {
         await client.close();
       }
@@ -191,7 +185,11 @@ function registerCapabilityGroup(
     try {
       const result = await getSdkCapabilities(client);
       if (!method) {
-        console.log(groupHelp(result, group));
+        const help = groupHelp(result, group);
+        emit(
+          program,
+          formatResult({ help }, format, () => help)
+        );
         return;
       }
 
@@ -200,7 +198,11 @@ function registerCapabilityGroup(
       );
       if (!capability) throw new Error(`Unknown SDK command: sdk ${commandName} ${method}`);
       if (opts.help) {
-        console.log(capabilityHelp(result, capability));
+        const help = capabilityHelp(result, capability);
+        emit(
+          program,
+          formatResult({ help }, format, () => help)
+        );
         return;
       }
       if (capability.status !== 'supported') {
@@ -220,9 +222,7 @@ function registerCapabilityGroup(
         payload.allowDestructive = true;
 
       const callResult = await client.execute('sdk_call', payload);
-      console.log(formatResult(callResult, format));
-    } catch (error) {
-      reportError(error, format);
+      emit(program, formatResult(callResult, format));
     } finally {
       await client.close();
     }

@@ -14,6 +14,7 @@ import { remoteSdk } from './remote-sdk.js';
 import { LocalState } from './local-state.js';
 import { SdkWorkspaceBackend } from '../../business/workspace/sdk-backend.js';
 import { ReadSession } from './session.js';
+import { isWriteUncertainty, unknownOutcomeFailure } from '../output/errors.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
@@ -61,6 +62,7 @@ export interface ClientOptions {
   kbId?: string;
   allowDestructive?: boolean;
   verbose?: boolean;
+  onDiagnostic?: (text: string) => void;
 }
 export class DirectClient {
   private connection?: Connection;
@@ -131,6 +133,10 @@ export class DirectClient {
       (action === 'flashcards_apply' || action === 'wiki_apply') && payload.dryRun !== false;
     try {
       return await this.executeAction(action, payload);
+    } catch (error) {
+      if (!READ_ONLY_ACTIONS.has(action) && !taskPreview && isWriteUncertainty(error))
+        throw unknownOutcomeFailure(error);
+      throw error;
     } finally {
       if (!READ_ONLY_ACTIONS.has(action) && !taskPreview) this.readSession.invalidateAll();
     }
@@ -190,13 +196,13 @@ export class DirectClient {
       if (this.adapter && this.state)
         await this.state.setLocal('search-snapshots', this.adapter.exportSearchSnapshots());
       if (this.options.verbose && this.connection)
-        console.error(
+        this.options.onDiagnostic?.(
           JSON.stringify({
             timings: {
               ...this.connection.timings,
               commandMs: Math.round(performance.now() - this.startedAt),
             },
-          })
+          }) + '\n'
         );
     } finally {
       await this.connection?.close();

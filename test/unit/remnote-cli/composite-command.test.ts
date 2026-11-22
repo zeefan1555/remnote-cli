@@ -1,11 +1,15 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { readContentFileOrStdin } from '../../../src/remnote-cli/commands/content-input.js';
+import { EXIT } from '../../../src/remnote-cli/output/errors.js';
 import { summarizeReceipt } from '../../../src/remnote-cli/output/receipt-summary.js';
+import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
+
 vi.mock('../../../src/remnote-cli/commands/content-input.js', () => ({
   readContentFileOrStdin: vi.fn(),
 }));
+
 const inspect = { schemaVersion: 1, remIds: ['r'] };
 const receipt = {
   schemaVersion: 1,
@@ -50,9 +54,7 @@ const taskReceipt = {
   readWindow: { startedAt: 'start', finishedAt: 'end' },
   errors: [],
 };
-afterEach(() => {
-  process.exitCode = 0;
-});
+
 describe('four composite commands', () => {
   it('keeps every recovery identity when an answer write succeeds before facts fail', () => {
     const partial = {
@@ -78,8 +80,9 @@ describe('four composite commands', () => {
     ] as const)
       expect(summary[field]).toEqual(partial[field]);
   });
+
   it.each(['flashcards', 'wiki'] as const)(
-    'summarizes %s without changing failed exit status',
+    'summarizes %s in failure details without losing recovery evidence',
     async (kind) => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans[kind]));
       const result = {
@@ -95,23 +98,32 @@ describe('four composite commands', () => {
         errors: [{ code: 'incomplete', message: 'Failed proof' }],
       };
       vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
-      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-      await createProgram('test').parseAsync(
-        [kind, 'apply', '--plan', '-', '--idempotency-key', 'batch', '--apply', '--summary'],
-        { from: 'user' }
-      );
-      const out = JSON.parse(log.mock.calls[0][0]);
-      expect(out.ids).toEqual(result.ids);
-      expect(out.facts).toEqual(result.facts);
-      expect(out.planHash).toBe(result.planHash);
-      expect(out.verificationScope).toBe('affected_objects');
-      expect(out.checks).toEqual([result.checks[1]]);
-      expect(out.counts.checks).toBe(2);
-      expect(out.errors).toEqual(result.errors);
-      expect(process.exitCode).toBe(1);
+
+      const output = await runCliForTest([
+        kind,
+        'apply',
+        '--plan',
+        '-',
+        '--idempotency-key',
+        'batch',
+        '--apply',
+        '--summary',
+      ]);
+      const failure = parseFailure(output.stderr);
+      const details = failure.details as Record<string, unknown>;
+
+      expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+      expect(details.ids).toEqual(result.ids);
+      expect(details.facts).toEqual(result.facts);
+      expect(details.planHash).toBe(result.planHash);
+      expect(details.verificationScope).toBe('affected_objects');
+      expect(details.checks).toEqual([result.checks[1]]);
+      expect((details.counts as { checks: number }).checks).toBe(2);
+      expect(details.errors).toEqual(result.errors);
     }
   );
-  it('verification summary omits bodies/history but preserves scope, hashes and failures', async () => {
+
+  it('verification summary omits bodies and history', async () => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(
       JSON.stringify({
         schemaVersion: 1,
@@ -133,31 +145,37 @@ describe('four composite commands', () => {
       scopes: [{ rootRemId: 'r', remIds: ['r'], complete: true }],
     };
     vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await createProgram('test').parseAsync(['verify', 'scope', '--expect', '-', '--summary'], {
-      from: 'user',
-    });
-    const out = JSON.parse(log.mock.calls[0][0]);
-    expect(out.objects).toEqual([{ remId: 'r', textHash: 'hash', cardIds: ['c'] }]);
-    expect(out.scopes).toEqual(result.scopes);
-    expect(out.counts.objects).toBe(1);
-    expect(process.exitCode ?? 0).toBe(0);
+
+    const output = await runCliForTest(['verify', 'scope', '--expect', '-', '--summary']);
+    const data = parseSuccess(output.stdout) as {
+      objects: unknown[];
+      scopes: unknown[];
+      counts: { objects: number };
+    };
+
+    expect(output.exitCode).toBe(0);
+    expect(data.objects).toEqual([{ remId: 'r', textHash: 'hash', cardIds: ['c'] }]);
+    expect(data.scopes).toEqual(result.scopes);
+    expect(data.counts.objects).toBe(1);
   });
-  it.each(['-', '/tmp/request.json'])('reads context from %s preserving receipt', async (path) => {
+
+  it.each(['-', '/tmp/request.json'])('reads context from %s', async (path) => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(inspect));
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(receipt);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await createProgram('test').parseAsync(['context', '--request', path], { from: 'user' });
+
+    const output = await runCliForTest(['context', '--request', path]);
+
     expect(readContentFileOrStdin).toHaveBeenCalledWith(path);
     expect(execute).toHaveBeenCalledExactlyOnceWith('inspect_many', {
       ...inspect,
       maxRems: 1000,
       ancestorDepth: 20,
     });
-    expect(JSON.parse(log.mock.calls[0][0])).toEqual(receipt);
+    expect(parseSuccess(output.stdout)).toEqual(receipt);
   });
+
   it.each(['passed', 'failed', 'incomplete'])(
-    'emits complete verify %s receipt and appropriate code',
+    'emits verify %s with the contract exit code',
     async (status) => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(
         JSON.stringify({
@@ -167,55 +185,72 @@ describe('four composite commands', () => {
         })
       );
       vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ...receipt, status });
-      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-      await createProgram('test').parseAsync(['--text', 'verify', 'scope', '--expect', '-'], {
-        from: 'user',
-      });
-      expect(JSON.parse(log.mock.calls[0][0])).toEqual({ ...receipt, status });
-      expect(process.exitCode ?? 0).toBe(status === 'passed' ? 0 : 1);
+
+      const output = await runCliForTest(['verify', 'scope', '--expect', '-']);
+
+      if (status === 'passed') {
+        expect(output.exitCode).toBe(0);
+        expect(parseSuccess(output.stdout)).toEqual({ ...receipt, status });
+      } else {
+        expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+        expect(parseFailure(output.stderr).details).toEqual({ ...receipt, status });
+      }
     }
   );
+
   it.each([{ complete: false }, { errors: [{ code: 'failed', message: 'Read failed' }] }])(
     'context fails closed %#',
-    async (v) => {
+    async (value) => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(inspect));
-      vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ...receipt, ...v });
-      vi.spyOn(console, 'log').mockImplementation(() => {});
-      await createProgram('test').parseAsync(['context', '--request', '-'], { from: 'user' });
-      expect(process.exitCode).toBe(1);
+      vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({ ...receipt, ...value });
+
+      const output = await runCliForTest(['context', '--request', '-']);
+
+      expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+      expect(parseFailure(output.stderr).subtype).toBe('receipt_incomplete');
     }
   );
+
   it.each(['{bad', '[]', '{"schemaVersion":1,"today":true}'])(
     'rejects invalid input before dispatch %#',
     async (input) => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(input);
       const execute = vi.spyOn(DirectClient.prototype, 'execute');
-      await createProgram('test').parseAsync(['context', '--request', '-'], { from: 'user' });
+
+      const output = await runCliForTest(['context', '--request', '-']);
+
       expect(execute).not.toHaveBeenCalled();
-      expect(process.exitCode).toBe(1);
+      expect(output.exitCode).toBe(EXIT.USAGE);
     }
   );
+
   it.each(['flashcards', 'wiki'] as const)(
-    'wraps %s inner plan, defaults preview',
+    'wraps %s inner plan and defaults preview',
     async (kind) => {
       vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans[kind]));
       const execute = vi
         .spyOn(DirectClient.prototype, 'execute')
         .mockResolvedValue({ ...taskReceipt, kind });
-      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-      await createProgram('test').parseAsync(
-        [kind, 'apply', '--plan', '-', '--idempotency-key', 'batch'],
-        { from: 'user' }
-      );
-      expect(execute).toHaveBeenCalledExactlyOnceWith(`${kind}_apply`, {
+
+      const output = await runCliForTest([
+        kind,
+        'apply',
+        '--plan',
+        '-',
+        '--idempotency-key',
+        'batch',
+      ]);
+
+      expect(execute).toHaveBeenCalledExactlyOnceWith(kind + '_apply', {
         schemaVersion: 1,
         plan: plans[kind],
         idempotencyKey: 'batch',
         dryRun: true,
       });
-      expect(JSON.parse(log.mock.calls[0][0])).toEqual({ ...taskReceipt, kind });
+      expect(parseSuccess(output.stdout)).toEqual({ ...taskReceipt, kind });
     }
   );
+
   it.each(['preview', 'verified', 'partial', 'unknown', 'incomplete', 'conflict'])(
     'applied receipt %s only succeeds for verified',
     async (status) => {
@@ -223,43 +258,64 @@ describe('four composite commands', () => {
       const execute = vi
         .spyOn(DirectClient.prototype, 'execute')
         .mockResolvedValue({ ...taskReceipt, status });
-      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-      await createProgram('test').parseAsync(
-        ['--text', 'flashcards', 'apply', '--plan', '-', '--idempotency-key', 'batch', '--apply'],
-        { from: 'user' }
-      );
+
+      const output = await runCliForTest([
+        'flashcards',
+        'apply',
+        '--plan',
+        '-',
+        '--idempotency-key',
+        'batch',
+        '--apply',
+      ]);
+
       expect(execute).toHaveBeenCalledWith('flashcards_apply', {
         schemaVersion: 1,
         plan: plans.flashcards,
         idempotencyKey: 'batch',
         dryRun: false,
       });
-      expect(JSON.parse(log.mock.calls[0][0])).toEqual({ ...taskReceipt, status });
-      expect(process.exitCode ?? 0).toBe(status === 'verified' ? 0 : 1);
+      if (status === 'verified') {
+        expect(output.exitCode).toBe(0);
+        expect(parseSuccess(output.stdout)).toEqual({ ...taskReceipt, status });
+      } else {
+        expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+        expect(parseFailure(output.stderr).details).toEqual({ ...taskReceipt, status });
+      }
     }
   );
+
   it('never retries a failed apply', async () => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.wiki));
     const execute = vi
       .spyOn(DirectClient.prototype, 'execute')
       .mockRejectedValue(new Error('Outcome unknown'));
-    await createProgram('test').parseAsync(
-      ['wiki', 'apply', '--plan', '-', '--idempotency-key', 'batch', '--apply'],
-      { from: 'user' }
-    );
+
+    const output = await runCliForTest([
+      'wiki',
+      'apply',
+      '--plan',
+      '-',
+      '--idempotency-key',
+      'batch',
+      '--apply',
+    ]);
+
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(process.exitCode).toBe(1);
+    expect(output.exitCode).toBe(EXIT.UNKNOWN_OUTCOME);
+    expect(parseFailure(output.stderr).type).toBe('unknown_outcome');
   });
-  it('leaf helps expose examples, checks, schemas and repaired safety boundaries', () => {
-    const p = createProgram('test');
-    const out: string[] = [];
+
+  it('leaf helps expose examples, checks, schemas and safety boundaries', () => {
+    const program = createProgram('test');
+    const output: string[] = [];
     for (const name of ['context', 'verify', 'flashcards', 'wiki']) {
-      const c = p.commands.find((c) => c.name() === name)!;
-      const leaf = c.commands[0] ?? c;
-      leaf.configureOutput({ writeOut: (t) => out.push(t) });
+      const command = program.commands.find((candidate) => candidate.name() === name)!;
+      const leaf = command.commands[0] ?? command;
+      leaf.configureOutput({ writeOut: (text) => output.push(text) });
       leaf.outputHelp();
     }
-    const text = out.join('');
+    const text = output.join('');
     for (const phrase of [
       '"schemaVersion":1',
       'parent',

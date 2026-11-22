@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command, InvalidArgumentError } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { formatResult, formatError, type OutputFormat } from '../output/formatter.js';
-import { EXIT } from '../config.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 import { resolveOptionalInlineOrFileContent } from './content-input.js';
 import { validateNotFlag } from './arg-utils.js';
 
@@ -96,15 +96,12 @@ export function registerInsertChildrenCommand(program: Command): void {
         if (opts.siblingRemId) payload.siblingRemId = opts.siblingRemId;
 
         const result = await client.execute('insert_children', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) =>
             formatRemResult(data, `Inserted children under ${parentRemId}`)
           )
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }
@@ -139,15 +136,12 @@ export function registerReplaceChildrenCommand(program: Command): void {
         });
 
         const result = await client.execute('replace_children', { parentRemId, content });
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) =>
             formatRemResult(data, `Replaced children under ${parentRemId}`)
           )
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }
@@ -172,13 +166,10 @@ export function registerUpdateTagsCommand(program: Command): void {
         if (opts.removeTagIds?.length) payload.removeTagRemIds = opts.removeTagIds;
 
         const result = await client.execute('update_tags', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => formatRemResult(data, `Updated tags on ${remId}`))
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }
@@ -235,16 +226,13 @@ export function registerSetPropertyCommand(program: Command): void {
         };
 
         const result = await client.execute('set_property', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const r = data as Record<string, unknown>;
             return `Set property: ${r.propertyRemId ?? opts.propertyId} on ${r.remId ?? remId} (${r.valueKind ?? 'unknown'})`;
           })
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }
@@ -289,16 +277,13 @@ export function registerMoveNoteCommand(program: Command): void {
         if (opts.ancestorDepth) payload.ancestorDepth = parseInt(opts.ancestorDepth, 10);
 
         const result = await client.execute('move_note', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const r = data as Record<string, unknown>;
             return `${r.dryRun ? 'Dry-run move' : 'Moved'}: ${r.title ?? remId} (${r.remId ?? remId}) -> ${r.newParentTitle ?? r.newParentRemId}`;
           })
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }
@@ -337,7 +322,8 @@ export function registerSetDocumentStatusCommand(program: Command): void {
         if (opts.expectedOldRemType) payload.expectedOldRemType = opts.expectedOldRemType;
 
         const result = await client.execute('set_document_status', payload);
-        console.log(
+        emit(
+          program,
           formatResult(result, format, (data) => {
             const r = data as Record<string, unknown>;
             const label = r.dryRun
@@ -348,10 +334,6 @@ export function registerSetDocumentStatusCommand(program: Command): void {
             return `${label}: ${r.title ?? remId} (${r.remId ?? remId}) ${r.oldRemType ?? '?'} -> ${r.newRemType ?? '?'}; isDocument=${String(r.newIsDocument ?? r.requestedIsDocument)}`;
           })
         );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(formatError(message, format));
-        process.exitCode = EXIT.ERROR;
       } finally {
         await client.close();
       }

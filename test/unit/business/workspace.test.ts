@@ -65,7 +65,7 @@ import { reconcile } from '../../../src/business/workspace/reconcile.js';
 import { readPublication } from '../../../src/business/workspace/publication.js';
 import { formatWorkspace } from '../../../src/business/workspace/format.js';
 import { stringify as yamlStringify } from 'yaml';
-import { createProgram } from '../../../src/remnote-cli/cli.js';
+import { runCliForTest } from '../../helpers/run-cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 
 let temporary: string, directory: string;
@@ -277,15 +277,16 @@ it('CLI relocate keeps a nonempty imported identity/card baseline usable by offl
   );
   const destination = join(temporary, 'renamed-vault');
   const backend = vi.spyOn(DirectClient.prototype, 'workspaceBackend');
-  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const outputs: Awaited<ReturnType<typeof runCliForTest>>[] = [];
   for (const args of [
     ['relocate', directory, destination],
     ['status', destination],
     ['lint', destination],
   ])
-    await createProgram('test').parseAsync(['node', 'remnote-cli', 'sync', ...args]);
+    outputs.push(await runCliForTest(['sync', ...args]));
   expect(backend).not.toHaveBeenCalled();
-  expect(log).toHaveBeenCalledTimes(3);
+  expect(outputs).toHaveLength(3);
+  expect(outputs.every((output) => output.exitCode === 0)).toBe(true);
   expect(await loadState(destination)).toEqual({ ...before, directory: destination });
   expect(await statusWorkspace(destination)).toMatchObject({
     complete: true,

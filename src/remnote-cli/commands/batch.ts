@@ -1,9 +1,18 @@
 import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
-import { Command, CommanderError } from 'commander';
+import { Command } from 'commander';
 import { createCommandClient, runWithCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import {
+  CLI_ERROR_TYPES,
+  CliFailure,
+  EXIT,
+  errorData,
+  type CliErrorData,
+  type CliErrorType,
+} from '../output/errors.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
+import { createBufferedRuntime, emit, fail } from '../output/runtime.js';
+import { createProgram, runProgram } from '../cli.js';
 
 const MAX_BATCH_BYTES = 1024 * 1024;
 const MAX_BATCH_COMMANDS = 100;
@@ -15,11 +24,11 @@ export interface BatchCommandResult {
   ok: boolean;
   exitCode: number;
   result?: unknown;
-  error?: string;
+  error?: CliErrorData;
 }
 
 export interface BatchOutput {
-  schemaVersion: 1;
+  schemaVersion: 2;
   count: number;
   ok: boolean;
   stoppedEarly: boolean;
@@ -28,6 +37,11 @@ export interface BatchOutput {
 
 interface BatchItem {
   argv: string[];
+}
+
+interface ParsedOutput {
+  result?: unknown;
+  error?: CliErrorData;
 }
 
 async function readBatch(pathOrDash: string, stdin: Readable = process.stdin): Promise<string> {
@@ -77,40 +91,80 @@ export function parseBatchInput(text: string): BatchItem[] {
         try {
           return commandItem(JSON.parse(line));
         } catch {
-          throw new Error(`Invalid JSONL batch command on line ${index + 1}`);
+          throw new Error('Invalid JSONL batch command on line ' + (index + 1));
         }
       });
     } else throw error;
   }
   if (commands.length === 0) throw new Error('Batch input contains no commands');
   if (commands.length > MAX_BATCH_COMMANDS)
-    throw new Error(`Batch input exceeds ${MAX_BATCH_COMMANDS} commands`);
+    throw new Error('Batch input exceeds ' + MAX_BATCH_COMMANDS + ' commands');
   return commands;
 }
 
-function argvProblem(argv: string[]): string | undefined {
-  if (argv[0] === 'batch') return 'batch cannot contain another batch command';
+function argvProblem(argv: string[]): CliErrorData | undefined {
+  if (argv[0] === 'batch')
+    return errorData(
+      new CliFailure('usage', 'nested_batch', 'batch cannot contain another batch command')
+    );
   for (const arg of argv) {
-    if (arg === '-') return 'Batch commands cannot read stdin; pass file paths';
+    if (arg === '-')
+      return errorData(
+        new CliFailure('usage', 'batch_stdin', 'Batch commands cannot read stdin; pass file paths')
+      );
     const flag = arg.split('=', 1)[0];
     if (CONNECTION_FLAGS.includes(flag))
-      return `${flag} belongs on the batch command, not an inner command`;
+      return errorData(
+        new CliFailure(
+          'usage',
+          'connection_flag_scope',
+          flag + ' belongs on the batch command, not an inner command'
+        )
+      );
   }
   return undefined;
 }
 
-/**
- * `.command()` copies `_exitCallback` and the output writers at creation time.
- * Setting them only on the root leaves subcommand help and usage errors on `process.exit`.
- */
-function bindCommand(
-  command: Command,
-  writeOut: (text: string) => void,
-  writeErr: (text: string) => void
-): void {
-  command.exitOverride();
-  command.configureOutput({ writeOut, writeErr });
-  for (const child of command.commands) bindCommand(child, writeOut, writeErr);
+function isCliErrorType(value: unknown): value is CliErrorType {
+  return typeof value === 'string' && CLI_ERROR_TYPES.some((candidate) => candidate === value);
+}
+
+function parseCliError(value: unknown): CliErrorData | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    !isCliErrorType(record.type) ||
+    typeof record.subtype !== 'string' ||
+    typeof record.message !== 'string' ||
+    typeof record.retryable !== 'boolean'
+  )
+    return undefined;
+  return {
+    type: record.type,
+    subtype: record.subtype,
+    message: record.message,
+    ...(typeof record.hint === 'string' ? { hint: record.hint } : {}),
+    retryable: record.retryable,
+    ...(record.details === undefined ? {} : { details: record.details }),
+  };
+}
+
+function parseOutput(text: string): ParsedOutput {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return text.length === 0 ? {} : { result: text };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { result: value };
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== 2) return { result: value };
+  if (record.ok === true && Object.hasOwn(record, 'data')) return { result: record.data };
+  if (record.ok === false) {
+    const error = parseCliError(record.error);
+    if (error) return { error };
+  }
+  return { result: value };
 }
 
 async function runArgv(
@@ -119,70 +173,28 @@ async function runArgv(
   version: string
 ): Promise<BatchCommandResult> {
   const problem = argvProblem(argv);
-  if (problem) return { index, argv, ok: false, exitCode: EXIT.ERROR, error: problem };
-  let stdout = '';
-  let stderr = '';
-  const previousExit = process.exitCode;
-  process.exitCode = undefined;
-  const log = console.log;
-  const errorLog = console.error;
-  console.log = (...args: unknown[]) => {
-    stdout += `${args.map((value) => String(value)).join(' ')}\n`;
-  };
-  console.error = (...args: unknown[]) => {
-    stderr += `${args.map((value) => String(value)).join(' ')}\n`;
-  };
-  let thrown: unknown;
-  try {
-    const { createProgram } = await import('../cli.js');
-    const program = createProgram(version);
-    bindCommand(
-      program,
-      (text) => {
-        stdout += text;
-      },
-      (text) => {
-        stderr += text;
-      }
-    );
-    await program.parseAsync(['node', 'remnote-cli', ...argv], { from: 'node' });
-  } catch (error) {
-    thrown = error;
-  } finally {
-    console.log = log;
-    console.error = errorLog;
-  }
-  const commanderCode = thrown instanceof CommanderError ? thrown.exitCode : undefined;
-  const exitCode = commanderCode ?? process.exitCode ?? (thrown ? EXIT.ERROR : EXIT.SUCCESS);
-  process.exitCode = previousExit;
-  const text = stdout.trim();
-  let result: unknown = text.length > 0 ? text : undefined;
-  if (text) {
-    try {
-      result = JSON.parse(text);
-    } catch {
-      result = text;
-    }
-  }
-  const thrownText =
-    thrown instanceof CommanderError && thrown.exitCode === EXIT.SUCCESS
-      ? ''
-      : thrown instanceof Error
-        ? thrown.message
-        : thrown
-          ? String(thrown)
-          : '';
-  const errorText = [stderr.trim(), thrownText && !stderr.includes(thrownText) ? thrownText : '']
-    .filter(Boolean)
-    .join('\n');
+  if (problem) return { index, argv, ok: false, exitCode: EXIT.USAGE, error: problem };
+
+  const runtime = createBufferedRuntime('json');
+  const program = createProgram(version, runtime);
+  const exitCode = await runProgram(program, ['node', 'remnote-cli', ...argv], runtime);
+  const stdout = runtime.stdout().trim();
+  const stderr = runtime.stderr().trim();
   const ok = exitCode === EXIT.SUCCESS;
+  const parsedStdout = parseOutput(stdout);
+  const parsedStderr = parseOutput(stderr);
+  const parsed = !ok && parsedStderr.error ? parsedStderr : parsedStdout;
+  const fallbackError =
+    ok || stderr.length === 0
+      ? undefined
+      : errorData(new CliFailure('internal', 'batch_command_failed', stderr));
   return {
     index,
     argv,
     ok,
     exitCode,
-    ...(result !== undefined ? { result } : {}),
-    ...(!ok && errorText ? { error: errorText } : {}),
+    ...(parsed.result === undefined ? {} : { result: parsed.result }),
+    ...(!ok && (parsed.error ?? fallbackError) ? { error: parsed.error ?? fallbackError } : {}),
   };
 }
 
@@ -191,8 +203,20 @@ function formatBatchText(data: unknown): string {
   return batch.results
     .map((item) => {
       const body =
-        item.error ?? (item.result === undefined ? '' : JSON.stringify(item.result, null, 2));
-      return `[${item.index}] exit ${item.exitCode} ${item.argv.join(' ')}${body ? `\n${body}` : ''}`;
+        item.error !== undefined
+          ? JSON.stringify(item.error, null, 2)
+          : item.result === undefined
+            ? ''
+            : JSON.stringify(item.result, null, 2);
+      return (
+        '[' +
+        item.index +
+        '] exit ' +
+        item.exitCode +
+        ' ' +
+        item.argv.join(' ') +
+        (body ? '\n' + body : '')
+      );
     })
     .join('\n\n');
 }
@@ -240,17 +264,30 @@ export function registerBatchCommand(program: Command, version: string): void {
           }
         });
         const output: BatchOutput = {
-          schemaVersion: 1,
+          schemaVersion: 2,
           count: results.length,
           ok: results.every((item) => item.ok),
           stoppedEarly,
           results,
         };
-        console.log(formatResult(output, format, formatBatchText));
-        if (!output.ok) process.exitCode = EXIT.ERROR;
-      } catch (error) {
-        console.error(formatError(error instanceof Error ? error.message : String(error), format));
-        process.exitCode = EXIT.ERROR;
+        if (output.ok) {
+          const rendered =
+            format === 'json'
+              ? formatResult(output, 'json')
+              : formatResult(output, 'text', formatBatchText);
+          emit(program, rendered);
+        } else {
+          const unknown = results.some((item) => item.error?.type === 'unknown_outcome');
+          fail(
+            program,
+            new CliFailure(
+              unknown ? 'unknown_outcome' : 'conflict',
+              unknown ? 'batch_write_unknown' : 'batch_failed',
+              'One or more batch commands failed',
+              { details: output, retryable: false }
+            )
+          );
+        }
       } finally {
         client.release();
         await client.close();

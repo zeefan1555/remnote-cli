@@ -1,7 +1,7 @@
+import { emit } from '../output/runtime.js';
 import { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
-import { EXIT } from '../config.js';
-import { formatError, formatResult, type OutputFormat } from '../output/formatter.js';
+import { formatResult, type OutputFormat } from '../output/formatter.js';
 
 function formatOutlineText(data: unknown): string {
   const result = data as Record<string, unknown>;
@@ -35,10 +35,7 @@ function registerOutlineAction(
         if (opts.today) payload.today = true;
         if (opts.rootId) payload.rootRemId = opts.rootId;
         const result = await client.execute('set_outline_collapsed', payload);
-        console.log(formatResult(result, format, formatOutlineText));
-      } catch (error) {
-        console.error(formatError(error instanceof Error ? error.message : String(error), format));
-        process.exitCode = EXIT.ERROR;
+        emit(program, formatResult(result, format, formatOutlineText));
       } finally {
         await client.close();
       }
