@@ -32,8 +32,10 @@ it.each([false, true, 'unavailable'])(
     });
     const close = vi.spyOn(Connection.prototype, 'close').mockResolvedValue();
     vi.mocked(verifiedCatalog).mockReturnValue({
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       sdkCatalogHash: 'b'.repeat(64),
+      capabilities: [],
     } as never);
     let state = new Map<string, { text: unknown; parent?: string }>();
     let counter = 0;

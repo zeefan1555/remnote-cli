@@ -11,6 +11,7 @@ import { REMOTE_ACTION_NAMES } from '../remnote-cli/client/remote-actions.js';
 import { FlashcardsApplySchema, WikiApplySchema } from './task-schemas.js';
 import { CLI_ERROR_TYPES, EXIT } from '../remnote-cli/output/errors.js';
 import type { CommandSpec } from '../remnote-cli/spec/command-spec.js';
+import { localSdkCapabilities } from '../remnote-cli/client/sdk-capabilities.js';
 
 export const CONTRACT_SCHEMA_NAMES = ['flashcards', 'wiki', 'workspace'] as const;
 export type ContractSchemaName = (typeof CONTRACT_SCHEMA_NAMES)[number];
@@ -62,6 +63,9 @@ export function buildCliContract(commands: CommandSpec[] = []) {
   return {
     schemaVersion: 2,
     protocolVersion: PROTOCOL_VERSION,
+    sdkFacts: {
+      schemaVersion: localSdkCapabilities().catalogSchemaVersion,
+    },
     bridgeActions: Object.values(REMOTE_ACTION_NAMES),
     plans: planSchemas,
     requiredCapabilities,

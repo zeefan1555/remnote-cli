@@ -1002,8 +1002,10 @@ native status/tag synchronization and are currently unavailable; previews remain
 
 ## SDK commands
 
-The Plugin SDK is available through one first-level `sdk` command. Its second level contains capability discovery and
-19 SDK namespaces; each third-level command maps to one bridge-advertised capability:
+The Plugin SDK is available through one first-level `sdk` command. Its second level
+contains capability discovery, a raw capability escape hatch and 19 SDK namespaces.
+The CLI derives navigation from the versioned SDK facts shipped with its build, so
+group and method help works while RemNote is closed:
 
 ```text
 capabilities  app        card       date       editor
@@ -1014,7 +1016,7 @@ search        settings   storage    widget      window
 
 Use `sdk capabilities` to search the full inventory. Running a namespace without a method lists that namespace's
 commands; adding `--help` to a method prints its SDK signature, mode, target requirements, unsupported reason, and
-example.
+example. Live capability state is checked again before execution.
 
 ```bash
 remnote-cli sdk --help
@@ -1024,12 +1026,17 @@ remnote-cli sdk rem object-collapse --help
 remnote-cli sdk app get-platform --args-json '[]'
 remnote-cli sdk rem object-collapse --target-id REM_ID --args-json '["PORTAL_ID"]'
 remnote-cli sdk messaging broadcast --args-file ./args.json
+remnote-cli sdk call rem:getChildrenRem --target-id REM_ID --args-json '[]'
 ```
 
 - Positional SDK arguments come from either `--args-json` or `--args-file`, never both.
 - Argument files/stdin are UTF-8 and capped at 100 KB; CLI input validation also limits calls to 100 JSON arguments.
 - RemObject and Card methods require `--target-id`.
 - Prefer friendly commands when they cover the workflow.
+- Use `sdk call <capability-id>` when a live Bridge exposes a supported method
+  before the local generated navigation has been updated. It still requires the
+  exact live capability, live catalog hash, target ID where required, support
+  status and destructive approval.
 - Use `--allow-destructive` only after explicit user intent and only for a command whose help reports
   `Mode: destructive`.
 - Callback, event-listener, scheduler, Widget registration, and stateful RichTextBuilder operations remain

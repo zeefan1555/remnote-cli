@@ -38,6 +38,9 @@ catalog, when an action lacks policy, or when generated output is stale.
 
 ## Dynamic SDK commands
 
-`sdk GROUP` commands are marked dynamic and destructive. The live
-`remnote-cli sdk capabilities` result remains authoritative for methods,
-modes and supported status exposed by the active SDK.
+`sdk GROUP` commands are marked dynamic and destructive. Their group and method
+help comes from the versioned SDK facts shipped with the CLI. Execution checks the
+live catalog hash, modes and supported status exposed by the active SDK.
+
+`sdk call <capability-id>` accepts one supported capability from the live catalog.
+It does not bypass the Bridge allowlist, destructive approval or target-ID rules.

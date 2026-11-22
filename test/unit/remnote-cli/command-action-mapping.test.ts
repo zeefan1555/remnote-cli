@@ -1,9 +1,14 @@
-vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js', () => ({
-  getSdkCapabilities: async (client: DirectClient) => ({
-    ...((await client.execute('get_sdk_capabilities', {})) as Record<string, unknown>),
-    sdkCatalogHash: 'a'.repeat(64),
-  }),
-}));
+vi.mock('../../../src/remnote-cli/client/sdk-capabilities.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/remnote-cli/client/sdk-capabilities.js')>();
+  return {
+    ...actual,
+    getSdkCapabilities: async (client: DirectClient) => ({
+      ...((await client.execute('get_sdk_capabilities', {})) as Record<string, unknown>),
+      sdkCatalogHash: 'a'.repeat(64),
+    }),
+  };
+});
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -212,14 +217,13 @@ describe('command bridge action mapping', () => {
 
   it('maps sdk capabilities to get_sdk_capabilities', async () => {
     const result = {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
           id: 'rem:getText',
           target: 'rem',
           method: 'getText',
-          group: 'rem',
-          command: 'object-get-text',
           signatures: ['getText: () => Promise<RichTextInterface>'],
           status: 'supported',
           mode: 'read',
@@ -233,14 +237,13 @@ describe('command bridge action mapping', () => {
 
   it('maps an sdk rem object command to sdk_call', async () => {
     const capabilities = {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
           id: 'rem:setText',
           target: 'rem',
           method: 'setText',
-          group: 'rem',
-          command: 'object-set-text',
           signatures: ['setText: (text: RichTextInterface) => Promise<void>'],
           status: 'supported',
           mode: 'write',
@@ -264,6 +267,7 @@ describe('command bridge action mapping', () => {
   it('maps an SDK namespace command args file to sdk_call', async () => {
     const filePath = await createTempContentFile('[{"value":1}]');
     const capabilities = {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
@@ -271,8 +275,6 @@ describe('command bridge action mapping', () => {
           target: 'namespace',
           namespace: 'messaging',
           method: 'broadcast',
-          group: 'messaging',
-          command: 'broadcast',
           signatures: ['broadcast: (message: unknown) => Promise<void>'],
           status: 'supported',
           mode: 'read',
@@ -294,14 +296,13 @@ describe('command bridge action mapping', () => {
 
   it('passes explicit destructive approval through an SDK command', async () => {
     const capabilities = {
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
           id: 'card:remove',
           target: 'card',
           method: 'remove',
-          group: 'card',
-          command: 'object-remove',
           signatures: ['remove: () => Promise<void>'],
           status: 'supported',
           mode: 'destructive',
@@ -321,9 +322,39 @@ describe('command bridge action mapping', () => {
     executeSpy.mockRestore();
   });
 
+  it('calls a supported live capability through the raw sdk call escape hatch', async () => {
+    const capabilities = {
+      catalogSchemaVersion: 1,
+      sdkVersion: '0.0.46',
+      capabilities: [
+        {
+          id: 'rem:remove',
+          target: 'rem',
+          method: 'remove',
+          signatures: ['remove: () => Promise<void>'],
+          status: 'supported',
+          mode: 'destructive',
+        },
+      ],
+    };
+    const executeSpy = await runCommand(
+      ['sdk', 'call', 'rem:remove', '--target-id', 'rem-1', '--allow-destructive'],
+      capabilities
+    );
+    expect(executeSpy).toHaveBeenNthCalledWith(1, 'get_sdk_capabilities', {});
+    expect(executeSpy).toHaveBeenNthCalledWith(2, 'sdk_call', {
+      capability: 'rem:remove',
+      expectedCatalogHash: 'a'.repeat(64),
+      targetId: 'rem-1',
+      allowDestructive: true,
+    });
+    executeSpy.mockRestore();
+  });
+
   it('rejects conflicting SDK argument sources before calling sdk_call', async () => {
     const filePath = await createTempContentFile('[]');
     const executeSpy = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
+      catalogSchemaVersion: 1,
       sdkVersion: '0.0.46',
       capabilities: [
         {
@@ -331,8 +362,6 @@ describe('command bridge action mapping', () => {
           target: 'namespace',
           namespace: 'app',
           method: 'getPlatform',
-          group: 'app',
-          command: 'get-platform',
           signatures: ['getPlatform: () => Promise<Platform>'],
           status: 'supported',
           mode: 'read',

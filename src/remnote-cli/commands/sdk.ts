@@ -7,8 +7,10 @@ import type { CommandCatalog } from '../spec/command-spec.js';
 
 import {
   getSdkCapabilities,
-  type Capability,
-  type CapabilityResult,
+  localSdkNavigation,
+  navigationCatalog,
+  type NavigationCapability,
+  type NavigationCatalog,
 } from '../client/sdk-capabilities.js';
 
 const SDK_GROUPS = [
@@ -37,7 +39,7 @@ function cliGroupName(group: string): string {
   return group.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
-function formatCapability(capability: Capability): string {
+function formatCapability(capability: NavigationCapability): string {
   const reason = capability.reason ? ` reason=${capability.reason}` : '';
   return `sdk ${cliGroupName(capability.group)} ${capability.command}: capability=${capability.id} status=${capability.status} mode=${capability.mode}${reason}`;
 }
@@ -52,7 +54,7 @@ function outputFormat(program: Command): OutputFormat {
   return program.opts().text ? 'text' : 'json';
 }
 
-function groupHelp(result: CapabilityResult, group: string): string {
+function groupHelp(result: NavigationCatalog, group: string): string {
   const commandName = cliGroupName(group);
   const capabilities = result.capabilities
     .filter((capability) => capability.group === group)
@@ -72,7 +74,7 @@ function groupHelp(result: CapabilityResult, group: string): string {
   ].join('\n');
 }
 
-function capabilityHelp(result: CapabilityResult, capability: Capability): string {
+function capabilityHelp(result: NavigationCatalog, capability: NavigationCapability): string {
   const commandName = cliGroupName(capability.group);
   const example = [
     'remnote-cli',
@@ -140,7 +142,7 @@ function registerCapabilityCatalog(sdk: Command, program: Command, catalog: Comm
       const format = outputFormat(program);
       const client = createCommandClient(program);
       try {
-        const result = await getSdkCapabilities(client);
+        const result = navigationCatalog(await getSdkCapabilities(client));
         const query = typeof opts.query === 'string' ? opts.query.toLowerCase() : undefined;
         const capabilities = result.capabilities.filter(
           (capability) =>
@@ -190,30 +192,35 @@ function registerCapabilityGroup(
 
   sdkGroup.action(async (method: string | undefined, opts) => {
     const format = outputFormat(program);
-    const client = createCommandClient(program);
-    try {
-      const result = await getSdkCapabilities(client);
-      if (!method) {
-        const help = groupHelp(result, group);
-        emit(
-          program,
-          formatResult({ help }, format, () => help)
-        );
-        return;
-      }
-
-      const capability = result.capabilities.find(
+    if (!method) {
+      const help = groupHelp(localSdkNavigation(), group);
+      emit(
+        program,
+        formatResult({ help }, format, () => help)
+      );
+      return;
+    }
+    if (opts.help) {
+      const local = localSdkNavigation();
+      const capability = local.capabilities.find(
         (candidate) => candidate.group === group && candidate.command === method
       );
       if (!capability) throw new Error(`Unknown SDK command: sdk ${commandName} ${method}`);
-      if (opts.help) {
-        const help = capabilityHelp(result, capability);
-        emit(
-          program,
-          formatResult({ help }, format, () => help)
-        );
-        return;
-      }
+      const help = capabilityHelp(local, capability);
+      emit(
+        program,
+        formatResult({ help }, format, () => help)
+      );
+      return;
+    }
+
+    const client = createCommandClient(program);
+    try {
+      const result = navigationCatalog(await getSdkCapabilities(client));
+      const capability = result.capabilities.find(
+        (candidate) => candidate.group === group && candidate.command === method
+      );
+      if (!capability) throw new Error(`Unknown live SDK command: sdk ${commandName} ${method}`);
       if (capability.status !== 'supported') {
         throw new Error(
           `Unsupported SDK command sdk ${commandName} ${method}: ${capability.reason ?? 'no executable CLI path'}`
@@ -238,12 +245,52 @@ function registerCapabilityGroup(
   });
 }
 
+function registerSdkCall(sdk: Command, program: Command, catalog: CommandCatalog): void {
+  catalog
+    .action(sdk, 'call <capability-id>', {
+      description: 'Call one supported live SDK capability by exact capability ID',
+      risk: 'destructive',
+      bridge: 'required',
+    })
+    .option('--target-id <id>', 'Target Rem or Card ID for object methods')
+    .option('--args-json <json-array>', 'Positional arguments as a JSON array')
+    .option('--args-file <path|->', 'Read positional JSON arguments from a file or stdin')
+    .action(async (capabilityId: string, opts) => {
+      const format = outputFormat(program);
+      const client = createCommandClient(program);
+      try {
+        const result = await getSdkCapabilities(client);
+        const capability = result.capabilities.find((candidate) => candidate.id === capabilityId);
+        if (!capability) throw new Error(`Unknown live SDK capability: ${capabilityId}`);
+        if (capability.status !== 'supported') {
+          throw new Error(
+            `Unsupported SDK capability ${capability.id}: ${capability.reason ?? 'no executable CLI path'}`
+          );
+        }
+        const payload: Record<string, unknown> = {
+          capability: capability.id,
+          expectedCatalogHash: result.sdkCatalogHash,
+        };
+        if (opts.targetId !== undefined) payload.targetId = opts.targetId as string;
+        const args = await readArgs(opts as { argsJson?: string; argsFile?: string });
+        if (args !== undefined) payload.args = args;
+        if (program.opts().allowDestructive || client.allowsDestructive())
+          payload.allowDestructive = true;
+        const callResult = await client.execute('sdk_call', payload);
+        emit(program, formatResult(callResult, format));
+      } finally {
+        await client.close();
+      }
+    });
+}
+
 export function registerSdkCommands(program: Command, catalog: CommandCatalog): void {
   const sdk = catalog.group(program, 'sdk', {
     description: 'Low-level RemNote Plugin SDK access',
     bareHelp: true,
   });
   registerCapabilityCatalog(sdk, program, catalog);
+  registerSdkCall(sdk, program, catalog);
   for (const [group, description] of SDK_GROUPS) {
     registerCapabilityGroup(sdk, program, catalog, group, description);
   }

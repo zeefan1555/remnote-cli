@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import type { Command } from 'commander';
 import { buildCliContract } from '../../schemas/contract.js';
-import { getSdkCapabilities } from '../client/sdk-capabilities.js';
+import { getSdkCapabilities, localSdkCapabilities } from '../client/sdk-capabilities.js';
 import { remnoteCliStateHome } from '../client/state-home.js';
 import { PROTOCOL_VERSION } from '../client/connection.js';
 import { buildCommandSpecs } from '../spec/command-spec.js';
@@ -252,6 +252,7 @@ function skippedBridgeChecks(): DoctorCheck[] {
     'protocol',
     'knowledge_base',
     'sdk_catalog',
+    'sdk_facts_sync',
     'capabilities',
     'journal',
   ].map((id) => ({ id, status: 'skip', message: 'Skipped by --offline' }));
@@ -270,6 +271,18 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const stateHome = remnoteCliStateHome();
   checks.push(await stateDirectoryCheck(stateHome));
   checks.push(contractCheck(options.program));
+  const localFacts = localSdkCapabilities();
+  checks.push({
+    id: 'local_sdk_facts',
+    status: 'pass',
+    message: 'Local SDK facts and generated navigation are readable',
+    details: {
+      catalogSchemaVersion: localFacts.catalogSchemaVersion,
+      sdkVersion: localFacts.sdkVersion,
+      catalogHash: localFacts.sdkCatalogHash,
+      capabilities: localFacts.capabilities.length,
+    },
+  });
 
   if (options.offline || !options.client) {
     checks.push(...skippedBridgeChecks());
@@ -356,6 +369,18 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
           details: {
             sdkVersion: catalog.sdkVersion,
             catalogHash: catalog.sdkCatalogHash,
+          },
+        });
+        checks.push({
+          id: 'sdk_facts_sync',
+          status: catalog.sdkCatalogHash === localFacts.sdkCatalogHash ? 'pass' : 'warn',
+          message:
+            catalog.sdkCatalogHash === localFacts.sdkCatalogHash
+              ? 'Live SDK facts match the local generated navigation'
+              : 'Live SDK facts changed; generated help is stale but sdk call can use supported live capabilities',
+          details: {
+            localCatalogHash: localFacts.sdkCatalogHash,
+            liveCatalogHash: catalog.sdkCatalogHash,
           },
         });
         const supported = new Set(

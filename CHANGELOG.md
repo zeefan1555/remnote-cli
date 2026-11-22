@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.2] - 2026-11-22
+
+### Added
+
+- Generate the SDK method tree offline from versioned Bridge facts. `sdk GROUP --help` and method help no longer require RemNote to be running.
+- Add `sdk call <capability-id>` as a raw escape hatch for one supported live capability. The command still enforces the live catalog hash, allowlist, target and destructive rules.
+
+### Changed
+
+- Derive SDK group and command names in the CLI instead of consuming navigation fields from the Bridge.
+
 ## [0.28.1] - 2026-11-22
 
 ### Changed

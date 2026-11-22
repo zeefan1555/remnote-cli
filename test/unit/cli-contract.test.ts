@@ -29,6 +29,7 @@ describe('generated CLI contract', () => {
     );
     expect(contract.requiredCapabilities.wiki.pages).toContain('namespace:rem.createRem');
     expect(contract.bridgeActions).not.toContain('transaction_begin');
+    expect(contract.sdkFacts).toEqual({ schemaVersion: 1 });
     expect(contract.output).toMatchObject({
       schemaVersion: 2,
       successStream: 'stdout',

@@ -14,8 +14,6 @@ function catalog(): CapabilityResult {
       namespace: 'rem',
       target: 'namespace',
       method: 'findOne',
-      group: 'rem',
-      command: 'find-one',
       signatures: [],
       status: 'supported',
       mode: 'read',
@@ -25,8 +23,6 @@ function catalog(): CapabilityResult {
       namespace: 'richText',
       target: 'namespace',
       method: 'rem',
-      group: 'richText',
-      command: 'rem',
       signatures: [],
       status: 'supported',
       mode: 'read',
@@ -36,8 +32,6 @@ function catalog(): CapabilityResult {
       id: 'rem:getAliases',
       target: 'rem',
       method: 'getAliases',
-      group: 'rem',
-      command: 'object-get-aliases',
       signatures: [],
       status: 'supported',
       mode: 'read',
@@ -47,8 +41,6 @@ function catalog(): CapabilityResult {
       id: 'rem:setParent',
       target: 'rem',
       method: 'setParent',
-      group: 'rem',
-      command: 'set-parent',
       signatures: [],
       status: 'supported',
       mode: 'write',
@@ -58,8 +50,6 @@ function catalog(): CapabilityResult {
       namespace: 'date',
       target: 'namespace',
       method: 'getDailyDoc',
-      group: 'date',
-      command: 'get-daily-doc',
       signatures: [],
       status: 'supported',
       mode: 'write',
@@ -69,14 +59,12 @@ function catalog(): CapabilityResult {
       namespace: 'event',
       target: 'namespace',
       method: 'addListener',
-      group: 'event',
-      command: 'add-listener',
       signatures: [],
       status: 'unsupported',
       mode: 'write',
     },
   ];
-  const data = { sdkVersion: '0.0.46', capabilities };
+  const data = { catalogSchemaVersion: 1 as const, sdkVersion: '0.0.46', capabilities };
   return {
     ...data,
     sdkCatalogHash: createHash('sha256').update(JSON.stringify(data)).digest('hex'),
@@ -91,6 +79,13 @@ describe('remote SDK values', () => {
       verifiedCatalog({ ...source, capabilities: [...source.capabilities, source.capabilities[0]] })
     ).toThrow();
     expect(() => verifiedCatalog({ ...source, extra: true })).toThrow();
+    expect(() => verifiedCatalog({ ...source, catalogSchemaVersion: 2 })).toThrow();
+    expect(() =>
+      verifiedCatalog({
+        ...source,
+        capabilities: [{ ...source.capabilities[0], group: 'rem' }],
+      })
+    ).toThrow();
   });
 
   it('materializes immutable Rem snapshots with explicit refs, dates and undefined values', async () => {

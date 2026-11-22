@@ -37,11 +37,12 @@ describe('createProgram', () => {
     const sdk = program.commands.find((command) => command.name() === 'sdk');
     const sdkCommandNames = sdk?.commands.map((command) => command.name());
     expect(sdkCommandNames).toContain('capabilities');
+    expect(sdkCommandNames).toContain('call');
     expect(sdkCommandNames).toContain('app');
     expect(sdkCommandNames).toContain('rem');
     expect(sdkCommandNames).toContain('rich-text');
     expect(sdkCommandNames).toContain('window');
-    expect(sdkCommandNames).toHaveLength(20);
+    expect(sdkCommandNames).toHaveLength(21);
     expect(commandNames).toContain('update');
     expect(commandNames).toContain('set-document-status');
     expect(commandNames).toContain('journal');

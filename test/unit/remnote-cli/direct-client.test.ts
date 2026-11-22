@@ -32,7 +32,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   directory = await mkdtemp(join(tmpdir(), 'direct-client-'));
   vi.stubEnv('REMNOTE_CLI_STATE_HOME', directory);
-  const data = { sdkVersion: '0.0.46', capabilities: [] };
+  const data = { catalogSchemaVersion: 1 as const, sdkVersion: '0.0.46', capabilities: [] };
   const sdkCatalogHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
   wire.open.mockResolvedValue({
     pluginVersion: 'different',
