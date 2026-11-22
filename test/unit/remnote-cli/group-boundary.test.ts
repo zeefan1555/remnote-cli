@@ -13,6 +13,14 @@ describe('command group boundaries', () => {
     }
   );
 
+  it('lets Commander report a missing root option value', async () => {
+    const result = await runCliForTest(['--kb-id']);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({
+      subtype: 'commander.optionMissingArgument',
+    });
+  });
+
   it.each(['powerup', 'flashcards', 'wiki', 'outline', 'todo', 'verify', 'sync', 'sdk'])(
     'shows help for bare group %s',
     async (group) => {

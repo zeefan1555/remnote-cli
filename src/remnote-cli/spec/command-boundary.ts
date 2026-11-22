@@ -107,7 +107,10 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
     if (token === '--help' || token === '-h') return undefined;
     if (token.startsWith('-')) {
       if (isKnownOption(command, token)) {
-        if (optionTakesValue(command, token)) index++;
+        if (optionTakesValue(command, token)) {
+          if (index + 1 >= args.length) return undefined;
+          index++;
+        }
         continue;
       }
       if (command.commands.length > 0 && hasDescendantOption(command, token)) {
@@ -153,7 +156,10 @@ export function rootHelpRequested(program: Command, argv: string[]): boolean {
     if (token === '--version' || token === '-V') return false;
     if (token.startsWith('-')) {
       if (!isKnownOption(program, token)) return false;
-      if (optionTakesValue(program, token)) index++;
+      if (optionTakesValue(program, token)) {
+        if (index + 1 >= args.length) return false;
+        index++;
+      }
       continue;
     }
     return false;
