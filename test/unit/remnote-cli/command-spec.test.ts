@@ -70,6 +70,10 @@ describe('command specs', () => {
       risk: 'destructive',
       bridge: 'required',
     });
+    expect(commandSpec(specs, 'rem tags update')).toMatchObject({
+      risk: 'destructive',
+      bridge: 'required',
+    });
     expect(commandSpec(specs, 'sync status')).toMatchObject({
       risk: 'read',
       bridge: 'none',

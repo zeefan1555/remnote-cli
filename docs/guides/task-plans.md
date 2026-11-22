@@ -106,7 +106,7 @@ is no `root` binding, and the receipt `ids` include `parent`. With `parentRemId`
 cannot be `true`, two or more new cards do not need a title, and at least one new card is required. Verification
 checks each card's parent, that the topic keeps `tagRemId` and lists the new cards among its children in plan order,
 and that no new card repeats `tagRemId`. Use it for overflow cards after the first titled 7-card plan instead of
-single-card plans followed by `move-note` and tag removal. Preflight rejects any other parent before a write.
+single-card plans followed by `rem move` and tag removal. Preflight rejects any other parent before a write.
 
 `tags` is optional and replaces the implicit HOME tagging above with explicit tags:
 
@@ -124,7 +124,7 @@ non-card, non-folder, non-document, direct-child-of-`dailyRemId` checks still ap
 the creation step, before the created-tag baseline is recorded, so same-key replay stays consistent. After writing,
 every created Rem (root, cards, answer lines) must carry exactly its declared tag IDs, or none if undeclared; each
 yields a `tags` check in the receipt and a mismatch fails the apply. Receipt `ids` then omit `tag`. Tag IDs added
-later with `update-tags` change that baseline and make a same-key replay conflict, so declare final tags in the plan.
+later with `rem tags update` change that baseline and make a same-key replay conflict, so declare final tags in the plan.
 For new-card plans without `tags`, implicit HOME tagging is unchanged.
 
 `cardCluster` is an optional boolean and defaults to off. A multi-card plan still creates a titled parent Rem, but
@@ -181,7 +181,7 @@ aliases, index ownership, text, parents and references retain their existing gua
 Answer-only plans validate their exact answers/card history/reference targets and Wiki
 prerequisites without traversing unrelated Wiki, index or partition objects.
 `verified`/`complete` certify only this batch, never the whole Wiki. After the last
-Wiki mutation, the caller must run `verify scope` with the Wiki root in
+Wiki mutation, the caller must run `rem verify scope` with the Wiki root in
 `inspect.subtreeRootIds` and a `zeroCards` expectation with `noCardStructure:true`.
 Any later Wiki mutation invalidates that task-level proof. Pure reuse requires exact
 affected-page/reference proof, not an unrelated root scan. There is no skip-verification flag.

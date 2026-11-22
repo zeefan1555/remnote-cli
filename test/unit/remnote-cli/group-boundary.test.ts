@@ -92,6 +92,18 @@ describe('command group boundaries', () => {
     });
   });
 
+  it('names the action that owns a legacy leaf flag', async () => {
+    const result = await runCliForTest(['journal', '--content', 'Legacy entry']);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({
+      subtype: 'missing_subcommand',
+      details: {
+        commandPath: 'journal',
+        suggestions: ['journal append'],
+      },
+    });
+  });
+
   it('reports an unknown group flag', async () => {
     const result = await runCliForTest(['sync', '--unknown']);
     expect(result.exitCode).toBe(EXIT.USAGE);

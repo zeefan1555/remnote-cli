@@ -88,7 +88,7 @@ Bridge requirements and pagination belong only to actions. Help, schema, contrac
 and diagnostics read that registered model instead of maintaining a second path
 policy table. Commander still owns argument parsing and the mature option model.
 
-`ReadSession` is command-local. `context` and `inspect` share exact Rem loads and
+`ReadSession` is command-local. `rem context` and `rem inspect` share exact Rem loads and
 read-only SDK method results, preserve input order through a bounded scheduler, and
 discard the entire cache after any mutation. Values never survive the owning
 `DirectClient`, so batch commands can benefit without leaking state across commands.

@@ -1084,7 +1084,7 @@
       "path": "rem tags update",
       "kind": "action",
       "helpSection": "knowledge",
-      "risk": "write",
+      "risk": "destructive",
       "bridge": "required",
       "dynamic": false
     },

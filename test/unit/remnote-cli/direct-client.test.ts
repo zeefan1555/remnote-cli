@@ -94,6 +94,25 @@ describe('local business dispatch', () => {
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
+  it('classifies a failed destructive removal as an unknown write outcome', async () => {
+    client = new DirectClient({ allowDestructive: true, persist: false });
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const rem = plugin.addTestRem('delete_unknown', 'Delete unknown');
+    vi.spyOn(plugin.rem, 'findOne').mockResolvedValueOnce(rem);
+    vi.spyOn(rem, 'remove').mockRejectedValueOnce(new Error('Native removal failed'));
+
+    await expect(
+      client.execute('delete_rem', {
+        remId: rem._id,
+        dryRun: false,
+        expectedTitle: 'Delete unknown',
+      })
+    ).rejects.toMatchObject({
+      type: 'unknown_outcome',
+      subtype: 'write_response_lost',
+    });
+  });
+
   it('rejects catalog drift', async () => {
     wire.open.mockResolvedValue({ sdkVersion: 'different', sdkCatalogHash: 'f'.repeat(64) });
     await expect(client.execute('get_status', {})).rejects.toThrow('catalog changed');

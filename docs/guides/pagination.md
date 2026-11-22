@@ -1,6 +1,6 @@
 # Pagination
 
-`search`, `search-by-tag` and single-parent `list-children` support automatic
+`rem search`, `rem search-by-tag` and single-parent `rem children list` support automatic
 cursor pagination.
 
 ## Complete snapshots
@@ -52,5 +52,5 @@ Pagination fails as a conflict when:
 The raw one-page mode also reports `paging.complete`. Reuse `--cursor` with
 the same query and scope to continue manually.
 
-Several-parent `list-children` keeps its raw multi-result shape because each parent
+Several-parent `rem children list` keeps its raw multi-result shape because each parent
 has an independent cursor.

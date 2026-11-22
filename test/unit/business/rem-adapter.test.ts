@@ -2999,7 +2999,7 @@ describe('RemAdapter', () => {
           expectedTitle: 'Delete unknown',
         })
       ).rejects.toThrow(
-        /Native removal failed\. Destructive write may have partially completed or completed/
+        /Native removal failed\. Write outcome unknown; destructive write may have partially completed or completed/
       );
       expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
         expect.stringMatching(/^destructive:/),
@@ -3518,6 +3518,7 @@ describe('RemAdapter', () => {
 
   describe('updateTags', () => {
     it('should add and remove tags by exact Rem ID without name lookup', async () => {
+      adapter.updateSettings({ acceptReplaceOperation: true });
       const testRem = plugin.addTestRem('tag_id_test', 'Tagged note');
       await testRem.addTag('remove_tag_id');
       const addSpy = vi.spyOn(testRem, 'addTag');
@@ -3535,6 +3536,25 @@ describe('RemAdapter', () => {
       expect(plugin.rem.findByName).not.toHaveBeenCalled();
       expect(testRem.getTags()).toContain('add_tag_id');
       expect(testRem.getTags()).not.toContain('remove_tag_id');
+    });
+
+    it('should reject removals before adding tags without destructive authorization', async () => {
+      const testRem = plugin.addTestRem('tag_guard_test', 'Tagged note');
+      await testRem.addTag('remove_tag_id');
+      const addSpy = vi.spyOn(testRem, 'addTag');
+      const removeSpy = vi.spyOn(testRem, 'removeTag');
+
+      await expect(
+        adapter.updateTags({
+          remId: 'tag_guard_test',
+          addTagRemIds: ['add_tag_id'],
+          removeTagRemIds: ['remove_tag_id'],
+        })
+      ).rejects.toThrow('--allow-destructive');
+
+      expect(addSpy).not.toHaveBeenCalled();
+      expect(removeSpy).not.toHaveBeenCalled();
+      expect(testRem.getTags()).toEqual(['remove_tag_id']);
     });
 
     it('should reject update tags without tag IDs', async () => {

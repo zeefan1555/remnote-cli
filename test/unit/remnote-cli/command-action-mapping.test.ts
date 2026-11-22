@@ -839,6 +839,7 @@ describe('command bridge action mapping', () => {
       'tag2',
       '--remove-tag-ids',
       'tag3',
+      '--allow-destructive',
     ]);
     expect(executeSpy).toHaveBeenCalledWith('update_tags', {
       remId: 'abc123',

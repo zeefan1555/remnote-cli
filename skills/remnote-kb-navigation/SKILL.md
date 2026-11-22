@@ -26,7 +26,7 @@ Use this skill to orient quickly in a user's whole RemNote knowledge base.
 ## Navigation rules
 
 1. Use JSON output (default). Do not use `--text` for navigation.
-2. Use ID-first traversal via `read`.
+2. Use ID-first traversal via `rem read`.
 3. Start shallow (`--depth 1`) for orientation.
 4. Use high child limit for full branch listings: `--child-limit 500`.
 5. Keep operations read-only unless write confirmation policy allows mutating commands.

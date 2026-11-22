@@ -27,7 +27,7 @@ describe('command reference check', () => {
     directory = await mkdtemp(join(tmpdir(), 'remnote-command-refs-'));
     await writeFile(
       join(directory, 'stale.md'),
-      'remnote-cli create "Legacy"\n\n{"argv":["read","REM_ID"]}\n\nremnote-cli schema powerup.get\n'
+      'remnote-cli create "Legacy"\n\n{"argv":["read","REM_ID"]}\n\nremnote-cli schema powerup.get\n\nUse `update-tags` for legacy tags.\n'
     );
     const result = run(directory);
     expect(result.status).toBe(1);
@@ -36,5 +36,16 @@ describe('command reference check', () => {
     expect(result.stderr).toContain('read');
     expect(result.stderr).toContain('powerup.get');
     expect(result.stderr).toContain('rem powerup get');
+    expect(result.stderr).toContain('update-tags');
+    expect(result.stderr).toContain('rem tags update');
+  });
+
+  it('accepts the journal group followed by its action', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'remnote-command-refs-'));
+    await writeFile(
+      join(directory, 'current.md'),
+      'remnote-cli journal append "Current"\n\n{"argv":["journal","append","Current"]}\n'
+    );
+    expect(run(directory).status).toBe(0);
   });
 });

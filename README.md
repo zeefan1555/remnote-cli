@@ -273,7 +273,7 @@ remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-2026-11-22
 remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-2026-11-22 --apply --summary
 ```
 
-The Wiki plan keeps grouped index entries in their reviewed parent and refuses missing or conflicting structure. A successful batch checks the affected objects. After the final Wiki write, run `verify scope` with the Wiki root and a `zeroCards` expectation for full task acceptance.
+The Wiki plan keeps grouped index entries in their reviewed parent and refuses missing or conflicting structure. A successful batch checks the affected objects. After the final Wiki write, run `rem verify scope` with the Wiki root and a `zeroCards` expectation for full task acceptance.
 
 ## Synchronize an Obsidian vault
 
@@ -319,7 +319,7 @@ For the Markdown format, scope rules, conflict evidence, and recovery commands, 
 
 ## Preview, apply, and unknown writes
 
-Commands with preview and apply modes preview by default. `flashcards apply` and `wiki apply` write only with `--apply`. `sync plan` previews, while `sync apply` is the write path.
+Commands with preview and apply modes preview by default. `card apply` and `wiki apply` write only with `--apply`. `sync plan` previews, while `sync apply` is the write path.
 
 Native writes are sequential, not atomic. A timeout, disconnect, `unknown` receipt, or lost response does not prove that no data changed. If a write is interrupted:
 

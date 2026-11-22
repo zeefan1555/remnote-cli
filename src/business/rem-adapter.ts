@@ -2492,7 +2492,7 @@ export class RemAdapter {
       await save().catch(() => {});
       const outcome =
         kind === 'destructive'
-          ? 'Destructive write may have partially completed or completed before the error'
+          ? 'Write outcome unknown; destructive write may have partially completed or completed before the error'
           : 'Additive writes may be partial';
       throw new Error(
         `${error instanceof Error ? error.message : String(error)}. ${outcome}; no rollback or retry was attempted. Recovery key: ${key}; known Rem IDs: ${entry.remIds.join(', ') || 'none returned'}. Read back before retry.`,
@@ -4170,6 +4170,9 @@ export class RemAdapter {
 
     if (!addTagRemIds.length && !removeTagRemIds.length) {
       throw new Error('update_tags requires addTagRemIds or removeTagRemIds');
+    }
+    if (removeTagRemIds.length > 0 && !this.settings.acceptReplaceOperation) {
+      throw new Error('Destructive operation requires --allow-destructive');
     }
 
     const rem = await this.plugin.rem.findOne(remId);

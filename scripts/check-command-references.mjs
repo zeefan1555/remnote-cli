@@ -36,7 +36,9 @@ const commandPatterns = Array.from(legacyPaths, ([path, replacement]) => ({
   path,
   replacement,
   regex: new RegExp(
-    'remnote-cli(?:\\s+--\\S+)*\\s+' + path.replace(/ /g, '\\s+') + '(?=\\s|$|\\W)',
+    'remnote-cli(?:\\s+--\\S+)*\\s+' +
+      path.replace(/ /g, '\\s+') +
+      (path === 'journal' ? '(?=\\s+--|\\s*$)' : '(?=\\s|$|\\W)'),
     'g'
   ),
 }));
@@ -49,7 +51,7 @@ const argvPatterns = Array.from(legacyPaths, ([path, replacement]) => ({
         .split(' ')
         .map((part) => '"' + part + '"')
         .join('\\s*,\\s*') +
-      '(?=\\s*\\]|\\s*,)',
+      (path === 'journal' ? '(?=\\s*\\]|\\s*,\\s*"-)' : '(?=\\s*\\]|\\s*,)'),
     'g'
   ),
 }));
@@ -61,6 +63,11 @@ const schemaPatterns = Array.from(legacyPaths, ([path, replacement]) => ({
     'g'
   ),
 }));
+const inlinePatterns = Array.from(legacyPaths, ([path, replacement]) => ({
+  path,
+  replacement,
+  regex: new RegExp('`' + path.replace(/ /g, '\\s+') + '`', 'g'),
+})).filter(({ path }) => path.includes('-') || path.includes(' '));
 
 async function files(directory) {
   const output = [];
@@ -79,12 +86,11 @@ for (const root of roots) {
     if (
       path.endsWith('CHANGELOG.md') ||
       path.endsWith('cli-contract.generated.json') ||
-      path.includes('command-reference.md') ||
       path.includes('group-boundary.test.ts')
     )
       continue;
     const text = await readFile(path, 'utf8');
-    for (const patterns of [commandPatterns, argvPatterns, schemaPatterns]) {
+    for (const patterns of [commandPatterns, argvPatterns, schemaPatterns, inlinePatterns]) {
       for (const { path: legacyPath, replacement, regex } of patterns) {
         for (const match of text.matchAll(regex)) {
           const before = text.slice(0, match.index);

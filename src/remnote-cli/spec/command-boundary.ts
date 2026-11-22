@@ -83,6 +83,24 @@ function hasDescendantOption(command: Command, token: string): boolean {
   );
 }
 
+function descendantOptionOwners(command: Command, token: string): string[] {
+  const name = token.replace(/^-+/, '').split('=', 1)[0];
+  const output: string[] = [];
+  const visit = (parent: Command): void => {
+    for (const child of parent.commands) {
+      if (
+        child.options.some(
+          (option) => option.long?.replace(/^--/, '') === name || option.short === `-${name}`
+        )
+      )
+        output.push(commandPath(child));
+      visit(child);
+    }
+  };
+  visit(command);
+  return output;
+}
+
 function editDistance(left: string, right: string): number {
   const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let i = 1; i <= left.length; i++) {
@@ -159,10 +177,13 @@ export function commandBoundaryFailure(program: Command, argv: string[]): CliFai
       }
       if (isKnownShortFlagCluster(command, token)) continue;
       if (command.commands.length > 0 && hasDescendantOption(command, token)) {
+        const candidates = descendantOptionOwners(command, token).slice(0, 6);
+        const suffix = candidates.length > 0 ? `; did you mean ${candidates.join(', ')}?` : '';
         return groupFailure(
           command,
           'missing_subcommand',
-          `missing subcommand for ${commandPath(command) || 'remnote-cli'}; ${token.split('=', 1)[0]} belongs to a subcommand`
+          `missing subcommand for ${commandPath(command) || 'remnote-cli'}; ${token.split('=', 1)[0]} belongs to a subcommand${suffix}`,
+          candidates
         );
       }
       if (command.commands.length > 0) {

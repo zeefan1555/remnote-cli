@@ -1,7 +1,7 @@
 # State verification
 
-`inspect` and `assert` check Rem state from JSON. They are generic: rules name paths and
-comparisons, not a flashcard checklist. `context` and `verify scope` remain the bounded
+`rem inspect` and `rem assert` check Rem state from JSON. They are generic: rules name paths and
+comparisons, not a flashcard checklist. `rem context` and `rem verify scope` remain the bounded
 task-receipt tools.
 
 Offline unit tests cover the element summary, field filtering, and rule results. A live

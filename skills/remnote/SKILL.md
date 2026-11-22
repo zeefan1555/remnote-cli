@@ -208,14 +208,14 @@ When the command already has 32 SDK requests in flight, additional requests wait
 instead of failing. Do not pre-split a valid reviewed plan merely to stay under an
 implementation limit.
 
-Use `--summary` on task apply and `verify scope` when only IDs/hashes, scopes, counts
+Use `--summary` on task apply and `rem verify scope` when only IDs/hashes, scopes, counts
 and failures are needed. It does not change exit or recovery semantics. Wiki batch
 receipts certify `verificationScope:affected_objects`, not the whole Wiki. After
 the last Wiki mutation, explicitly verify the complete Wiki root with `zeroCards`
 and `noCardStructure:true`; later Wiki changes invalidate that proof. Answer-only
 patches do not cause a Wiki scan. Reuse already-reviewed content only if unchanged.
 
-Within one `batch` process, `context` and `inspect` share a command-local read
+Within one `batch` process, `rem context` and `rem inspect` share a command-local read
 session. Repeated exact Rem and field reads are de-duplicated with bounded concurrency;
 any mutation clears it before later commands read again. The session never survives
 the batch process.

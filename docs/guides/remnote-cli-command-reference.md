@@ -750,12 +750,12 @@ Shared options for `rem search` and `rem search-by-tag`:
 | `--child-limit <n>`        | `20`    | Max children per hierarchy level     |
 | `--max-content-length <n>` | `3000`  | Max rendered content character count |
 
-`search` also supports:
+`rem search` also supports:
 
 | Option              | Default | Description                                      |
 | ------------------- | ------- | ------------------------------------------------ |
 | `--parent-id <id>`  | none    | Non-empty parent Rem ID to scope search within its subtree |
-| `--cursor <cursor>` | n/a     | Opaque cursor from a previous `search` response  |
+| `--cursor <cursor>` | n/a     | Opaque cursor from a previous `rem search` response  |
 | `--cards-only` | off | Return only Rems that generate cards |
 | `--include-review-stats` | off | Include native card review facts on each result |
 
@@ -792,7 +792,7 @@ Search notes by exact tag Rem ID (ancestor-context aware).
 remnote-cli rem search-by-tag --tag-id <tag-rem-id> [options]
 ```
 
-Options and output/content controls are identical to `search`
+Options and output/content controls are identical to `rem search`
 (`-l/--limit`, `--content-mode`, `--view`, `--ancestor-depth`, `--depth`, `--child-limit`,
 `--max-content-length`).
 Use `--result-mode tagged` to return directly tagged Rems instead of the default ancestor-context results.
@@ -1237,7 +1237,7 @@ or Portal.
 
 ## rem tags update
 
-Add or remove tags by exact tag Rem ID.
+Add or remove tags by exact tag Rem ID. Removing tags requires `--allow-destructive`.
 
 ```bash
 remnote-cli rem tags update <rem-id> --add-tag-ids <tag-rem-id...>
@@ -1249,6 +1249,7 @@ remnote-cli rem tags update <rem-id> --add-tag-ids <tag-rem-id...>
 | `--remove-tag-ids <tag-rem-id...>` | none    | Exact tag Rem IDs to remove |
 
 Use exact IDs for production tagging workflows. Name-based tag mutation is intentionally not exposed.
+The CLI checks destructive authorization before it adds or removes any tag.
 
 ## rem property set
 
@@ -1383,9 +1384,9 @@ The committed generated artifact is
 
 | CLI | Local business action |
 |-----|-----------------------|
-| `context --request <path or ->` | `inspectMany` |
-| `verify scope --expect <path or -> [--summary]` | `verifyScope` |
-| `flashcards apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyFlashcards` |
+| `rem context --request <path or ->` | `inspectMany` |
+| `rem verify scope --expect <path or -> [--summary]` | `verifyScope` |
+| `card apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyFlashcards` |
 | `wiki apply --plan <path or -> --idempotency-key KEY [--apply] [--summary]` | `applyWiki` |
 
 [Read receipts](read-receipts.md) documents every selector/check/receipt field and [task plans](task-plans.md) every
@@ -1415,7 +1416,7 @@ merely to pass. Raw context title/text/backText/aliases are limited to explicit 
 `--summary` keeps status, IDs/hashes, scopes, counts and failures, without content/history
 bodies or passing-check detail. Exit semantics are unchanged. Wiki batch receipts use
 `verificationScope:affected_objects`; after the last Wiki mutation, final task acceptance
-still requires explicit whole-Wiki `verify scope` zero-card/card-structure proof.
+still requires explicit whole-Wiki `rem verify scope` zero-card/card-structure proof.
 
 Preview/apply never look up dates or create daily documents. Native dailyDocument type does not prove calendar
 freshness without a date scalar. Caller revalidates intended dates before new batches/after midnight; replay keeps

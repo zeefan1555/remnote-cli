@@ -170,7 +170,7 @@ export function registerUpdateTagsCommand(
 ): void {
   const subprogram = catalog.action(parent, 'update <rem-id>', {
     description: 'Add or remove tags by exact tag Rem ID',
-    risk: 'write',
+    risk: 'destructive',
     bridge: 'required',
   });
 

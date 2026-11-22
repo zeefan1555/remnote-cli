@@ -33,7 +33,7 @@ export function registerUpdateCommand(
           (!opts.removeAliases || opts.removeAliases.length === 0)
         ) {
           throw new Error(
-            'Provide --title, --add-aliases, or --remove-aliases for update. Use insert-children, replace-children, or update-tags for other writes.'
+            'Provide --title, --add-aliases, or --remove-aliases for update. Use rem children insert, rem children replace, or rem tags update for other writes.'
           );
         }
 
