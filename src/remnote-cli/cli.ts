@@ -32,6 +32,7 @@ import { registerTodoCommand } from './commands/todo.js';
 import { registerSyncCommands } from './commands/sync.js';
 import { registerContractCommand } from './commands/contract.js';
 import { registerSchemaCommand } from './commands/schema.js';
+import { registerDoctorCommand } from './commands/doctor.js';
 import { CommanderError } from 'commander';
 import type { CliRuntime } from './output/runtime.js';
 import { bindRuntime, createProcessRuntime, finishProgram, runtimeFor } from './output/runtime.js';
@@ -83,6 +84,7 @@ export function createProgram(
   registerReadTableCommand(program);
   registerSyncCommands(program);
   registerSchemaCommand(program);
+  registerDoctorCommand(program);
   registerContractCommand(program);
 
   bindRuntime(program, runtime);

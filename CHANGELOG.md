@@ -77,6 +77,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Add offline `schema` command discovery. Every Commander path must have one
   risk and Bridge policy, and the generated contract now includes the command
   summary.
+- Add read-only `doctor` diagnostics for Node, CLI policy, state directories,
+  Bridge identity, protocol, knowledge base, SDK catalog, required capabilities
+  and local journal health. `--offline` never opens a socket.
 
 ### Changed
 

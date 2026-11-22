@@ -828,6 +828,12 @@
       "dynamic": false
     },
     {
+      "path": "doctor",
+      "risk": "read",
+      "bridge": "optional",
+      "dynamic": false
+    },
+    {
       "path": "flashcards",
       "risk": "read",
       "bridge": "none",

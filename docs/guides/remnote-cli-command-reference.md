@@ -61,6 +61,20 @@ remnote-cli schema powerup get
 
 See [Command schema](command-schema.md).
 
+## Doctor
+
+`doctor` is a read-only diagnostic for the CLI and its live Bridge.
+
+```bash
+remnote-cli doctor
+remnote-cli doctor --offline
+remnote-cli doctor --text
+```
+
+`--offline` checks Node, command policy and local state without opening a socket.
+Warnings and skips do not fail the command. Any failing check returns exit code
+3 with the complete report in `error.details`. See [Doctor](doctor.md).
+
 ### Argument Quoting and Shifting
 
 CLI environments (especially Windows shells) can sometimes "swallow" empty strings or misinterpret arguments if quoting is missing. This can lead to **argument shifting**, where a flag (like `--content`) is incorrectly interpreted as the _value_ for a preceding option (like `--title`).
