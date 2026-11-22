@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { EXIT } from '../../../src/remnote-cli/output/errors.js';
-import { parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
+import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 const tempDirs: string[] = [];
 
@@ -316,6 +316,42 @@ describe('command bridge action mapping', () => {
     executeSpy.mockRestore();
   });
 
+  it('refuses a specific SDK action when the live mode contradicts local risk metadata', async () => {
+    const catalog = {
+      catalogSchemaVersion: 1,
+      sdkVersion: 'future',
+      capabilities: [
+        {
+          id: 'rem:getChildrenRem',
+          target: 'rem',
+          method: 'getChildrenRem',
+          signatures: [],
+          status: 'supported',
+          mode: 'write',
+        },
+      ],
+    };
+    const executeSpy = vi
+      .spyOn(DirectClient.prototype, 'execute')
+      .mockImplementation(async (action) =>
+        action === 'get_sdk_capabilities' ? catalog : { unexpected: true }
+      );
+
+    const result = await runCliForTest([
+      'sdk',
+      'rem',
+      'object-get-children-rem',
+      '--target-id',
+      'rem-1',
+      '--args-json',
+      '[]',
+    ]);
+    expect(result.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
+    expect(parseFailure(result.stderr)).toMatchObject({ subtype: 'sdk_catalog_mismatch' });
+    expect(executeSpy).not.toHaveBeenCalledWith('sdk_call', expect.anything());
+    executeSpy.mockRestore();
+  });
+
   it('maps an SDK namespace command args file to sdk_call', async () => {
     const filePath = await createTempContentFile('[{"value":1}]');
     const capabilities = {
@@ -329,7 +365,7 @@ describe('command bridge action mapping', () => {
           method: 'broadcast',
           signatures: ['broadcast: (message: unknown) => Promise<void>'],
           status: 'supported',
-          mode: 'read',
+          mode: 'write',
         },
       ],
     };

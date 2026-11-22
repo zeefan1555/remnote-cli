@@ -2,6 +2,7 @@ import { emit } from '../output/runtime.js';
 import type { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
 import { readContentFileOrStdin } from './content-input.js';
 import type { CommandActionOptions, CommandCatalog } from '../spec/command-spec.js';
 import {
@@ -115,6 +116,13 @@ async function executeCapability(
     const live = await getSdkCapabilities(client);
     const current = live.capabilities.find((candidate) => candidate.id === capability.id);
     if (!current) throw new Error(`Live SDK capability is unavailable: ${capability.id}`);
+    if (current.target !== capability.target || current.mode !== capability.mode) {
+      throw new CliFailure(
+        'conflict',
+        'sdk_catalog_mismatch',
+        `Live SDK capability ${current.id} is ${current.target}/${current.mode}, but offline help describes ${capability.target}/${capability.mode}. Update the local SDK facts before using this action.`
+      );
+    }
     if (current.status !== 'supported') {
       throw new Error(
         `Unsupported SDK capability ${current.id}: ${current.reason ?? 'no executable CLI path'}`
