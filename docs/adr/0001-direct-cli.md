@@ -10,7 +10,7 @@ There is no MCP endpoint, stdio proxy, resident daemon, or product-version match
 
 The plugin owns the official SDK, generated public-method allowlist, bounded JSON
 serialization, capability discovery, permissions and exact knowledge-base binding.
-CLI code owns note/card/wiki/todo workflows, validation, previews, local recovery
+CLI code owns note, card, and native TODO workflows, validation, previews, local recovery
 journals and paging snapshots. SDK upgrades or permission/serialization changes can
 still require a plugin update; business changes do not.
 

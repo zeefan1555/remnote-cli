@@ -19,8 +19,9 @@ offline. It is not native rollback acceptance and does not patch the SDK.
 
 Supersede only the native begin/end transaction mechanism in ADR 0001. Do not
 open native transactions over the bridge. Reject remaining transaction-dependent
-commands (`rem update`, `rem children replace`, `rem property set` and TODO apply) before their callback
-or any mutation runs; do not silently execute those callbacks non-atomically.
+commands (`rem update`, `rem children replace`, and `rem property set`)
+before their callback or any mutation runs. Do not execute those callbacks
+non-atomically.
 In particular, destructive replacement must not become a partially committed
 operation merely to restore connectivity.
 
@@ -37,6 +38,11 @@ workflow. Its scaffold uses the public `createTreeWithMarkdown` call without an
 outer native transaction. Save any returned IDs before follow-up work. On failure
 retain `started`/`unknown`, IDs and the original key, then stop without replay or
 automatic cleanup. Final success still requires exact native readback.
+
+Native TODO completion and reopening use the single SDK method
+`rem.setTodoStatus()`. They do not need an outer transaction. The command
+previews by default, applies only to an exact native TODO, and reads
+`getTodoStatus()` back before reporting success.
 
 The SDK remains pinned. No callback executor, private transport patch, global
 Undo, compensating rollback or old MCP runtime is introduced. SDK object results
@@ -64,7 +70,9 @@ Check rejected begin/end requests, reconnect and status after rejection, CLI
 transaction refusal before callback execution, malformed object IDs, and
 journaled scaffold failure/replay. Run both package quality gates and builds.
 After desktop reload, reconcile the earlier unknown alias creation before new
-writes, then verify real card creation, exact readback and same-key replay.
+writes, then verify real card creation, exact readback, and same-key replay.
+Also verify native TODO list, complete, and reopen. A label-only TODO Rem must
+remain absent from results.
 
 Native atomic commands remain unavailable until an official SDK can acknowledge
 abort and passes independent desktop persistence tests. Do not rerun the known

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export type CodeSegment = { code: string; language?: string };
-export type TextSegment = string | { remId: string } | { pageKey: string } | CodeSegment;
+export type TextSegment = string | { remId: string } | CodeSegment;
 export interface AnswerPatch {
   key: string;
   cardRemId: string;
@@ -51,23 +51,6 @@ export type ReuseFlashcardsPlan = FlashcardPlanFields & {
 export type MixedFlashcardsPlan = FlashcardPlanFields & { kind: 'mixed' };
 export type FlashcardsPlan =
   CreateFlashcardsPlan | PatchFlashcardsPlan | ReuseFlashcardsPlan | MixedFlashcardsPlan;
-export interface WikiPlan {
-  schemaVersion: 1;
-  wikiRootId: string;
-  partitionRemId: string;
-  indexRemId: string;
-  logRemId: string;
-  pages: Array<{
-    key: string;
-    remId?: string;
-    indexParentRemId?: string;
-    title: string;
-    aliases?: string[];
-    nodes: Array<{ key: string; remId?: string; text: TextSegment[]; expectedTextHash?: string }>;
-    summary: TextSegment[];
-  }>;
-  answerPatches?: AnswerPatch[];
-}
 const RemId = z.string().min(1).max(256).regex(/\S/);
 const Key = z
   .string()
@@ -87,7 +70,6 @@ const CodeSegment = z
   })
   .strict();
 const AnswerSegment = z.union([PlainSegment, CodeSegment]);
-const WikiSegment = z.union([PlainSegment, z.object({ pageKey: Key }).strict()]);
 const PlainText = z.array(PlainSegment).min(1).max(100);
 const AnswerLine = z
   .array(AnswerSegment)
@@ -119,10 +101,8 @@ const Question = z.union([
   }),
   QuestionSegments,
 ]);
-const WikiText = z.array(WikiSegment).min(1).max(100);
 const patch = { key: Key, cardRemId: RemId, remId: RemId, expectedTextHash: Hash };
 const PlainPatch = z.object({ ...patch, text: AnswerLine }).strict();
-const WikiPatch = z.object({ ...patch, text: WikiText }).strict();
 function keys(entries: Array<{ key: string }>, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   for (const entry of entries) {
@@ -302,54 +282,6 @@ function tagRules(
       message: 'A single-card root is the card itself; tags.root and its card key must match',
     });
 }
-const WikiNode = z
-  .object({ key: Key, remId: RemId.optional(), text: WikiText, expectedTextHash: Hash.optional() })
-  .strict()
-  .superRefine((node, ctx) => {
-    if (node.remId && !node.expectedTextHash)
-      ctx.addIssue({ code: 'custom', message: 'Existing nodes require expectedTextHash' });
-    if (!node.remId && node.expectedTextHash)
-      ctx.addIssue({ code: 'custom', message: 'New nodes must not include expectedTextHash' });
-  });
-export const WikiPlanSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    wikiRootId: RemId,
-    partitionRemId: RemId,
-    indexRemId: RemId,
-    logRemId: RemId,
-    pages: z.array(
-      z
-        .object({
-          key: Key,
-          remId: RemId.optional(),
-          indexParentRemId: RemId.optional(),
-          title: Title,
-          aliases: z.array(z.string().min(1).max(200).regex(/\S/)).optional(),
-          nodes: z.array(WikiNode),
-          summary: WikiText,
-        })
-        .strict()
-    ),
-    answerPatches: z.array(WikiPatch).optional(),
-  })
-  .strict()
-  .superRefine((plan, ctx) => {
-    keys(
-      [...plan.pages, ...plan.pages.flatMap((p) => p.nodes), ...(plan.answerPatches ?? [])],
-      ctx
-    );
-    if (!plan.pages.length && !plan.answerPatches?.length)
-      ctx.addIssue({ code: 'custom', message: 'At least one page or answer patch is required' });
-    const pageKeys = new Set(plan.pages.map((p) => p.key));
-    for (const text of [
-      ...plan.pages.flatMap((p) => [p.summary, ...p.nodes.map((n) => n.text)]),
-      ...(plan.answerPatches ?? []).map((p) => p.text),
-    ])
-      for (const segment of text)
-        if (typeof segment === 'object' && 'pageKey' in segment && !pageKeys.has(segment.pageKey))
-          ctx.addIssue({ code: 'custom', message: `Unknown pageKey: ${segment.pageKey}` });
-  });
 const envelope = {
   schemaVersion: z.literal(1),
   dryRun: z.boolean().default(true),
@@ -360,4 +292,3 @@ const envelope = {
     .regex(/^[A-Za-z0-9._-]+$/),
 };
 export const FlashcardsApplySchema = z.object({ ...envelope, plan: FlashcardsPlanSchema }).strict();
-export const WikiApplySchema = z.object({ ...envelope, plan: WikiPlanSchema }).strict();

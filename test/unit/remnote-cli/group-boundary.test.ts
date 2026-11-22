@@ -20,12 +20,10 @@ describe('command group boundaries', () => {
   it.each([
     [['rem']],
     [['card']],
-    [['wiki']],
     [['table']],
     [['todo']],
     [['media']],
     [['journal']],
-    [['sync']],
     [['sdk']],
     [['rem', 'powerup']],
     [['rem', 'outline']],
@@ -38,9 +36,9 @@ describe('command group boundaries', () => {
   });
 
   it('treats global output flags on a bare group as a successful help request', async () => {
-    const result = await runCliForTest(['sync', '--text']);
+    const result = await runCliForTest(['todo', '--text']);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('Usage: remnote-cli sync');
+    expect(result.stdout).toContain('Usage: remnote-cli todo');
   });
 
   it.each([
@@ -83,15 +81,6 @@ describe('command group boundaries', () => {
     });
   });
 
-  it('reports a leaf-only flag without a subcommand', async () => {
-    const result = await runCliForTest(['sync', '--plan-hash', 'hash']);
-    expect(result.exitCode).toBe(EXIT.USAGE);
-    expect(parseFailure(result.stderr)).toMatchObject({
-      subtype: 'missing_subcommand',
-      details: { commandPath: 'sync' },
-    });
-  });
-
   it('names the action that owns a legacy leaf flag', async () => {
     const result = await runCliForTest(['journal', '--content', 'Legacy entry']);
     expect(result.exitCode).toBe(EXIT.USAGE);
@@ -105,23 +94,21 @@ describe('command group boundaries', () => {
   });
 
   it('reports an unknown group flag', async () => {
-    const result = await runCliForTest(['sync', '--unknown']);
+    const result = await runCliForTest(['todo', '--unknown']);
     expect(result.exitCode).toBe(EXIT.USAGE);
     expect(parseFailure(result.stderr)).toMatchObject({
       subtype: 'unknown_group_flag',
-      details: { commandPath: 'sync' },
+      details: { commandPath: 'todo' },
     });
   });
 
   it('groups root help by purpose', async () => {
     const result = await runCliForTest(['--help']);
     const knowledge = result.stdout.indexOf('Knowledge commands:');
-    const workflows = result.stdout.indexOf('Workflow commands:');
     const diagnostics = result.stdout.indexOf('Diagnostics and tooling:');
     const raw = result.stdout.indexOf('Raw SDK commands:');
     expect(knowledge).toBeGreaterThan(-1);
-    expect(workflows).toBeGreaterThan(knowledge);
-    expect(diagnostics).toBeGreaterThan(workflows);
+    expect(diagnostics).toBeGreaterThan(knowledge);
     expect(raw).toBeGreaterThan(diagnostics);
   });
 });

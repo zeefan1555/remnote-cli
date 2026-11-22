@@ -30,7 +30,7 @@ import {
 import { inspectState, type InspectStateParams } from './state-inspect.js';
 import { getPowerupSlot, type PowerupGetParams } from './powerup-read.js';
 import { TaskOperations, type TaskApplyParams } from './task-operations.js';
-import type { FlashcardsPlan, WikiPlan } from '../schemas/task-schemas.js';
+import type { FlashcardsPlan } from '../schemas/task-schemas.js';
 import { cardDelimiterIndex } from './card-structure.js';
 import { contentHash } from './content-hash.js';
 import type { ReadSession } from '../remnote-cli/client/session.js';
@@ -293,39 +293,39 @@ export interface OutlineResult {
   items: OutlineItem[];
 }
 
+export type TodoStatus = 'Finished' | 'Unfinished';
+export type TodoStatusFilter = 'unfinished' | 'finished' | 'all';
+
 export interface ListTodosParams {
-  tagRemId: string;
+  status?: TodoStatusFilter;
+  rootRemId?: string;
 }
 
 export interface TodoItem {
   remId: string;
   title: string;
-  isTodo: boolean;
-  todoStatus?: 'Finished' | 'Unfinished';
+  todoStatus: TodoStatus;
   parentRemId?: string;
   parentTitle?: string;
 }
 
 export interface ListTodosResult {
-  tagRemId: string;
+  status: TodoStatusFilter;
+  scanned: number;
   todos: TodoItem[];
 }
 
 export interface UpdateTodoParams {
   remId: string;
   finished: boolean;
-  todoTagRemId: string;
-  doneTagRemId: string;
   dryRun?: boolean;
 }
 
 export interface UpdateTodoResult extends TodoItem {
   dryRun: boolean;
   changed: boolean;
-  oldTodoStatus?: 'Finished' | 'Unfinished';
-  newTodoStatus?: 'Finished' | 'Unfinished';
-  addedTagRemIds: string[];
-  removedTagRemIds: string[];
+  oldTodoStatus: TodoStatus;
+  newTodoStatus: TodoStatus;
 }
 
 export interface ContentProperties {
@@ -687,10 +687,7 @@ export class RemAdapter {
     }));
   }
   applyFlashcards(params: TaskApplyParams<FlashcardsPlan>) {
-    return this.tasks().apply('flashcards', params);
-  }
-  applyWiki(params: TaskApplyParams<WikiPlan>) {
-    return this.tasks().apply('wiki', params);
+    return this.tasks().apply(params);
   }
   private assertWriteEnabled(beforeMutation?: () => void): void {
     beforeMutation?.();
@@ -4450,98 +4447,81 @@ export class RemAdapter {
   }
 
   async listTodos(params: ListTodosParams): Promise<ListTodosResult> {
-    const tagRemId = this.requireNonEmptyString(params.tagRemId, 'tagRemId');
-    const tag = await this.plugin.rem.findOne(tagRemId);
-    if (!tag) throw new Error(`Tag not found: ${tagRemId}`);
-
+    const status = params.status ?? 'unfinished';
+    const scope =
+      params.rootRemId !== undefined ? await this.plugin.rem.findOne(params.rootRemId) : undefined;
+    if (params.rootRemId !== undefined && !scope)
+      throw new Error(`Root not found: ${params.rootRemId}`);
+    const rems = scope
+      ? [scope, ...(await scope.getDescendants())]
+      : await this.plugin.rem.getAll();
+    if (!Array.isArray(rems) || rems.some((rem) => !rem || typeof rem._id !== 'string' || !rem._id))
+      throw new Error('Malformed SDK Rem list');
+    const tasks = rems.map((rem) => async () => await rem.isTodo());
+    const flags = this.readSession
+      ? await this.readSession.all(tasks)
+      : await Promise.all(tasks.map((task) => task()));
     const todos: TodoItem[] = [];
-    for (const rem of await tag.taggedRem()) {
-      const [{ title }, parentContext, isTodo] = await Promise.all([
+    for (const [index, rem] of rems.entries()) {
+      if (!flags[index]) continue;
+      const [{ title }, parentContext, todoStatus] = await Promise.all([
         this.getTitleAndDetail(rem),
         this.getParentContext(rem),
-        rem.isTodo(),
+        rem.getTodoStatus(),
       ]);
-      const todoStatus = isTodo ? await rem.getTodoStatus() : undefined;
+      if (!todoStatus) throw new Error(`Native TODO status unavailable for Rem ${rem._id}`);
+      if (status !== 'all' && todoStatus !== (status === 'finished' ? 'Finished' : 'Unfinished'))
+        continue;
       todos.push({
         remId: rem._id,
         title,
-        isTodo,
-        ...(todoStatus ? { todoStatus } : {}),
+        todoStatus,
         ...parentContext,
       });
     }
 
-    return { tagRemId, todos };
+    return { status, scanned: rems.length, todos };
   }
 
   async updateTodo(params: UpdateTodoParams): Promise<UpdateTodoResult> {
     const remId = this.requireNonEmptyString(params.remId, 'remId');
-    const todoTagRemId = this.requireNonEmptyString(params.todoTagRemId, 'todoTagRemId');
-    const doneTagRemId = this.requireNonEmptyString(params.doneTagRemId, 'doneTagRemId');
-    if (todoTagRemId === doneTagRemId) {
-      throw new Error('todoTagRemId and doneTagRemId must be different');
-    }
-
     const finished = this.requireBoolean(params.finished, 'finished');
     const dryRun = params.dryRun ?? true;
     if (!dryRun && !this.settings.acceptWriteOperations) {
       throw new Error('Write operations are disabled in Automation Bridge settings');
     }
 
-    const [rem, todoTag, doneTag] = await Promise.all([
-      this.plugin.rem.findOne(remId),
-      this.plugin.rem.findOne(todoTagRemId),
-      this.plugin.rem.findOne(doneTagRemId),
-    ]);
+    const rem = await this.plugin.rem.findOne(remId);
     if (!rem) throw new Error(`Note not found: ${remId}`);
-    if (!todoTag) throw new Error(`TODO tag not found: ${todoTagRemId}`);
-    if (!doneTag) throw new Error(`DONE tag not found: ${doneTagRemId}`);
 
-    const [{ title }, parentContext, isTodo, currentTags] = await Promise.all([
+    const [{ title }, parentContext, isTodo] = await Promise.all([
       this.getTitleAndDetail(rem),
       this.getParentContext(rem),
       rem.isTodo(),
-      rem.getTagRems(),
     ]);
-    const oldTodoStatus = isTodo ? await rem.getTodoStatus() : undefined;
-    const newTodoStatus = isTodo ? (finished ? 'Finished' : 'Unfinished') : undefined;
-    const currentTagIds = new Set(currentTags.map((tag) => tag._id));
-    const addTagRemId = finished ? doneTagRemId : todoTagRemId;
-    const removeTagRemId = finished ? todoTagRemId : doneTagRemId;
-    const addedTagRemIds = currentTagIds.has(addTagRemId) ? [] : [addTagRemId];
-    const removedTagRemIds = currentTagIds.has(removeTagRemId) ? [removeTagRemId] : [];
-    const changed =
-      oldTodoStatus !== newTodoStatus || addedTagRemIds.length > 0 || removedTagRemIds.length > 0;
+    if (!isTodo) throw new Error(`Rem ${remId} is not a native RemNote TODO`);
+    const oldTodoStatus = await rem.getTodoStatus();
+    if (!oldTodoStatus) throw new Error(`Native TODO status unavailable for Rem ${remId}`);
+    const newTodoStatus: TodoStatus = finished ? 'Finished' : 'Unfinished';
+    const changed = oldTodoStatus !== newTodoStatus;
 
+    let todoStatus = oldTodoStatus;
     if (!dryRun && changed) {
-      await this.runInTransaction(async () => {
-        if (isTodo && oldTodoStatus !== newTodoStatus) {
-          await rem.setTodoStatus(newTodoStatus!);
-        }
-        if (addedTagRemIds.length > 0) await rem.addTag(addTagRemId);
-        if (removedTagRemIds.length > 0) await rem.removeTag(removeTagRemId);
-
-        const verifiedTagIds = new Set((await rem.getTagRems()).map((tag) => tag._id));
-        if (!verifiedTagIds.has(addTagRemId) || verifiedTagIds.has(removeTagRemId)) {
-          throw new Error(`Failed to update TODO tags for Rem ${remId}`);
-        }
-        if (isTodo && (await rem.getTodoStatus()) !== newTodoStatus) {
-          throw new Error(`Failed to update native TODO status for Rem ${remId}`);
-        }
-      });
+      await rem.setTodoStatus(newTodoStatus);
+      todoStatus = (await rem.getTodoStatus()) ?? oldTodoStatus;
+      if (todoStatus !== newTodoStatus)
+        throw new Error(`Failed to update native TODO status for Rem ${remId}`);
     }
 
     return {
       remId,
       title,
-      isTodo,
+      todoStatus,
       ...parentContext,
       dryRun,
       changed,
-      ...(oldTodoStatus ? { oldTodoStatus } : {}),
-      ...(newTodoStatus ? { newTodoStatus } : {}),
-      addedTagRemIds,
-      removedTagRemIds,
+      oldTodoStatus,
+      newTodoStatus,
     };
   }
 }

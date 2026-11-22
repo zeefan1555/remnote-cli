@@ -13,7 +13,6 @@ describe('contract command', () => {
       exitCodes: { unknownOutcome: number };
       plans: {
         flashcards: { $schema: string };
-        workspace: { properties: { operation: { enum: string[] } } };
       };
     };
     expect(result.exitCode).toBe(0);
@@ -25,7 +24,7 @@ describe('contract command', () => {
       exitCodes: { success: 0, unknownOutcome: 5 },
     });
     expect(value.plans.flashcards.$schema).toContain('json-schema.org');
-    expect(value.plans.workspace.properties.operation.enum).toContain('apply');
+    expect(Object.keys(value.plans)).toEqual(['flashcards']);
   });
 
   it('prints one schema and rejects an unknown name', async () => {

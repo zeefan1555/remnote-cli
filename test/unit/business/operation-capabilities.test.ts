@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { requiredTaskCapabilities } from '../../../src/business/operation-capabilities.js';
-import { FlashcardsPlanSchema, WikiPlanSchema } from '../../../src/schemas/task-schemas.js';
+import { FlashcardsPlanSchema } from '../../../src/schemas/task-schemas.js';
 
 const patch = {
   key: 'patch',
@@ -34,37 +34,15 @@ describe('task capability declarations', () => {
     expect(patchOnly.kind).toBe('patch');
     expect(reuseOnly.kind).toBe('reuse');
     expect(mixed.kind).toBe('mixed');
-    expect(requiredTaskCapabilities('flashcards', create)).toContain(
+    expect(requiredTaskCapabilities(create)).toContain('namespace:rem.createTreeWithMarkdown');
+    expect(requiredTaskCapabilities(create)).toContain('namespace:rem.findMany');
+    expect(requiredTaskCapabilities(patchOnly)).not.toContain(
       'namespace:rem.createTreeWithMarkdown'
     );
-    expect(requiredTaskCapabilities('flashcards', create)).toContain('namespace:rem.findMany');
-    expect(requiredTaskCapabilities('flashcards', patchOnly)).not.toContain(
-      'namespace:rem.createTreeWithMarkdown'
-    );
-    expect(requiredTaskCapabilities('flashcards', patchOnly)).not.toContain(
-      'namespace:rem.findMany'
-    );
-    expect(requiredTaskCapabilities('flashcards', reuseOnly)).not.toContain('rem:setText');
-    expect(requiredTaskCapabilities('flashcards', mixed)).toEqual(
+    expect(requiredTaskCapabilities(patchOnly)).not.toContain('namespace:rem.findMany');
+    expect(requiredTaskCapabilities(reuseOnly)).not.toContain('rem:setText');
+    expect(requiredTaskCapabilities(mixed)).toEqual(
       expect.arrayContaining(['namespace:rem.findOne', 'rem:getCards', 'rem:setText'])
     );
-  });
-
-  it('requires Wiki creation capabilities only when pages are present', () => {
-    const base = {
-      schemaVersion: 1 as const,
-      wikiRootId: 'wiki',
-      partitionRemId: 'partition',
-      indexRemId: 'index',
-      logRemId: 'log',
-    };
-    const pages = WikiPlanSchema.parse({
-      ...base,
-      pages: [{ key: 'page', title: 'Page', nodes: [], summary: ['Summary'] }],
-    });
-    const patchOnly = WikiPlanSchema.parse({ ...base, pages: [], answerPatches: [patch] });
-    expect(requiredTaskCapabilities('wiki', pages)).toContain('namespace:rem.createRem');
-    expect(requiredTaskCapabilities('wiki', patchOnly)).not.toContain('namespace:rem.createRem');
-    expect(requiredTaskCapabilities('wiki', patchOnly)).toContain('rem:setText');
   });
 });

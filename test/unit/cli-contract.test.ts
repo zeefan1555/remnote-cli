@@ -21,13 +21,12 @@ describe('generated CLI contract', () => {
   });
 
   it('contains all plan schemas and live capability requirements', () => {
-    expect(CONTRACT_SCHEMA_NAMES).toEqual(['flashcards', 'wiki', 'workspace']);
+    expect(CONTRACT_SCHEMA_NAMES).toEqual(['flashcards']);
     for (const name of CONTRACT_SCHEMA_NAMES) expect(contractSchema(name)).toBeDefined();
     const contract = contractWithCommands();
     expect(contract.requiredCapabilities.flashcards.create).toContain(
       'namespace:rem.createTreeWithMarkdown'
     );
-    expect(contract.requiredCapabilities.wiki.pages).toContain('namespace:rem.createRem');
     expect(contract.bridgeActions).not.toContain('transaction_begin');
     expect(contract.sdkFacts).toEqual({
       schemaVersion: 1,
@@ -50,7 +49,6 @@ describe('generated CLI contract', () => {
           risk: 'read',
           bridge: 'required',
         }),
-        expect.objectContaining({ path: 'sync', kind: 'group' }),
         expect.objectContaining({
           path: 'rem move',
           kind: 'action',

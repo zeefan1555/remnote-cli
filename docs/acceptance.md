@@ -195,8 +195,8 @@ ADR 0003 removes the cross-request native transaction scope. Additive commands
 save private recovery metadata and known IDs before follow-up writes; unknown
 outcomes stop without retry or cleanup. Alias methods return bounded text values.
 Ordinary Rem/Card results still require real IDs. Atomic update, replacement,
-property writes and TODO apply remain unavailable rather than silently losing
-their atomicity guarantee.
+and property writes remain unavailable. Native TODO status uses one SDK setter
+with exact readback instead of a tagged TODO flow.
 
 Verified on RemNote desktop, KB `byte`, on 2026-10-02:
 

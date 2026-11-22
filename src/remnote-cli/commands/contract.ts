@@ -11,7 +11,7 @@ export function registerContractCommand(program: Command, catalog: CommandCatalo
       risk: 'read',
       bridge: 'none',
     })
-    .option('--schema <name>', 'Print one plan schema: flashcards, wiki, or workspace')
+    .option('--schema <name>', 'Print one plan schema: flashcards')
     .action((options: { schema?: string }) => {
       const value = options.schema
         ? contractSchema(options.schema)

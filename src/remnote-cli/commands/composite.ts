@@ -99,7 +99,7 @@ export function registerCompositeCommands(
         '  cardRemIds: value=card-generating Rem ID array; zeroCards: noCardStructure=true',
         'cardRemIds and zeroCards require their root in inspect.subtreeRootIds.',
         'Only status=passed succeeds. Failed/incomplete receipts are emitted before nonzero exit;',
-        'never narrow away required WIKI or full-card scope merely to obtain a pass.',
+        'never narrow away required full-card scope merely to obtain a pass.',
       ].join('\n')
     )
     .action(async (opts: { expect: string; summary?: boolean }) =>

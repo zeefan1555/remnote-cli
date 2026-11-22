@@ -255,7 +255,15 @@ export const SetOutlineCollapsedSchema = z
 
 export const ListTodosSchema = z
   .object({
-    tagRemId: z.string().min(1).describe('Exact TODO tag Rem ID'),
+    status: z
+      .enum(['unfinished', 'finished', 'all'])
+      .default('unfinished')
+      .describe('Native TODO status to list'),
+    rootRemId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Inspect this native Rem and all of its descendants'),
   })
   .strict();
 
@@ -263,15 +271,9 @@ export const UpdateTodoSchema = z
   .object({
     remId: z.string().min(1).describe('Todo Rem ID'),
     finished: z.boolean().describe('True to complete, false to reopen'),
-    todoTagRemId: z.string().min(1).describe('Exact TODO tag Rem ID'),
-    doneTagRemId: z.string().min(1).describe('Exact DONE tag Rem ID'),
     dryRun: z.boolean().default(true).describe('Preview without changing RemNote'),
   })
-  .strict()
-  .refine((value) => value.todoTagRemId !== value.doneTagRemId, {
-    message: 'todoTagRemId and doneTagRemId must be different',
-    path: ['doneTagRemId'],
-  });
+  .strict();
 
 export const GetSdkCapabilitiesSchema = z
   .object({ identityOnly: z.boolean().optional() })

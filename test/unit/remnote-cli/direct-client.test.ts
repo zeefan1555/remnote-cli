@@ -91,6 +91,7 @@ describe('local business dispatch', () => {
   it('invalidates command reads after a mutation but not after status', async () => {
     const invalidate = vi.spyOn(ReadSession.prototype, 'invalidateAll');
     await client.execute('get_status', {});
+    await client.execute('list_todos', {});
     expect(invalidate).not.toHaveBeenCalled();
     await client.execute('create_note', { title: 'Invalidate' });
     expect(invalidate).toHaveBeenCalledOnce();

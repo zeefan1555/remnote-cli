@@ -435,6 +435,7 @@ export class MockRemNotePlugin {
   kb = { getCurrentKnowledgeBaseData: vi.fn(async () => ({ _id: 'test-kb', name: 'Test KB' })) };
 
   rem = {
+    getAll: vi.fn(async (): Promise<MockRem[]> => [...this.rems.values()]),
     findMany: vi.fn(async (ids: string[]): Promise<MockRem[]> =>
       ids.flatMap((id) => {
         const rem = this.rems.get(id);

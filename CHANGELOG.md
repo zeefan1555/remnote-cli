@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-11-22
+
+### Changed
+
+- Make `todo list`, `todo complete`, and `todo reopen` use native RemNote
+  `isTodo`, `getTodoStatus`, and `setTodoStatus`. TODO tags and TODO text no
+  longer identify or update a native TODO.
+- Reduce the offline contract to the flashcard task schema.
+
+### Removed
+
+- Remove the `wiki` command and Wiki task plan.
+- Remove the Markdown workspace `sync` command and its implementation.
+
 ## [0.29.0] - 2026-11-22
 
 ### Changed

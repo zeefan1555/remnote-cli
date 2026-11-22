@@ -1,25 +1,26 @@
 import { emit } from '../output/runtime.js';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
 import type { CommandCatalog } from '../spec/command-spec.js';
 
 function formatTodoListText(data: unknown): string {
-  const todos = (data as { todos?: Array<Record<string, unknown>> }).todos ?? [];
-  if (todos.length === 0) return 'No tagged todos found.';
+  const result = data as {
+    status?: string;
+    todos?: Array<Record<string, unknown>>;
+  };
+  const todos = result.todos ?? [];
+  if (todos.length === 0) return `No ${result.status ?? 'matching'} native todos found.`;
   return todos
     .map((todo, index) => {
-      const nativeStatus = todo.isTodo
-        ? `native=${String(todo.todoStatus ?? 'unknown')}`
-        : 'native=not-a-todo';
-      return `${index + 1}. ${String(todo.title || '(untitled)')} [${String(todo.remId)}] ${nativeStatus}`;
+      return `${index + 1}. ${String(todo.title || '(untitled)')} [${String(todo.remId)}] native=${String(todo.todoStatus)}`;
     })
     .join('\n');
 }
 
 function formatTodoUpdateText(data: unknown): string {
   const result = data as Record<string, unknown>;
-  return `${result.dryRun === true ? 'Preview' : 'Applied'} TODO update for ${String(result.title)} [${String(result.remId)}]: changed=${String(result.changed)}, native=${String(result.newTodoStatus ?? 'not-a-todo')}`;
+  return `${result.dryRun === true ? 'Preview' : 'Applied'} native TODO update for ${String(result.title)} [${String(result.remId)}]: changed=${String(result.changed)}, status=${String(result.newTodoStatus)}`;
 }
 
 function registerTodoUpdate(
@@ -31,12 +32,10 @@ function registerTodoUpdate(
 ): void {
   catalog
     .action(todo, `${name} <rem-id>`, {
-      description: `${name === 'complete' ? 'Complete' : 'Reopen'} a todo and swap its status tags`,
+      description: `${name === 'complete' ? 'Complete' : 'Reopen'} a native RemNote TODO`,
       risk: 'write',
       bridge: 'required',
     })
-    .requiredOption('--todo-tag-id <remId>', 'Exact TODO tag Rem ID')
-    .requiredOption('--done-tag-id <remId>', 'Exact DONE tag Rem ID')
     .option('--apply', 'Apply the change; otherwise preview only')
     .action(async (remId: string, opts) => {
       const format: OutputFormat = program.opts().text ? 'text' : 'json';
@@ -45,8 +44,6 @@ function registerTodoUpdate(
         const result = await client.execute('update_todo', {
           remId,
           finished,
-          todoTagRemId: opts.todoTagId,
-          doneTagRemId: opts.doneTagId,
           dryRun: opts.apply !== true,
         });
         emit(program, formatResult(result, format, formatTodoUpdateText));
@@ -58,21 +55,29 @@ function registerTodoUpdate(
 
 export function registerTodoCommand(program: Command, catalog: CommandCatalog): void {
   const todo = catalog.group(program, 'todo', {
-    description: 'List and update tagged RemNote todos',
+    description: 'List and update native RemNote todos',
   });
 
-  catalog
-    .action(todo, 'list', {
-      description: 'List Rems carrying an exact TODO tag',
-      risk: 'read',
-      bridge: 'required',
-    })
-    .requiredOption('--tag-id <remId>', 'Exact TODO tag Rem ID')
+  const list = catalog.action(todo, 'list', {
+    description: 'List native RemNote TODOs; unfinished by default',
+    risk: 'read',
+    bridge: 'required',
+  });
+  list
+    .option('--root-id <id>', 'Inspect this native Rem and all of its descendants')
+    .addOption(
+      new Option('--status <status>', 'Filter by native TODO status')
+        .choices(['unfinished', 'finished', 'all'])
+        .default('unfinished')
+    )
     .action(async (opts) => {
       const format: OutputFormat = program.opts().text ? 'text' : 'json';
       const client = createCommandClient(program);
       try {
-        const result = await client.execute('list_todos', { tagRemId: opts.tagId });
+        const result = await client.execute('list_todos', {
+          status: opts.status,
+          ...(opts.rootId ? { rootRemId: opts.rootId } : {}),
+        });
         emit(program, formatResult(result, format, formatTodoListText));
       } finally {
         await client.close();

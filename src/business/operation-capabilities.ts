@@ -1,4 +1,4 @@
-import type { FlashcardsPlan, WikiPlan } from '../schemas/task-schemas.js';
+import type { FlashcardsPlan } from '../schemas/task-schemas.js';
 
 export const FLASHCARD_CREATE_CAPABILITIES = [
   'namespace:rem.createTreeWithMarkdown',
@@ -30,50 +30,13 @@ export const FLASHCARD_PATCH_CAPABILITIES = [
 
 export const FLASHCARD_REUSE_CAPABILITIES = ['namespace:rem.findOne', 'rem:getCards'] as const;
 
-export const WIKI_CREATE_CAPABILITIES = [
-  'namespace:rem.createRem',
-  'namespace:rem.findOne',
-  'namespace:rem.findMany',
-  'namespace:richText.rem',
-  'rem:getAliases',
-  'rem:getCards',
-  'rem:getChildrenRem',
-  'rem:getOrCreateAliasWithText',
-  'rem:getParentRem',
-  'rem:getTagRems',
-  'rem:hasPowerup',
-  'rem:isDocument',
-  'rem:isFolder',
-  'rem:setIsCollapsed',
-  'rem:setParent',
-  'rem:setText',
-] as const;
-
-export const WIKI_PATCH_CAPABILITIES = [
-  'namespace:rem.findOne',
-  'namespace:richText.rem',
-  'rem:setText',
-] as const;
-
-export function requiredTaskCapabilities(
-  kind: 'flashcards' | 'wiki',
-  plan: FlashcardsPlan | WikiPlan
-): readonly string[] {
+export function requiredTaskCapabilities(plan: FlashcardsPlan): readonly string[] {
   const required = new Set<string>();
-  if (kind === 'flashcards') {
-    const flashcards = plan as FlashcardsPlan;
-    if (flashcards.newCards?.length)
-      FLASHCARD_CREATE_CAPABILITIES.forEach((capability) => required.add(capability));
-    if (flashcards.answerPatches?.length)
-      FLASHCARD_PATCH_CAPABILITIES.forEach((capability) => required.add(capability));
-    if (flashcards.reusedCardRemIds?.length)
-      FLASHCARD_REUSE_CAPABILITIES.forEach((capability) => required.add(capability));
-  } else {
-    const wiki = plan as WikiPlan;
-    if (wiki.pages.length)
-      WIKI_CREATE_CAPABILITIES.forEach((capability) => required.add(capability));
-    if (wiki.answerPatches?.length)
-      WIKI_PATCH_CAPABILITIES.forEach((capability) => required.add(capability));
-  }
+  if (plan.newCards?.length)
+    FLASHCARD_CREATE_CAPABILITIES.forEach((capability) => required.add(capability));
+  if (plan.answerPatches?.length)
+    FLASHCARD_PATCH_CAPABILITIES.forEach((capability) => required.add(capability));
+  if (plan.reusedCardRemIds?.length)
+    FLASHCARD_REUSE_CAPABILITIES.forEach((capability) => required.add(capability));
   return [...required].sort();
 }

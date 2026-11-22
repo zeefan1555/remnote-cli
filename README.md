@@ -42,8 +42,7 @@ characters. See [Output and errors](docs/guides/output-and-errors.md).
 The root commands group stable product domains:
 
 ```text
-Knowledge: rem, card, wiki, table, todo, media, journal
-Workflows: sync
+Knowledge: rem, card, table, todo, media, journal
 Diagnostics: batch, status, doctor, schema, contract
 Raw SDK: sdk
 ```
@@ -125,8 +124,8 @@ remnote-cli schema rem.search
 ```
 
 `contract` prints protocol, output and error contracts, plan schemas, required SDK
-capabilities, receipt statuses, and exit codes. Use `--schema flashcards`,
-`--schema wiki`, or `--schema workspace` to inspect one plan schema.
+capabilities, receipt statuses, and exit codes. Use `--schema flashcards` to
+inspect the flashcard plan schema.
 
 `schema` lists every command path and whether it is a navigation group or an
 executable action. Pass the command path to get positional arguments, options,
@@ -212,6 +211,25 @@ remnote-cli rem inspect REM_ID --expect /tmp/rules.json --strict
 
 Rules can compare exact fields, counts, hashes, and nested values. Without `--strict`, rule failures still appear in the result but do not change the exit code. Use [state verification](docs/guides/state-verification.md) to author reusable rules.
 
+## Work with native TODOs
+
+RemNote TODO state lives on the Rem. The CLI uses `isTodo()`,
+`getTodoStatus()`, and `setTodoStatus()`. A TODO tag or the text `TODO` does
+not identify a native TODO.
+
+```bash
+remnote-cli todo list
+remnote-cli todo list --status all
+remnote-cli todo list --root-id ROOT_ID
+remnote-cli todo complete REM_ID
+remnote-cli todo complete REM_ID --apply
+remnote-cli todo reopen REM_ID --apply
+```
+
+`todo list` shows unfinished native TODOs by default. Pass `--root-id` to scan
+one Rem and its descendants. Complete and reopen preview by default. Apply changes
+only the native status and then reads the exact Rem back.
+
 ## Create flashcards
 
 Flashcard plans target existing IDs. Save an inner `schemaVersion: 1` plan, preview it, then apply only the reviewed plan with the same stable idempotency key.
@@ -240,86 +258,16 @@ remnote-cli card apply --plan /tmp/flashcards.json --idempotency-key cards-2026-
 
 Preview is the default. `--apply` performs writes. The CLI does not choose or validate the calendar date. Pass an existing daily document and recheck the intended date before a new batch or after midnight.
 
-Task plans have no artificial card, answer, patch, page, node, alias or plan-file
+Task plans have no artificial card, answer, patch, or plan-file
 size ceiling. The CLI partitions internal scaffold calls, persists progress and
 queues SDK requests when the Bridge connection reaches its in-flight capacity.
 Bindings, text segments and receipt fields are documented in
 [Task plans](docs/guides/task-plans.md).
 
-## Maintain a Wiki
-
-Wiki plans identify one Wiki root, its partition, index, and log Rems. The plan below adds one page.
-
-```json
-{
-  "schemaVersion": 1,
-  "wikiRootId": "WIKI_ID",
-  "partitionRemId": "PARTITION_ID",
-  "indexRemId": "INDEX_ID",
-  "logRemId": "LOG_ID",
-  "pages": [
-    {
-      "key": "overview",
-      "title": "Overview",
-      "nodes": [{ "key": "scope", "text": ["Current scope."] }],
-      "summary": ["Overview."]
-    }
-  ]
-}
-```
-
-```bash
-remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-2026-11-22
-remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-2026-11-22 --apply --summary
-```
-
-The Wiki plan keeps grouped index entries in their reviewed parent and refuses missing or conflicting structure. A successful batch checks the affected objects. After the final Wiki write, run `rem verify scope` with the Wiki root and a `zeroCards` expectation for full task acceptance.
-
-## Synchronize an Obsidian vault
-
-Sync maps a private Markdown vault to bound RemNote IDs. Keep the vault outside code repositories and use a directory that no other process edits during a command.
-
-Create the first baseline in a new, empty vault with an exact knowledge-base ID and root ID:
-
-```bash
-mkdir -m 700 /PRIVATE/remnote-vault
-remnote-cli sync import /PRIVATE/remnote-vault --kb-id KB_ID --root-id ROOT_ID
-```
-
-After import, preview and apply changes from either side:
-
-```bash
-remnote-cli sync plan /PRIVATE/remnote-vault
-remnote-cli sync apply /PRIVATE/remnote-vault
-remnote-cli sync apply /PRIVATE/remnote-vault --path 'Projects/Plan.md'
-```
-
-`sync plan` performs no native writes. `sync apply` validates the whole vault, plans the selected changes, applies them, and verifies the result. `sync apply` does not use an `--apply` flag.
-
-`--path` accepts repeatable vault-relative files or directories. It does not accept globs. With no path, sync selects the whole vault. The default `--scope changed` reads local changes and their dependencies. Use `--scope all` to reconcile all bound IDs in the selected area.
-
-These commands inspect local state without changing RemNote:
-
-```bash
-remnote-cli sync status /PRIVATE/remnote-vault
-remnote-cli sync lint /PRIVATE/remnote-vault
-remnote-cli sync diff /PRIVATE/remnote-vault --path 'Projects'
-```
-
-File removal is not a delete command. Native deletion is a separate, bounded operation:
-
-```bash
-remnote-cli sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID
-remnote-cli sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID --allow-destructive --apply --plan-hash HASH
-```
-
-The first command previews. The second requires an explicitly authorized deletion, `--allow-destructive`, `--apply`, and the preview's `--plan-hash`.
-
-For the Markdown format, scope rules, conflict evidence, and recovery commands, use the [sync reference](docs/guides/remnote-cli-command-reference.md#sync).
-
 ## Preview, apply, and unknown writes
 
-Commands with preview and apply modes preview by default. `card apply` and `wiki apply` write only with `--apply`. `sync plan` previews, while `sync apply` is the write path.
+Commands with preview and apply modes preview by default. `card apply`,
+`todo complete`, and `todo reopen` write only with `--apply`.
 
 Native writes are sequential, not atomic. A timeout, disconnect, `unknown` receipt, or lost response does not prove that no data changed. If a write is interrupted:
 
@@ -359,7 +307,8 @@ allowlist, live catalog hash, target requirements or destructive approval.
 remnote-cli rem search "architecture" --kb-id KB_ID --text
 ```
 
-The option checks the Bridge's active knowledge base. It does not switch knowledge bases. A mismatch is an error. `sync import` requires `--kb-id` because it creates the first binding.
+The option checks the Bridge's active knowledge base. It does not switch knowledge
+bases. A mismatch is an error.
 
 ## Troubleshooting
 

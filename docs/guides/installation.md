@@ -48,9 +48,11 @@ Protocol 2 and the live SDK catalog determine compatibility. Confirm
 `status.pluginVersion`, `status.pluginId`, `status.protocolVersion`,
 `status.sdkCatalogHash` and `status.nativeTransactions === false`; the installed
 manifest panel alone does not prove which JavaScript is running. Atomic
-update/replacement/property/TODO commands are unavailable until native abort is
-safe. Other official SDK operations are available subject to RemNote scopes and
-the CLI's explicit destructive-operation flag.
+update, replacement, and property commands are unavailable until native abort is
+safe. Native TODO list and status commands use `isTodo()`,
+`getTodoStatus()`, and `setTodoStatus()`. Other official SDK operations are
+available subject to RemNote scopes and the CLI's explicit destructive-operation
+flag.
 
 Source builds of the plugin come from
 [remnote-cli-bridge](https://github.com/zeefan1555/remnote-cli-bridge).
