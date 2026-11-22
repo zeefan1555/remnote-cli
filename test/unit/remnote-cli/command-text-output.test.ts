@@ -295,7 +295,7 @@ describe('command text output', () => {
     };
 
     const group = await runTextCommand(['sdk', 'rem'], capabilities);
-    expect(group.output).toContain('Usage: remnote-cli sdk rem <command> [options]');
+    expect(group.output).toContain('Usage: remnote-cli sdk rem [options] [command]');
     expect(group.output).toContain('object-collapse');
     expect(group.executeSpy).not.toHaveBeenCalled();
     group.executeSpy.mockRestore();

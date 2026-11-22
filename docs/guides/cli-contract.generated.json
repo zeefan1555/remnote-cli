@@ -817,6 +817,14 @@
       "dynamic": false
     },
     {
+      "path": "completion",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "read",
+      "bridge": "none",
+      "dynamic": false
+    },
+    {
       "path": "context",
       "kind": "action",
       "helpSection": "knowledge",
@@ -999,11 +1007,144 @@
     },
     {
       "path": "sdk app",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk app get-operating-system",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk app get-platform",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app plugin-track",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-callback",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-command",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-css",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-menu-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-powerup",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-rem-menu-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app register-widget",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app release-keys",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app steal-keys",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app toast",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app transaction",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app unregister-menu-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app unregister-widget",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk app wait-for-initial-sync",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk call",
@@ -1023,147 +1164,2245 @@
     },
     {
       "path": "sdk card",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk card find-many",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk card find-one",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk card get-all",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk card object-get-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk card object-get-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk card object-remove",
       "kind": "action",
       "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk card object-update-card-repetition-status",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk date",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk date get-daily-doc",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk date get-todays-doc",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk editor",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk editor collapse-selection",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor copy",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor cut",
       "kind": "action",
       "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor delete",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor delete-characters",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor get-caret-position",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor get-focused-editor-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor get-selected-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor get-selected-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor get-selection",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor insert-markdown",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor insert-plain-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor insert-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor move-caret",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor move-caret-vertical",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor redo",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor select-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor select-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor set-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk editor undo",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk event",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk event add-listener",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk event remove-listener",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk focus",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk focus get-focused-portal",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk focus get-focused-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk kb",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk kb get-current-knowledge-base-data",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk kb is-primary-knowledge-base",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk messaging",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk messaging broadcast",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
     },
     {
       "path": "sdk powerup",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk powerup get-powerup-by-code",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk powerup get-powerup-slot-by-code",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk queue",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk queue get-average-time-per-card",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue get-current-card",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue get-current-queue-screen-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue get-current-streak",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue get-num-remaining-cards",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue go-back-to-previous-card",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue has-revealed-answer",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue in-lookback-mode",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue is-type-answer-enabled",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue rate-current-card",
       "kind": "action",
       "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue remove-current-card-from-queue",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk queue show-answer",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk reader",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk reader add-highlight",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
     },
     {
       "path": "sdk rem",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk rem create-link-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem create-portal",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem create-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem create-single-rem-with-markdown",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem create-table",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem create-tree-with-markdown",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem find-by-name",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem find-many",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem find-one",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem get-all",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem move-rems",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-add-powerup",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-add-source",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-add-tag",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-add-to-portal",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-all-rem-in-document-or-portal",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-all-rem-in-folder-queue",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-ancestor-tag-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-collapse",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-copy-portal-reference-to-clipboard",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-copy-reference-to-clipboard",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-copy-tag-reference-to-clipboard",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-deep-rems-being-referenced",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-descendant-tag-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-embedded-queue-view-mode",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-expand",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-aliases",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-cards",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-children-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-descendants",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-enable-practice",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-font-size",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-hidden-explicitly-included-state",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-highlight-color",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-last-practiced",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-last-time-moved-to",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-or-create-alias-with-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-parent-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-portal-directly-included-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-portal-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-powerup-property",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-powerup-property-as-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-powerup-property-as-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-practice-direction",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-property-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-schema-version",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-sources",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-tag-property-as-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-tag-property-value",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-tag-rems",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-todo-status",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-get-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-has-powerup",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-indent",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-card-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-code",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-collapsed",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-document",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-folder",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-list-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-powerup",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-powerup-enum",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-powerup-property",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-powerup-property-list-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-powerup-slot",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-property",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-quote",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-slot",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-table",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-is-todo",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-merge",
       "kind": "action",
       "helpSection": "raw-sdk",
       "risk": "destructive",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-merge-and-set-alias",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-open-rem-as-page",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-open-rem-in-context",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-outdent",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-portals-and-documents-in",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-position-amongst-siblings",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-position-amongst-visible-siblings",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-remove",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-remove-from-portal",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-remove-powerup",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-remove-source",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-remove-tag",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "destructive",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-rems-being-referenced",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-rems-referencing-this",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-scroll-to-reader-highlight",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-back-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-enable-practice",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-font-size",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-hidden-explicitly-included-state",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-highlight-color",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-card-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-code",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-collapsed",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-document",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-folder",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-list-item",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-property",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-quote",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-slot",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-is-todo",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-parent",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-powerup-property",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-practice-direction",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-table-filter",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-tag-property-value",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-todo-status",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-set-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-sibling-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-tagged-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-times-selected-in-search",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rem object-visible-sibling-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk rich-text",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk rich-text apply-text-format-to-range",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text audio",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-audio",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-code",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-image",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-latex",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-newline",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-value",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text builder-video",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text char-at",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text code",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text deep-get-rem-and-alias-ids-from-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text deep-get-rem-ids-from-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text empty",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text equals",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text find-all-external-ur-ls",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text get-rem-and-alias-ids-from-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text get-rem-ids-from-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text image",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text index-of",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text index-of-element-at",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text latex",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text length",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text newline",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text normalize",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text parse-and-insert-html",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text parse-from-markdown",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text remove-text-format-from-range",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text replace-all-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text split",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text split-rich-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text substring",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text to-html",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text to-markdown",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text to-string",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text toggle-text-format-on-range",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text trim",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text trim-end",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text trim-start",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk rich-text video",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk scheduler",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk scheduler register-custom-scheduler",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
     },
     {
       "path": "sdk search",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk search query-and",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-card-info",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-checkbox",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-date",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-date-relative-to-today",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-documents-that-contain",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-has-any-connection-to",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-has-reference-to",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-has-rem-type",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-is-descendant-of",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-is-directly-tagged-with",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-is-in-document",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-is-tagged-with",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-multi-select",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-not",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-number",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-or",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-single-select",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-table-column",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-tag-without-inheritance",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search query-text",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk search search",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk settings",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk settings get-setting",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk settings register-boolean-setting",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk settings register-dropdown-setting",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk settings register-number-setting",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk settings register-string-setting",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk storage",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk storage get-local",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "read",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk storage get-session",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk storage get-synced",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk storage set-local",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk storage set-session",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk storage set-synced",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk widget",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk widget close-popup",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk widget get-dimensions",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk widget get-widget-context",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk widget get-widgets-at-location",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "read",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk widget open-popup",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "sdk window",
+      "kind": "group",
+      "helpSection": "raw-sdk"
+    },
+    {
+      "path": "sdk window close-all-floating-widgets",
       "kind": "action",
       "helpSection": "raw-sdk",
-      "risk": "destructive",
+      "risk": "write",
       "bridge": "required",
-      "dynamic": true
+      "dynamic": false
+    },
+    {
+      "path": "sdk window close-floating-widget",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-current-window-tree",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-focused-pane-id",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-last-focused-pane",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-open-pane-ids",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-open-pane-rem-id",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-open-pane-rem-ids",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window get-url",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window is-floating-widget-open",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window is-on-page",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window open-floating-widget",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window open-rem",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window open-widget-in-pane",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window open-widget-in-right-sidebar",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window release-keys",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window set-current-window-tree-from-string",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window set-floating-widget-position",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window set-focused-pane-id",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window set-rem-window-tree",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window set-url",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
+      "path": "sdk window steal-keys",
+      "kind": "action",
+      "helpSection": "raw-sdk",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
     },
     {
       "path": "search",

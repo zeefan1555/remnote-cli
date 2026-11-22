@@ -23,10 +23,29 @@ requirement, dynamic SDK marker and cursor pagination metadata when applicable.
 remnote-cli schema search
 remnote-cli schema powerup get
 remnote-cli schema sdk rem
+remnote-cli schema sdk.rem.object-get-children-rem
+remnote-cli schema sdk.rem --tree
 ```
 
 The result includes usage, an object-shaped CLI input schema, required fields,
 global options, output streams and the command risk policy.
+
+Dots and spaces are equivalent. `--tree` renders the command hierarchy beneath
+the selected group.
+
+## Completion candidates
+
+`completion` is a hidden machine command backed by the same catalog. It accepts
+the same dotted or space-separated path and returns direct child candidates:
+
+```bash
+remnote-cli completion sdk
+remnote-cli completion sdk rem object-get
+remnote-cli --text completion sdk rem object-get
+```
+
+Shell adapters can consume the text mode. The catalog data model does not change
+if another shell integration is added later.
 
 ## Contract relationship
 

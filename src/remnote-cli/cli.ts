@@ -53,6 +53,7 @@ export function createProgram(
 ): Command {
   const program = new Command();
   const catalog = new CommandCatalog(program);
+  program.configureHelp({ helpWidth: 120 });
 
   program
     .name('remnote-cli')
