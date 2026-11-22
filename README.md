@@ -1,23 +1,33 @@
 # RemNote CLI
 
-Command-line access to a RemNote knowledge base. Each command opens a fixed loopback
-WebSocket, talks to the [RemNote CLI Bridge](https://github.com/zeefan1555/remnote-cli-bridge)
-plugin, and closes the connection.
+`remnote-cli` gives scripts, coding agents, and people direct access to the active RemNote knowledge base. Each live command starts a short local connection to RemNote CLI Bridge, runs the requested SDK operations, and exits.
 
-```text
-remnote-cli <-> protocol 2 loopback WebSocket <-> RemNote CLI Bridge <-> RemNote SDK
-```
+The CLI has no MCP server, background daemon, or cloud relay. Command output is JSON by default. Add the global `--text` option for human-readable output.
 
-There is no MCP endpoint, stdio proxy, resident daemon, or cloud relay.
-`batch --file` keeps one listener open across a list of commands so back-to-back
-calls do not collide on the CLI port. Keep RemNote open with the Bridge enabled.
-An idle plugin waiting for a CLI command is normal.
+## Requirements
 
-[Native rollback acceptance remains blocked](docs/acceptance.md).
+- Node.js 22.13.0 or newer. Node.js 24 is recommended.
+- RemNote desktop with the RemNote CLI Bridge plugin enabled.
+- A shell on macOS or Linux for the source installation steps in this README.
 
-## Install
+The current operating-system user is the trust boundary. The CLI listener accepts only the local WebSocket origin used by RemNote's sandboxed plugin, so ordinary webpages cannot connect. This check does not isolate a native process running as the same user, which can forge request headers. Do not run untrusted local programs while the Bridge is enabled.
 
-Use Node.js 22.13.0 or newer. Node.js 24 matches `.nvmrc`.
+## Install RemNote CLI Bridge
+
+Install **RemNote CLI Bridge** from the RemNote marketplace. Its manifest ID is `remnote-cli-bridge`.
+
+1. Open the plugin in RemNote.
+2. Enable it.
+3. Grant content read and write access in RemNote.
+4. Grant the separate `KnowledgeBaseInfo: Read` permission.
+
+Keep RemNote open while you run CLI commands. The Bridge connects automatically and reports its active knowledge base. No extra connection setup is required.
+
+If you build the Bridge from source, follow the [installation guide](docs/guides/installation.md). Do not reuse an old MCP plugin installation.
+
+## Install the CLI
+
+The package is installed from source. It is not distributed as a global npm package.
 
 ```bash
 git clone https://github.com/zeefan1555/remnote-cli.git
@@ -28,162 +38,231 @@ npm run build
 remnote-cli --version
 ```
 
-`./link-cli.sh` registers `remnote-cli` with the current npm prefix. A later
-`npm run build` in this repository updates that command. `./unlink-cli.sh` removes
-the link.
+`./link-cli.sh` registers `remnote-cli` in the current npm prefix. Later builds in this checkout update the linked command. Run `./unlink-cli.sh` to remove it.
 
-## Setup
+To run the build without registering a command, replace `remnote-cli` in the examples with `node dist/remnote-cli/index.js`.
 
-Install **RemNote CLI Bridge** from the RemNote marketplace. Its manifest id is
-`remnote-cli-bridge`. Enable it in RemNote desktop and grant content access plus
-**KnowledgeBaseInfo: Read**.
+## Verify the first connection
 
-There is no pairing, token, URL, port, knowledge-base, or Bridge write setting.
-The CLI always listens on `127.0.0.1:3002`; the Bridge connects automatically and
-reports the live active knowledge base and SDK catalog identity.
+Start RemNote, then run:
 
 ```bash
 remnote-cli status --text
-remnote-cli contract --json
 ```
 
-Product versions do not need to match; protocol 2 and the live SDK catalog do.
-`--kb-id ID` is optional and only requires the Bridge's active KB to match that id.
+A working connection starts with `Bridge: Connected`. The status also shows the active knowledge base, plugin ID `remnote-cli-bridge`, protocol version 2, and the live SDK version. Product versions do not need to match. Compatibility depends on protocol version 2 and the live SDK catalog.
 
-The trust boundary is the current operating-system user. The CLI accepts only the
-`Origin: null` upgrade used by RemNote's sandboxed plugin and rejects missing or
-unknown Origins. Origin checks stop ordinary webpages, not malicious native
-programs running as the same user.
-
-See [installation](docs/guides/installation.md) and
-[configuration](docs/guides/configuration.md).
-
-## Basic usage
+You can inspect the machine-readable interface without RemNote running:
 
 ```bash
-remnote-cli search "topic"
-remnote-cli read REM_ID --content-mode structured --depth 1
-remnote-cli list-children PARENT_ID
-remnote-cli status --text
+remnote-cli --help
+remnote-cli contract
 ```
 
-JSON is the default. `--text` is the human-readable form. A lost response does
-not prove that no data changed: read the returned ids before retrying a write.
+`contract` prints protocol, plan schemas, required SDK capabilities, receipt statuses, and exit codes. Use `--schema flashcards`, `--schema wiki`, or `--schema workspace` to inspect one plan schema.
 
-## Shared Obsidian vault and two-way editing
+## Find and read notes
 
-The sync design supports editing in both a private human-readable Markdown vault
-and RemNote, including card edits during review. Users in Obsidian and agents
-edit the same local files. A shared baseline supports per-Rem semantic three-way
-merging without whole-file last-write-wins. Keep
-content outside code Git, optionally in a separate private content repository;
-network backup needs explicit user authorization. Sync does not configure Git or
-upload content to a remote.
+`search` returns result IDs and metadata. Use `--content-mode` when you need note content in the search response.
 
 ```bash
-remnote-cli --kb-id KB_ID sync import /PRIVATE/vault --root-id ROOT_ID
-remnote-cli sync status /PRIVATE/vault
-remnote-cli sync apply /PRIVATE/vault
+remnote-cli search "project plan" --limit 10 --text
+remnote-cli search "project plan" --content-mode structured --depth 2
+remnote-cli read REM_ID --content-mode structured --depth 2
 ```
 
-Import establishes the initial baseline in a new empty directory, from a declared
-subtree or official `.rem` archive. Subsequent sync plans may contain incoming and
-outgoing changes together; re-import is not a substitute for merging. Compared to
-the shared baseline, one-sided changes propagate, equal changes converge, and
-edits to different Rems merge. Conflicting edits may select a newer value only
-with trustworthy comparable version evidence; unknown/equal times preserve both
-versions. File mtime, sync capture time and review time are not content authority.
-Review history and scheduling remain RemNote-owned and never flow back from a
-local snapshot. Missing content on either side does not imply deletion.
+Pass one or more IDs to `read`. Use `--content-mode none` to read metadata only, or `--include-media-metadata` to find image IDs for `get-media`.
 
-Daily editing needs one `sync apply DIR` invocation: it validates, plans,
-applies and verifies without a manual read/save/lint/diff/preview pipeline.
-Use `sync plan DIR` for a preview with zero native writes, or add
-`--plan-hash HASH` to apply a previously reviewed frozen plan. `sync` is only a
-command group; `apply` has no `--apply` flag. Neither apply form retries uncertain
-writes automatically.
+Page through large searches with the returned `nextCursor`. Reuse the cursor with the same query and scope.
 
-Plan/apply default to `--scope changed`, reading locally dirty Rems and necessary
-dependencies. Repeat `--path 'Folder/Note.md'` or `--path 'Folder'` to select
-vault-relative files/directories, not globs or individual patches. `--scope all`
-reconciles every bound ID in those selected paths; omit `--path` to select the
-entire vault. Scope and path are independent selectors. Out-of-scope local edits
-are preserved, while local lint, identity validation and freezing still cover the
-whole vault. Changed scope is not a remote changes-since feed or proof of global
-freshness. `sync diff DIR` is offline and accepts `--path`; status/lint stay
-whole-vault. Frozen plan hashes bind the normalized selectors, actual selection
-and full-vault frozen inputs, so a materially changed selection cannot reuse one.
-Dependencies are checked for safety, not merged as incoming content or given new
-baseline clocks. A later all-scope sync still sees their remote-only edits.
-Clean changed/empty selections make no remote calls. Selected layout-only edits
-can publish offline, with `localPublished: true` and `remoteChecked: false`;
-unselected source bytes, native records and clocks stay unchanged.
+## Gather bounded context
 
-The current candidate reports `incoming`, `outgoing`,
-`converged` and conflict receipts; native acceptance is separate. The offline
-`sync read` / `sync save` workflow binds controlled local edits to each changed Rem
-version's content hash and save time. Divergent same-Rem edits use whole-Rem
-`version-time-lww` only with comparable, hash-bound local/native clocks, after
-archiving both versions. Direct file edits do not establish a trusted local clock;
-missing, equal, or invalid clocks preserve both versions as `untrusted-edit-order`.
-Independent front/back edits to the same basic card still share one whole-Rem
-merge unit, not individual fields.
-Legacy `pull`/`push` aliases are removed. Continuous discovery is limited to bound
-IDs (`discoveryScope: "bound-ids"`, `globalDiscoveryComplete: false`), read in
-batches of at most 50. Unknown children, missing Rems and reparenting fail or
-conflict; new top-level roots are not discovered by this scope. An initial archive
-import does not prove continuous whole-library coverage.
+`context` reads a bounded set of Rems in one bridge session. Save the request as JSON, then pass it by path or through stdin.
 
-Ordinary nested Markdown lists use short, stable Obsidian anchors; a single
-hidden `<!-- remnote:document-key -->` before H1 binds each imported document.
-There is no YAML when no user attributes are needed. Optional `title`, `aliases`
-and `tags` are display metadata; only a new multiline question needs an explicit
-`rems.<short-key>.content: multiline` attribute. Existing card types are recovered
-through identity-bound native records. New ordinary bullets need no hand-written
-YAML or anchor; verified publication assigns identity.
+```json
+{
+  "schemaVersion": 1,
+  "remIds": ["REM_ID"],
+  "subtreeRootIds": ["ROOT_ID"],
+  "tagRemIds": [],
+  "maxRems": 1000,
+  "ancestorDepth": 20
+}
+```
 
-Tracked `.remnote/identity.json` maps KB, document and short block keys to Rem IDs;
-native records, originals, card identity and history stay in hidden read-only
-sidecars, not user YAML. Generated links use full vault paths; unique basenames and
-the named document's current H1 fragment also resolve on input. Broken or ambiguous links, invalid
-identity and unknown YAML fields fail lint before remote writes. Local file moves
-do not move native Rems. Portals and auxiliary reference areas remain read-only
-native structures, not diagnostic note text or working Obsidian dynamic queries.
+```bash
+remnote-cli context --request /tmp/context-request.json
+printf '%s\n' '{"schemaVersion":1,"remIds":["REM_ID"],"maxRems":1000,"ancestorDepth":20}' | remnote-cli context --request -
+```
 
-New imports use this human format. For a clean previously published native-YAML
-vault, explicit offline `sync format DIR` converts its projection with zero backend
-calls, preserving native records and originals. Dirty source, incomplete baselines,
-pending journals or damaged identity are refused; daily sync has no legacy fallback.
-The same explicit command can canonically re-render a clean already-human vault,
-including empty-note block anchors, without changing native records or clocks.
-It reports `already-formatted` only when no publication is needed.
-See the [sync reference](docs/guides/remnote-cli-command-reference.md#sync) for exact
-format and write boundaries.
+Raw titles, text, and aliases are included only for IDs in `remIds`. Subtree and tag selectors return structural metadata and content hashes.
 
-Keep the vault root 0700; Obsidian-saved Markdown may be 0644, CLI-created Markdown
-is 0600, and private sidecars/state remain 0600. Exclude `.obsidian/`, `.trash/`
-and `.DS_Store` from content scans, frozen plans and Git; also ignore `.sync/`,
-locks and credentials in Git. Existing Rem/card IDs, parent/order and review
-history are protected; file removal is not a delete or move instruction. Preview
-deletion separately with `sync delete DIR --id ID --scope-root ID`; execution
-also requires `--apply --plan-hash HASH`, destructive authorization and live write
-gates. Delete accepts no scope/path filters. For
-native syntax, explicit deletion and recovery, see the
-[sync reference](docs/guides/remnote-cli-command-reference.md#sync).
-Writes are sequential, not atomic. Pre/post revision hashes are client optimistic
-checks, not native conditional setters; the check-write window remains. Native
-transactions stay disabled. On an unknown result, preserve the original
-plan/journal and reconcile exact IDs. Explicit `sync resume DIR --plan-hash HASH`
-can continue the same outgoing-only plan after proving its complete attempted
-prefix by exact-ID readback. It reuses known creation IDs and never replays an
-uncertain write. Changed local/remote evidence, an unknown creation without an ID,
-or an unproven effect is refused. `sync recover` only finishes verified local
-publication. See the reference for the new-card identity evidence boundary.
+Use `verify scope` when a later step needs fresh proof for a parent, tag, type, child list, references, or card scope. It exits zero only when the requested evidence is complete and passes.
 
+```bash
+remnote-cli verify scope --expect /tmp/verify-request.json --summary
+```
+
+See [Read receipts](docs/guides/read-receipts.md) for request fields and receipt meanings.
+
+## Inspect state
+
+`inspect` returns generic Rem state in one connection. Select only the fields you need.
+
+```bash
+remnote-cli inspect REM_ID --fields markdown,tags,cards,children
+remnote-cli inspect REM_ID --fields elements,isCardItem,hasCardStructure
+remnote-cli inspect REM_ID --expect /tmp/rules.json --strict
+```
+
+Rules can compare exact fields, counts, hashes, and nested values. Without `--strict`, rule failures still appear in the result but do not change the exit code. Use [state verification](docs/guides/state-verification.md) to author reusable rules.
+
+## Create flashcards
+
+Flashcard plans target existing IDs. Save an inner `schemaVersion: 1` plan, preview it, then apply only the reviewed plan with the same stable idempotency key.
+
+```json
+{
+  "schemaVersion": 1,
+  "dailyRemId": "DAILY_ID",
+  "homeRootId": "HOME_ID",
+  "tagRemId": "TAG_ID",
+  "title": "Spaced repetition",
+  "newCards": [
+    {
+      "key": "interval",
+      "question": "What does the interval control?",
+      "answer": [["The time before the card appears again."]]
+    }
+  ]
+}
+```
+
+```bash
+remnote-cli flashcards apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22
+remnote-cli flashcards apply --plan /tmp/flashcards.json --idempotency-key cards-2026-11-22 --apply --summary
+```
+
+Preview is the default. `--apply` performs writes. The CLI does not choose or validate the calendar date. Pass an existing daily document and recheck the intended date before a new batch or after midnight.
+
+Plan variants, text segments, limits, and receipt fields are documented in [Task plans](docs/guides/task-plans.md).
+
+## Maintain a Wiki
+
+Wiki plans identify one Wiki root, its partition, index, and log Rems. The plan below adds one page.
+
+```json
+{
+  "schemaVersion": 1,
+  "wikiRootId": "WIKI_ID",
+  "partitionRemId": "PARTITION_ID",
+  "indexRemId": "INDEX_ID",
+  "logRemId": "LOG_ID",
+  "pages": [
+    {
+      "key": "overview",
+      "title": "Overview",
+      "nodes": [{ "key": "scope", "text": ["Current scope."] }],
+      "summary": ["Overview."]
+    }
+  ]
+}
+```
+
+```bash
+remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-2026-11-22
+remnote-cli wiki apply --plan /tmp/wiki.json --idempotency-key wiki-2026-11-22 --apply --summary
+```
+
+The Wiki plan keeps grouped index entries in their reviewed parent and refuses missing or conflicting structure. A successful batch checks the affected objects. After the final Wiki write, run `verify scope` with the Wiki root and a `zeroCards` expectation for full task acceptance.
+
+## Synchronize an Obsidian vault
+
+Sync maps a private Markdown vault to bound RemNote IDs. Keep the vault outside code repositories and use a directory that no other process edits during a command.
+
+Create the first baseline in a new, empty vault with an exact knowledge-base ID and root ID:
+
+```bash
+mkdir -m 700 /PRIVATE/remnote-vault
+remnote-cli --kb-id KB_ID sync import /PRIVATE/remnote-vault --root-id ROOT_ID
+```
+
+After import, preview and apply changes from either side:
+
+```bash
+remnote-cli sync plan /PRIVATE/remnote-vault
+remnote-cli sync apply /PRIVATE/remnote-vault
+remnote-cli sync apply /PRIVATE/remnote-vault --path 'Projects/Plan.md'
+```
+
+`sync plan` performs no native writes. `sync apply` validates the whole vault, plans the selected changes, applies them, and verifies the result. `sync apply` does not use an `--apply` flag.
+
+`--path` accepts repeatable vault-relative files or directories. It does not accept globs. With no path, sync selects the whole vault. The default `--scope changed` reads local changes and their dependencies. Use `--scope all` to reconcile all bound IDs in the selected area.
+
+These commands inspect local state without changing RemNote:
+
+```bash
+remnote-cli sync status /PRIVATE/remnote-vault
+remnote-cli sync lint /PRIVATE/remnote-vault
+remnote-cli sync diff /PRIVATE/remnote-vault --path 'Projects'
+```
+
+File removal is not a delete command. Native deletion is a separate, bounded operation:
+
+```bash
+remnote-cli sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID
+remnote-cli --allow-destructive sync delete /PRIVATE/remnote-vault --id REM_ID --scope-root ROOT_ID --apply --plan-hash HASH
+```
+
+The first command previews. The second requires an explicitly authorized deletion, `--allow-destructive`, `--apply`, and the preview's `--plan-hash`.
+
+For the Markdown format, scope rules, conflict evidence, and recovery commands, use the [sync reference](docs/guides/remnote-cli-command-reference.md#sync).
+
+## Preview, apply, and unknown writes
+
+Commands with preview and apply modes preview by default. `flashcards apply` and `wiki apply` write only with `--apply`. `sync plan` previews, while `sync apply` is the write path.
+
+Native writes are sequential, not atomic. A timeout, disconnect, `unknown` receipt, or lost response does not prove that no data changed. If a write is interrupted:
+
+1. Stop the original writer.
+2. Keep the reviewed plan, plan hash, idempotency key, journal, and every returned ID.
+3. Read the exact IDs to reconcile the outcome.
+4. Use a documented recovery command only when it accepts the original evidence.
+
+Do not rerun the write or choose a new idempotency key to bypass uncertainty. Do not delete journals to force a fresh attempt. Some native update commands fail closed until the SDK can safely abort them. A preview receipt is not write approval.
+
+## Knowledge-base boundary
+
+`--kb-id` is an optional global guard. Put it before the command name.
+
+```bash
+remnote-cli --kb-id KB_ID search "architecture" --text
+```
+
+The option checks the Bridge's active knowledge base. It does not switch knowledge bases. A mismatch is an error. `sync import` requires `--kb-id` because it creates the first binding.
+
+## Troubleshooting
+
+If `status` reports `Not connected`, confirm that RemNote is open, RemNote CLI Bridge is enabled, and both permissions are granted. Bring RemNote to the foreground and retry. An unreachable Bridge can take up to 15 seconds to time out.
+
+If a command reports a knowledge-base mismatch, read the target from the live `status` output. Do not use another ID to bypass the guard.
+
+If a command reports `CLI port occupied`, run queued commands with `batch` or wait for the active command to finish. Do not stop an unknown process that uses the local listener.
+
+If `update`, `replace-children`, `set-property`, or a TODO state change fails before mutation, the installed SDK does not provide a safe abort path for that operation. Use a supported preview or follow the command help. Do not retry a partial batch.
+
+For detailed diagnosis, see [troubleshooting](docs/guides/remnote-cli-troubleshooting.md).
+
+## Learn more
+
+- [Installation](docs/guides/installation.md)
 - [Command reference](docs/guides/remnote-cli-command-reference.md)
-- [Development](docs/guides/development-setup.md)
+- [Task plans and receipts](docs/guides/task-plans.md)
+- [Read receipts](docs/guides/read-receipts.md)
+- [State verification](docs/guides/state-verification.md)
+- [Advanced use cases](docs/advanced-use-cases.md)
+- [Development setup](docs/guides/development-setup.md)
 - [Integration testing](docs/guides/integration-testing.md)
-- [Troubleshooting](docs/guides/remnote-cli-troubleshooting.md)
 - [Changelog](CHANGELOG.md)
 
 MIT License. See [LICENSE](LICENSE).
