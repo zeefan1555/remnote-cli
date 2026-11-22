@@ -1,10 +1,10 @@
 import { emit } from '../output/runtime.js';
-import { Command } from 'commander';
+import type { Command } from 'commander';
 import { createCommandClient } from '../client/command-client.js';
 import { formatResult, type OutputFormat } from '../output/formatter.js';
+import { CliFailure } from '../output/errors.js';
 import { readContentFileOrStdin } from './content-input.js';
-import type { CommandCatalog } from '../spec/command-spec.js';
-
+import type { CommandActionOptions, CommandCatalog } from '../spec/command-spec.js';
 import {
   getSdkCapabilities,
   localSdkNavigation,
@@ -54,27 +54,7 @@ function outputFormat(program: Command): OutputFormat {
   return program.opts().text ? 'text' : 'json';
 }
 
-function groupHelp(result: NavigationCatalog, group: string): string {
-  const commandName = cliGroupName(group);
-  const capabilities = result.capabilities
-    .filter((capability) => capability.group === group)
-    .sort((left, right) => left.command.localeCompare(right.command));
-  return [
-    `sdk ${commandName} - RemNote SDK ${result.sdkVersion}`,
-    '',
-    `Usage: remnote-cli sdk ${commandName} <command> [options]`,
-    '',
-    'Commands:',
-    ...capabilities.map(
-      (capability) =>
-        `  ${capability.command.padEnd(42)} ${capability.status}/${capability.mode}${capability.summary ? ` - ${capability.summary}` : ''}`
-    ),
-    '',
-    `Run "remnote-cli sdk ${commandName} <command> --help" for exact SDK signatures and arguments.`,
-  ].join('\n');
-}
-
-function capabilityHelp(result: NavigationCatalog, capability: NavigationCapability): string {
+function capabilityHelp(capability: NavigationCapability): string {
   const commandName = cliGroupName(capability.group);
   const example = [
     'remnote-cli',
@@ -92,8 +72,6 @@ function capabilityHelp(result: NavigationCatalog, capability: NavigationCapabil
   ].join(' ');
 
   return [
-    `sdk ${commandName} ${capability.command}`,
-    '',
     capability.summary ?? 'No SDK description is available.',
     '',
     `Capability: ${capability.id}`,
@@ -104,12 +82,6 @@ function capabilityHelp(result: NavigationCatalog, capability: NavigationCapabil
     '',
     'SDK signature:',
     ...capability.signatures.map((signature) => `  ${signature}`),
-    '',
-    'Arguments:',
-    '  --args-json <json-array>  Positional SDK arguments',
-    '  --args-file <path|->      Read the JSON array from a file or stdin',
-    '  --target-id <id>          Required for RemObject and Card methods',
-    '  --allow-destructive       Required for destructive capabilities',
     '',
     `Example: ${example}`,
   ].join('\n');
@@ -127,10 +99,55 @@ async function readArgs(opts: {
   return source === undefined ? undefined : parseArgsJson(source);
 }
 
+function riskFor(capability: NavigationCapability): CommandActionOptions['risk'] {
+  if (capability.mode === 'destructive') return 'destructive';
+  if (capability.mode === 'read') return 'read';
+  return 'write';
+}
+
+async function executeCapability(
+  program: Command,
+  capability: NavigationCapability,
+  opts: { targetId?: string; argsJson?: string; argsFile?: string }
+): Promise<void> {
+  const format = outputFormat(program);
+  const client = createCommandClient(program);
+  try {
+    const live = await getSdkCapabilities(client);
+    const current = live.capabilities.find((candidate) => candidate.id === capability.id);
+    if (!current) throw new Error(`Live SDK capability is unavailable: ${capability.id}`);
+    if (current.target !== capability.target || current.mode !== capability.mode) {
+      throw new CliFailure(
+        'conflict',
+        'sdk_catalog_mismatch',
+        `Live SDK capability ${current.id} is ${current.target}/${current.mode}, but offline help describes ${capability.target}/${capability.mode}. Update the local SDK facts before using this action.`
+      );
+    }
+    if (current.status !== 'supported') {
+      throw new Error(
+        `Unsupported SDK capability ${current.id}: ${current.reason ?? 'no executable CLI path'}`
+      );
+    }
+    const payload: Record<string, unknown> = {
+      capability: current.id,
+      expectedCatalogHash: live.sdkCatalogHash,
+    };
+    if (opts.targetId !== undefined) payload.targetId = opts.targetId;
+    const args = await readArgs(opts);
+    if (args !== undefined) payload.args = args;
+    if (program.opts().allowDestructive || client.allowsDestructive())
+      payload.allowDestructive = true;
+    const callResult = await client.execute('sdk_call', payload);
+    emit(program, formatResult(callResult, format));
+  } finally {
+    await client.close();
+  }
+}
+
 function registerCapabilityCatalog(sdk: Command, program: Command, catalog: CommandCatalog): void {
   catalog
     .action(sdk, 'capabilities', {
-      description: 'List and search RemNote Plugin SDK commands',
+      description: 'List and search live RemNote Plugin SDK commands',
       risk: 'read',
       bridge: 'required',
     })
@@ -169,80 +186,28 @@ function registerCapabilityCatalog(sdk: Command, program: Command, catalog: Comm
     });
 }
 
-function registerCapabilityGroup(
-  sdk: Command,
+function registerMethod(
+  groupCommand: Command,
   program: Command,
   catalog: CommandCatalog,
-  group: string,
-  description: string
+  capability: NavigationCapability
 ): void {
-  const commandName = cliGroupName(group);
-  const sdkGroup = catalog
-    .action(sdk, `${commandName} [method]`, {
-      description,
-      risk: 'destructive',
-      bridge: 'required',
-      dynamic: true,
-    })
-    .helpOption(false)
-    .option('-h, --help', 'Show this SDK group or method help')
-    .option('--target-id <id>', 'Target Rem or Card ID')
-    .option('--args-json <json-array>', 'Positional arguments as a JSON array')
-    .option('--args-file <path|->', 'Read positional JSON arguments from a file or stdin');
-
-  sdkGroup.action(async (method: string | undefined, opts) => {
-    const format = outputFormat(program);
-    if (!method) {
-      const help = groupHelp(localSdkNavigation(), group);
-      emit(
-        program,
-        formatResult({ help }, format, () => help)
-      );
-      return;
-    }
-    if (opts.help) {
-      const local = localSdkNavigation();
-      const capability = local.capabilities.find(
-        (candidate) => candidate.group === group && candidate.command === method
-      );
-      if (!capability) throw new Error(`Unknown SDK command: sdk ${commandName} ${method}`);
-      const help = capabilityHelp(local, capability);
-      emit(
-        program,
-        formatResult({ help }, format, () => help)
-      );
-      return;
-    }
-
-    const client = createCommandClient(program);
-    try {
-      const result = navigationCatalog(await getSdkCapabilities(client));
-      const capability = result.capabilities.find(
-        (candidate) => candidate.group === group && candidate.command === method
-      );
-      if (!capability) throw new Error(`Unknown live SDK command: sdk ${commandName} ${method}`);
-      if (capability.status !== 'supported') {
-        throw new Error(
-          `Unsupported SDK command sdk ${commandName} ${method}: ${capability.reason ?? 'no executable CLI path'}`
-        );
-      }
-
-      const payload: Record<string, unknown> = {
-        capability: capability.id,
-        expectedCatalogHash: result.sdkCatalogHash,
-      };
-      if (opts.targetId !== undefined) payload.targetId = opts.targetId as string;
-      const args = await readArgs(opts as { argsJson?: string; argsFile?: string });
-      if (args !== undefined) payload.args = args;
-      if (program.opts().allowDestructive || client.allowsDestructive())
-        payload.allowDestructive = true;
-
-      const callResult = await client.execute('sdk_call', payload);
-      emit(program, formatResult(callResult, format));
-    } finally {
-      await client.close();
-    }
+  const command = catalog.action(groupCommand, capability.command, {
+    description: `${capability.summary ?? capability.id} [${capability.status}/${capability.mode}]`,
+    risk: riskFor(capability),
+    bridge: 'required',
   });
+  const withTarget =
+    capability.target === 'rem' || capability.target === 'card'
+      ? command.requiredOption('--target-id <id>', 'Target Rem or Card ID')
+      : command.option('--target-id <id>', 'Target Rem or Card ID');
+  withTarget
+    .option('--args-json <json-array>', 'Positional arguments as a JSON array')
+    .option('--args-file <path|->', 'Read positional JSON arguments from a file or stdin')
+    .addHelpText('after', ['', capabilityHelp(capability)].join('\n'));
+  command.action(async (opts: { targetId?: string; argsJson?: string; argsFile?: string }) =>
+    executeCapability(program, capability, opts)
+  );
 }
 
 function registerSdkCall(sdk: Command, program: Command, catalog: CommandCatalog): void {
@@ -290,7 +255,13 @@ export function registerSdkCommands(program: Command, catalog: CommandCatalog): 
   });
   registerCapabilityCatalog(sdk, program, catalog);
   registerSdkCall(sdk, program, catalog);
+  const navigation: NavigationCatalog = localSdkNavigation();
   for (const [group, description] of SDK_GROUPS) {
-    registerCapabilityGroup(sdk, program, catalog, group, description);
+    const groupCommand = catalog.group(sdk, cliGroupName(group), { description });
+    const capabilities = navigation.capabilities
+      .filter((capability) => capability.group === group)
+      .sort((left, right) => left.command.localeCompare(right.command));
+    for (const capability of capabilities)
+      registerMethod(groupCommand, program, catalog, capability);
   }
 }

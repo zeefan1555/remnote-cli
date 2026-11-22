@@ -29,6 +29,7 @@ interface CommandSpecBase {
   description: string;
   usage: string;
   helpSection: RootHelpSection;
+  hidden: boolean;
   input: CommandInputSchema;
   output: {
     envelope: 'remnote-cli/v2';
@@ -54,6 +55,7 @@ export type CommandSpec = CommandGroupSpec | CommandActionSpec;
 
 export interface CommandGroupOptions {
   description: string;
+  hidden?: boolean;
 }
 
 export interface CommandActionOptions {
@@ -62,11 +64,13 @@ export interface CommandActionOptions {
   bridge: BridgeRequirement;
   dynamic?: boolean;
   pagination?: PaginationSpec;
+  hidden?: boolean;
 }
 
 interface CatalogEntry {
   command: Command;
   kind: CommandSpec['kind'];
+  hidden?: boolean;
   bareHelp?: boolean;
   risk?: CommandRisk;
   bridge?: BridgeRequirement;
@@ -175,6 +179,7 @@ function commandSpecFor(program: Command, entry: CatalogEntry): CommandSpec {
     description: command.description(),
     usage: usage(path, command),
     helpSection: rootHelpSection(path),
+    hidden: entry.hidden === true,
     input: inputSchema(program, command),
     output: {
       envelope: 'remnote-cli/v2' as const,
@@ -207,10 +212,13 @@ export class CommandCatalog {
   }
 
   group(parent: Command, use: string, options: CommandGroupOptions): Command {
-    const command = parent.command(use).description(options.description);
+    const command = parent
+      .command(use, { hidden: options.hidden === true })
+      .description(options.description);
     this.entries.set(command, {
       command,
       kind: 'group',
+      hidden: options.hidden ?? false,
       bareHelp: true,
     });
     command.action(() => command.outputHelp());
@@ -218,10 +226,13 @@ export class CommandCatalog {
   }
 
   action(parent: Command, use: string, options: CommandActionOptions): Command {
-    const command = parent.command(use).description(options.description);
+    const command = parent
+      .command(use, { hidden: options.hidden === true })
+      .description(options.description);
     this.entries.set(command, {
       command,
       kind: 'action',
+      hidden: options.hidden ?? false,
       risk: options.risk,
       bridge: options.bridge,
       dynamic: options.dynamic,

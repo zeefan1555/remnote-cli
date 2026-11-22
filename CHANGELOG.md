@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.4] - 2026-11-22
+
+### Added
+
+- Register all 286 generated SDK methods as real catalog actions so help, schema, contract and completion share one path.
+- Add hierarchical `schema --tree`, dotted path resolution and hidden `completion` candidates.
+
 ## [0.28.3] - 2026-11-22
 
 ### Changed

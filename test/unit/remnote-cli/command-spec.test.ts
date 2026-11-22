@@ -75,9 +75,14 @@ describe('command specs', () => {
       bridge: 'none',
     });
     expect(commandSpec(specs, 'sdk rem')).toMatchObject({
-      risk: 'destructive',
+      kind: 'group',
+      bareHelp: true,
+    });
+    expect(commandSpec(specs, 'sdk rem object-get-children-rem')).toMatchObject({
+      kind: 'action',
+      risk: 'read',
       bridge: 'required',
-      dynamic: true,
+      dynamic: false,
     });
     expect(commandSpec(specs, 'sync')).toEqual(
       expect.not.objectContaining({ risk: expect.anything(), bridge: expect.anything() })
