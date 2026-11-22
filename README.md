@@ -10,7 +10,7 @@ The CLI has no MCP server, background daemon, or cloud relay. Command output is 
 - RemNote desktop with the RemNote CLI Bridge plugin enabled.
 - A shell on macOS or Linux for the source installation steps in this README.
 
-The current operating-system user is the trust boundary. The Bridge rejects ordinary webpages, but a native process running as the same user can forge local request headers. Do not run untrusted local programs while the Bridge is enabled.
+The current operating-system user is the trust boundary. The CLI listener accepts only the local WebSocket origin used by RemNote's sandboxed plugin, so ordinary webpages cannot connect. This check does not isolate a native process running as the same user, which can forge request headers. Do not run untrusted local programs while the Bridge is enabled.
 
 ## Install RemNote CLI Bridge
 
