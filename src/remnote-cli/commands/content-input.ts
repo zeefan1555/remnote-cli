@@ -33,16 +33,15 @@ async function readUtf8FromStream(
 
 export async function readContentFileOrStdin(
   pathOrDash: string,
-  stdin: Readable = process.stdin,
-  maxBytes = MAX_WRITE_CONTENT_BYTES
+  stdin: Readable = process.stdin
 ): Promise<string> {
   if (pathOrDash === '-') {
-    return readUtf8FromStream(stdin, 'Stdin content', maxBytes);
+    return readUtf8FromStream(stdin, 'Stdin content', MAX_WRITE_CONTENT_BYTES);
   }
 
   try {
     const buffer = await readFile(pathOrDash);
-    ensureWithinLimit(buffer.byteLength, `Content file "${pathOrDash}"`, maxBytes);
+    ensureWithinLimit(buffer.byteLength, `Content file "${pathOrDash}"`, MAX_WRITE_CONTENT_BYTES);
     return buffer.toString('utf8');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

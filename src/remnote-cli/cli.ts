@@ -1,6 +1,5 @@
 import { registerBatchCommand } from './commands/batch.js';
 import { registerCompositeCommands } from './commands/composite.js';
-import { registerTaskCommands } from './commands/task.js';
 import { Command } from 'commander';
 import { createRequire } from 'node:module';
 import { registerCreateCommand } from './commands/create.js';
@@ -26,7 +25,6 @@ import { registerJournalCommand } from './commands/journal.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerReadTableCommand } from './commands/table.js';
 import { registerGetMediaCommand } from './commands/media.js';
-import { registerReviewStatsCommand } from './commands/review-stats.js';
 import { registerSdkCommands } from './commands/sdk.js';
 import { registerOutlineCommand } from './commands/outline.js';
 import { registerTodoCommand } from './commands/todo.js';
@@ -79,9 +77,6 @@ export function createProgram(
   const document = catalog.group(rem, 'document', {
     description: 'Change document status',
   });
-  const card = catalog.group(program, 'card', {
-    description: 'Apply card tasks and inspect native review facts',
-  });
   const table = catalog.group(program, 'table', {
     description: 'Read Advanced Tables',
   });
@@ -101,8 +96,6 @@ export function createProgram(
   registerAssertCommand(program, catalog, rem);
   registerPowerupCommand(program, catalog, rem);
   registerCompositeCommands(program, catalog, rem);
-  registerTaskCommands(program, catalog, card);
-  registerReviewStatsCommand(program, catalog, card);
   registerOutlineCommand(program, catalog, rem);
   registerTodoCommand(program, catalog);
   registerGetMediaCommand(program, catalog, media);

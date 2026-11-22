@@ -14,8 +14,6 @@ const LEGACY_PATHS = [
   ['powerup get', 'rem powerup get'],
   ['context', 'rem context'],
   ['verify scope', 'rem verify scope'],
-  ['flashcards apply', 'card apply'],
-  ['review-stats', 'card review-stats'],
   ['outline collapse', 'rem outline collapse'],
   ['outline expand', 'rem outline expand'],
   ['get-media', 'media get'],

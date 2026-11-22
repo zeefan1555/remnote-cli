@@ -153,9 +153,11 @@ describe('remote SDK values', () => {
     const request = vi.fn(async () => ({}));
     const sdk = remoteSdk({ request } as never, catalog(), false);
     const callback = vi.fn(async () => 42);
-    await expect(sdk.app.transaction(callback)).rejects.toThrow(
-      'Native transactions are unavailable'
+    const transaction = sdk.app.transaction(callback);
+    await expect(transaction).rejects.toThrow(
+      'Native transactions are unavailable: SDK 0.0.46 cannot acknowledge abort. No transaction writes were started.'
     );
+    await expect(transaction).rejects.not.toThrow(/task|journaled|individual SDK/i);
     expect(callback).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
   });

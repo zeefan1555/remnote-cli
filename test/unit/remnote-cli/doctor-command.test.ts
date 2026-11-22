@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { EXIT } from '../../../src/remnote-cli/output/errors.js';
-import { buildCliContract } from '../../../src/schemas/contract.js';
 import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 interface DoctorReport {
@@ -38,27 +37,17 @@ async function stateHome(): Promise<string> {
   return state;
 }
 
-function requiredCapabilityIds(): string[] {
-  const ids = new Set<string>();
-  function visit(value: unknown): void {
-    if (typeof value === 'string') ids.add(value);
-    else if (Array.isArray(value)) for (const item of value) visit(item);
-    else if (value && typeof value === 'object')
-      for (const item of Object.values(value)) visit(item);
-  }
-  visit(buildCliContract().requiredCapabilities);
-  return [...ids].sort();
-}
-
 function catalog() {
-  const capabilities = requiredCapabilityIds().map((id) => ({
-    id,
-    target: 'namespace' as const,
-    method: 'method',
-    signatures: ['method: () => Promise<void>'],
-    status: 'supported' as const,
-    mode: 'read' as const,
-  }));
+  const capabilities = [
+    {
+      id: 'namespace:rem.findMany',
+      target: 'namespace' as const,
+      method: 'method',
+      signatures: ['method: () => Promise<void>'],
+      status: 'supported' as const,
+      mode: 'read' as const,
+    },
+  ];
   const sdkVersion = '0.0.46';
   const catalogSchemaVersion = 1 as const;
   const sdkCatalogHash = createHash('sha256')
@@ -131,7 +120,6 @@ describe('doctor command', () => {
         expect.objectContaining({ id: 'protocol', status: 'pass' }),
         expect.objectContaining({ id: 'knowledge_base', status: 'pass' }),
         expect.objectContaining({ id: 'sdk_catalog', status: 'pass' }),
-        expect.objectContaining({ id: 'capabilities', status: 'pass' }),
         expect.objectContaining({ id: 'journal', status: 'pass' }),
       ])
     );

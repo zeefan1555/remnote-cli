@@ -52,4 +52,28 @@ describe('command reference check', () => {
     );
     expect(run(directory).status).toBe(0);
   });
+
+  it('rejects removed card workflows and task schema discovery', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'remnote-command-refs-'));
+    await writeFile(
+      join(directory, 'removed.md'),
+      'remnote-cli card apply --plan cards.json\nremnote-cli card review-stats REM_ID\nremnote-cli flashcards apply\nremnote-cli contract --schema flashcards\nUse `card apply` for cards.\n'
+    );
+    const result = run(directory);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('card apply');
+    expect(result.stderr).toContain('card review-stats');
+    expect(result.stderr).toContain('flashcards');
+    expect(result.stderr).toContain('contract --schema');
+    expect(result.stderr).toContain('rem inspect');
+  });
+
+  it('accepts native Rem card commands and generic sdk card inspection', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'remnote-command-refs-'));
+    await writeFile(
+      join(directory, 'native.md'),
+      'remnote-cli rem create --content "Question >> Answer"\nremnote-cli rem update REM_ID --content "Question"\nremnote-cli rem update-answer ANSWER_ID --card-id REM_ID\nremnote-cli rem inspect REM_ID --fields cards,rawCards\nremnote-cli sdk card --help\nremnote-cli schema sdk.card\n'
+    );
+    expect(run(directory).status).toBe(0);
+  });
 });

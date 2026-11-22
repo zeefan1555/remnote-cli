@@ -3,7 +3,6 @@ import { createProgram } from '../../../src/remnote-cli/cli.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { readContentFileOrStdin } from '../../../src/remnote-cli/commands/content-input.js';
 import { EXIT } from '../../../src/remnote-cli/output/errors.js';
-import { summarizeReceipt } from '../../../src/remnote-cli/output/receipt-summary.js';
 import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 vi.mock('../../../src/remnote-cli/commands/content-input.js', () => ({
@@ -22,93 +21,7 @@ const receipt = {
   checks: [],
   errors: [],
 };
-const plans = {
-  flashcards: {
-    schemaVersion: 1,
-    reusedCardRemIds: ['card'],
-  },
-};
-const taskReceipt = {
-  schemaVersion: 1,
-  kind: 'flashcards',
-  batchKey: 'batch',
-  planHash: 'a'.repeat(64),
-  ids: { 'card:c': 'r' },
-  facts: [{ remId: 'r', textHash: 'a'.repeat(64), cardIds: ['c'], reviewHash: 'b'.repeat(64) }],
-  status: 'preview',
-  complete: true,
-  created: [],
-  updated: [],
-  reused: [],
-  skipped: [],
-  steps: [],
-  checks: [],
-  readWindow: { startedAt: 'start', finishedAt: 'end' },
-  errors: [],
-};
-
-describe('four composite commands', () => {
-  it('keeps every recovery identity when an answer write succeeds before facts fail', () => {
-    const partial = {
-      ...taskReceipt,
-      ids: {},
-      facts: [],
-      status: 'partial',
-      complete: false,
-      updated: [{ key: 'patch:p', remId: 'written-answer' }],
-      steps: [{ key: 'patch:p', state: 'verified', remIds: ['written-answer'] }],
-      errors: [{ code: 'operation_failed', message: 'Card facts read failed' }],
-    };
-    const summary = summarizeReceipt(partial);
-    for (const field of [
-      'created',
-      'updated',
-      'reused',
-      'skipped',
-      'steps',
-      'ids',
-      'facts',
-      'errors',
-    ] as const)
-      expect(summary[field]).toEqual(partial[field]);
-  });
-
-  it('summarizes a failed card apply without losing recovery evidence', async () => {
-    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
-    const result = {
-      ...taskReceipt,
-      status: 'partial',
-      complete: false,
-      checks: [
-        { kind: 'parent', remId: 'r', status: 'passed' },
-        { kind: 'references', remId: 'r', status: 'failed', message: 'Missing target' },
-      ],
-      errors: [{ code: 'incomplete', message: 'Failed proof' }],
-    };
-    vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(result);
-
-    const output = await runCliForTest([
-      'card',
-      'apply',
-      '--plan',
-      '-',
-      '--idempotency-key',
-      'batch',
-      '--apply',
-      '--summary',
-    ]);
-    const failure = parseFailure(output.stderr);
-    const details = failure.details as Record<string, unknown>;
-
-    expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
-    expect(details.ids).toEqual(result.ids);
-    expect(details.facts).toEqual(result.facts);
-    expect(details.planHash).toBe(result.planHash);
-    expect(details.checks).toEqual([result.checks[1]]);
-    expect((details.counts as { checks: number }).checks).toBe(2);
-    expect(details.errors).toEqual(result.errors);
-  });
-
+describe('inspection composite commands', () => {
   it('verification summary omits bodies and history', async () => {
     vi.mocked(readContentFileOrStdin).mockResolvedValue(
       JSON.stringify({
@@ -210,83 +123,6 @@ describe('four composite commands', () => {
     }
   );
 
-  it('wraps a flashcard inner plan and defaults preview', async () => {
-    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
-    const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue(taskReceipt);
-
-    const output = await runCliForTest([
-      'card',
-      'apply',
-      '--plan',
-      '-',
-      '--idempotency-key',
-      'batch',
-    ]);
-
-    expect(execute).toHaveBeenCalledExactlyOnceWith('flashcards_apply', {
-      schemaVersion: 1,
-      plan: plans.flashcards,
-      idempotencyKey: 'batch',
-      dryRun: true,
-    });
-    expect(parseSuccess(output.stdout)).toEqual(taskReceipt);
-  });
-
-  it.each(['preview', 'verified', 'partial', 'unknown', 'incomplete', 'conflict'])(
-    'applied receipt %s only succeeds for verified',
-    async (status) => {
-      vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
-      const execute = vi
-        .spyOn(DirectClient.prototype, 'execute')
-        .mockResolvedValue({ ...taskReceipt, status });
-
-      const output = await runCliForTest([
-        'card',
-        'apply',
-        '--plan',
-        '-',
-        '--idempotency-key',
-        'batch',
-        '--apply',
-      ]);
-
-      expect(execute).toHaveBeenCalledWith('flashcards_apply', {
-        schemaVersion: 1,
-        plan: plans.flashcards,
-        idempotencyKey: 'batch',
-        dryRun: false,
-      });
-      if (status === 'verified') {
-        expect(output.exitCode).toBe(0);
-        expect(parseSuccess(output.stdout)).toEqual({ ...taskReceipt, status });
-      } else {
-        expect(output.exitCode).toBe(EXIT.NOT_FOUND_OR_CONFLICT);
-        expect(parseFailure(output.stderr).details).toEqual({ ...taskReceipt, status });
-      }
-    }
-  );
-
-  it('never retries a failed apply', async () => {
-    vi.mocked(readContentFileOrStdin).mockResolvedValue(JSON.stringify(plans.flashcards));
-    const execute = vi
-      .spyOn(DirectClient.prototype, 'execute')
-      .mockRejectedValue(new Error('Outcome unknown'));
-
-    const output = await runCliForTest([
-      'card',
-      'apply',
-      '--plan',
-      '-',
-      '--idempotency-key',
-      'batch',
-      '--apply',
-    ]);
-
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(output.exitCode).toBe(EXIT.UNKNOWN_OUTCOME);
-    expect(parseFailure(output.stderr).type).toBe('unknown_outcome');
-  });
-
   it('leaf helps expose examples, checks, schemas and safety boundaries', () => {
     const program = createProgram('test');
     const output: string[] = [];
@@ -294,7 +130,6 @@ describe('four composite commands', () => {
       ['rem', 'create'],
       ['rem', 'context'],
       ['rem', 'verify', 'scope'],
-      ['card', 'apply'],
     ]) {
       let leaf = program;
       for (const name of path) leaf = leaf.commands.find((candidate) => candidate.name() === name)!;
@@ -313,16 +148,6 @@ describe('four composite commands', () => {
       'children',
       'cardRemIds',
       'zeroCards',
-      'dailyRemId',
-      'Patch/reuse-only',
-      'answerPatches',
-      'expectedTextHash',
-      'facts',
-      'ids',
-      'calendar freshness',
-      'after midnight',
-      'original recorded diary',
-      'active knowledge base',
       'never narrow away required',
     ])
       expect(text).toContain(phrase);

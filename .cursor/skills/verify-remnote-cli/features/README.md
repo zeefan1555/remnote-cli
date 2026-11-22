@@ -17,4 +17,4 @@
 
 - [CLI 表面](./cli-surface.md)：构建、单测、版本和帮助。
 - [连接状态](./connection-status.md)：`doctor --offline` 的离线边界。
-- [闪卡计划与写入](./flashcards.md)：`card apply` 预览与受控写入（真机）。
+- [Rem 卡片文本与检查](./rem-card-text.md)：原生文本创建、题面和答案更新、复习事实回读。

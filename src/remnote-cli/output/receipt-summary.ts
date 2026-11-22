@@ -2,7 +2,7 @@
 export function summarizeReceipt(receipt: Record<string, unknown>): Record<string, unknown> {
   const summary = { ...receipt };
   const counts: Record<string, number> = {};
-  for (const field of ['created', 'updated', 'reused', 'skipped', 'steps', 'checks', 'objects']) {
+  for (const field of ['checks', 'objects']) {
     const values = receipt[field];
     if (!Array.isArray(values)) continue;
     counts[field] = values.length;

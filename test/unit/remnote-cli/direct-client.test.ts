@@ -215,9 +215,10 @@ describe('local business dispatch', () => {
     expect(wire.constructed).toHaveBeenCalledOnce();
   });
 
-  it('rejects unknown actions and invalid plans before connecting', async () => {
+  it('rejects unknown and removed task actions before connecting', async () => {
     await expect(client.execute('eval', {})).rejects.toThrow('Unknown CLI action');
-    await expect(client.execute('flashcards_apply', {})).rejects.toThrow();
+    await expect(client.execute('flashcards_apply', {})).rejects.toThrow('Unknown CLI action');
+    await expect(client.execute('get_review_stats', {})).rejects.toThrow('Unknown CLI action');
     expect(wire.open).not.toHaveBeenCalled();
   });
 

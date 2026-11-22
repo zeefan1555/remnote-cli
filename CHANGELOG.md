@@ -16,7 +16,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Verify text, parent, children, card-item, CardIDs, creation time, scheduling,
   and available history after one text write. Report unverified writes as unknown
   outcomes without replay. Reuse the existing `rem inspect --fields cards,rawCards`
-  facts and shared card snapshot. Keep metadata updates and `card apply` intact.
+  facts and shared card snapshot. Keep metadata updates intact.
+
+### Removed
+
+- Remove the public `card` group, card plan apply, standalone review statistics,
+  task-plan schemas, and task-only executor and capability preflight.
+- Remove plan schema discovery from `contract` and the old task-plan integration
+  harness. Use `rem create`, `rem update`, `rem update-answer`, and
+  `rem inspect --fields cards,rawCards`. Keep low-level `sdk card` inspection.
 
 ### Fixed
 

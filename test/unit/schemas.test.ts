@@ -10,7 +10,6 @@ import {
   SearchByTagSchema,
   ReadNoteSchema,
   ListChildrenSchema,
-  ReviewStatsSchema,
   SetOutlineCollapsedSchema,
   ListTodosSchema,
   UpdateTodoSchema,
@@ -56,27 +55,6 @@ describe('SDK schemas', () => {
     );
     expect(() => SdkCallSchema.parse({ capability: 'x', extra: true })).toThrow();
     expect(() => GetSdkCapabilitiesSchema.parse({ extra: true })).toThrow();
-  });
-});
-
-describe('ReviewStatsSchema', () => {
-  it('accepts one exact review scope', () => {
-    expect(ReviewStatsSchema.parse({ remIds: ['rem-1', 'rem-2'] })).toEqual({
-      remIds: ['rem-1', 'rem-2'],
-    });
-    expect(ReviewStatsSchema.parse({ rootRemId: 'root-1' })).toEqual({ rootRemId: 'root-1' });
-    expect(ReviewStatsSchema.parse({ tagRemId: 'tag-1' })).toEqual({ tagRemId: 'tag-1' });
-    expect(ReviewStatsSchema.parse({ today: true })).toEqual({ today: true });
-  });
-
-  it('rejects missing, conflicting, empty, or oversized selectors', () => {
-    expect(() => ReviewStatsSchema.parse({})).toThrow();
-    expect(() => ReviewStatsSchema.parse({ remIds: ['rem-1'], today: true })).toThrow();
-    expect(() => ReviewStatsSchema.parse({ remIds: [] })).toThrow();
-    expect(() => ReviewStatsSchema.parse({ remIds: [''] })).toThrow();
-    expect(() =>
-      ReviewStatsSchema.parse({ remIds: Array.from({ length: 101 }, (_, i) => `r${i}`) })
-    ).toThrow();
   });
 });
 

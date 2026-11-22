@@ -108,7 +108,7 @@ RemNote 安装时的官方 scope 授权保留。它属于 RemNote 权限模型�
 
 - [x] 依赖：CLI-2、CLI-3、CLI-4 均已实现。
 - [x] 允许文件：contract command/schema、CLI registration、generator/check、generated JSON、tests、README/command/skill/plan/version docs and CI/code-quality wiring.
-- [x] 改动：增加 `remnote-cli contract` 与 `contract --schema flashcards|wiki|workspace`。输出 protocol 2、三个 Bridge actions、JSON Schemas、按变体 capability、receipt statuses、workspace boundary 和 exit codes。命令不创建 connection client。
+- [x] 历史改动：增加 `remnote-cli contract` 与计划 schema 查询。RN-CLI-3 删除公开计划后，contract 仅输出 protocol 2、三个 Bridge actions、SDK identity、命令元数据、output/error contract 和 exit codes；输入 schema 用 `schema <command-path>` 查询。命令不创建 connection client。
 - [x] 用户可见结果：Codex 插件可在 RemNote 关闭时读取 contract；生成 JSON 文件由 check 命令验证无漂移。
 - [x] 单测：合同生成与提交产物相等；全部 schema 可从命令输出；未知 schema exit 1；CLI command registry 含 `contract`。
 - [x] live：构建后的 `contract --json` 成功输出 protocol/actions/plans，不启动 loopback 监听器。

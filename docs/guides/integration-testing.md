@@ -28,7 +28,6 @@ Wrapper entrypoints:
 ```bash
 ./run-agent-integration-test.sh --preflight-only
 ./run-agent-integration-test.sh --yes --command status --text
-./run-agent-integration-test.sh --yes --flashcards-only "EXISTING HOME CONCEPT TITLE"
 ./run-agent-integration-test.sh --yes --transactions-only
 ./run-agent-integration-test.sh --yes
 ```
@@ -36,35 +35,6 @@ Wrapper entrypoints:
 The wrapper builds the candidate CLI. Every spawned CLI command owns and closes
 its protocol 2 WebSocket session. `--suite` is removed; unknown wrapper flags
 fail before live work. Do not invoke the TypeScript live runner directly.
-
-## Two-Card Acceptance
-
-`--flashcards-only` runs a targeted task without table/media fixtures:
-
-1. Resolve one existing HOME folder, the specified exact HOME concept and the
-   explicit host date's native daily document.
-2. Preview a two-card plan and read prerequisites again to check no content changed.
-3. Apply once with a stable recorded idempotency key.
-4. Verify HOME tag, parent/child edges, exact question/answer text
-   and two distinct native card IDs. Card Cluster (`cc`) stays off unless the
-   plan sets `cardCluster: true`.
-5. Replay the same plan/key and verify unchanged Rem IDs, card IDs, content, child
-   lists and review history.
-6. Use only existing public `sdk` commands to read both card Rems and count the
-   same native card IDs. Keep the plugin asset hash unchanged throughout this
-   CLI-only composition; compare status identity/catalog before and after.
-
-The workflow requires plugin ID `remnote-cli-bridge` and
-native `app.getPlatform() === 'app'`; web sessions are not desktop acceptance.
-
-The runner creates a private temporary evidence directory and prints its path.
-It retains the plan, key, command results and exact IDs for diagnosis. Existing
-prerequisites are never deleted. The date API can create today's daily document
-if absent; the plan itself never resolves or creates dates.
-
-On a partial, unknown or failed apply, stop. Preserve the original plan, key and
-journal; inspect known IDs before another authorized action. Never start a new
-batch to bypass uncertainty.
 
 ## General Suite
 

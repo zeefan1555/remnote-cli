@@ -132,17 +132,6 @@ async function stateDirectoryCheck(stateHome: string): Promise<DoctorCheck> {
   }
 }
 
-function requiredCapabilityIds(): string[] {
-  const ids = new Set<string>();
-  function visit(value: unknown): void {
-    if (typeof value === 'string') ids.add(value);
-    else if (Array.isArray(value)) for (const item of value) visit(item);
-    else if (isRecord(value)) for (const item of Object.values(value)) visit(item);
-  }
-  visit(buildCliContract().requiredCapabilities);
-  return [...ids].sort();
-}
-
 async function journalCheck(stateHome: string, knowledgeBaseId: string): Promise<DoctorCheck> {
   const kbKey = createHash('sha256').update(knowledgeBaseId).digest('hex');
   const directory = join(stateHome, 'state', kbKey);
@@ -253,7 +242,6 @@ function skippedBridgeChecks(): DoctorCheck[] {
     'knowledge_base',
     'sdk_catalog',
     'sdk_facts_sync',
-    'capabilities',
     'journal',
   ].map((id) => ({ id, status: 'skip', message: 'Skipped by --offline' }));
 }
@@ -383,32 +371,12 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
             liveCatalogHash: catalog.sdkCatalogHash,
           },
         });
-        const supported = new Set(
-          catalog.capabilities
-            .filter((capability) => capability.status === 'supported')
-            .map((capability) => capability.id)
-        );
-        const missing = requiredCapabilityIds().filter((id) => !supported.has(id));
-        checks.push({
-          id: 'capabilities',
-          status: missing.length === 0 ? 'pass' : 'fail',
-          message:
-            missing.length === 0
-              ? 'All required SDK capabilities are supported'
-              : 'Required SDK capabilities are missing',
-          details: { missing },
-        });
       } catch (error) {
         checks.push({
           id: 'sdk_catalog',
           status: 'fail',
           message: 'SDK catalog cannot be verified',
           details: { error: error instanceof Error ? error.message : String(error) },
-        });
-        checks.push({
-          id: 'capabilities',
-          status: 'skip',
-          message: 'Skipped because the SDK catalog is unavailable',
         });
       }
 

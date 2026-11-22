@@ -23,7 +23,6 @@ import { errorCasesWorkflow } from './workflows/06-error-cases.js';
 import { readTableWorkflow } from './workflows/07-read-table.js';
 import { setPropertyWorkflow } from './workflows/08-set-property.js';
 import { mediaWorkflow } from './workflows/09-media.js';
-import { flashcardsWorkflow } from './workflows/10-flashcards.js';
 import { transactionsWorkflow } from './workflows/11-transactions.js';
 import {
   MEDIA_FIXTURE_TITLE,
@@ -334,14 +333,6 @@ async function main(): Promise<void> {
 
   if (process.argv.includes('--transactions-only')) {
     const result = await transactionsWorkflow({ cli, runId });
-    printWorkflowResult(0, result);
-    printSummary([result], Date.now() - overallStart);
-    process.exit(result.steps.every((step) => step.passed) ? 0 : 1);
-  }
-
-  if (process.argv.includes('--flashcards-only')) {
-    const tagTitle = process.argv[process.argv.indexOf('--flashcards-only') + 1];
-    const result = await flashcardsWorkflow({ cli, runId }, tagTitle);
     printWorkflowResult(0, result);
     printSummary([result], Date.now() - overallStart);
     process.exit(result.steps.every((step) => step.passed) ? 0 : 1);

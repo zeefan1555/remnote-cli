@@ -14,15 +14,9 @@ while [[ $# -gt 0 ]]; do
     --preflight-only) preflight_only=1; shift ;;
     --command) modes=$((modes + 1)); args=("$@"); break ;;
     --transactions-only) modes=$((modes + 1)); args+=("$1"); shift ;;
-    --flashcards-only)
-      modes=$((modes + 1))
-      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-        printf '%s\n' '--flashcards-only requires an existing HOME concept title.' >&2; exit 1
-      fi
-      args+=("$1" "$2"); shift 2 ;;
     --help|-h)
       printf '%s\n' 'Usage: ./run-agent-integration-test.sh --preflight-only' \
-        '       ./run-agent-integration-test.sh --yes [--flashcards-only <HOME concept>]' \
+        '       ./run-agent-integration-test.sh --yes' \
         '       ./run-agent-integration-test.sh --yes --transactions-only' \
         '       ./run-agent-integration-test.sh --yes --command <CLI arguments...>' \
         'Uses the fixed zero-configuration Bridge endpoint. Refuses an occupied port; never starts or stops a daemon.'
