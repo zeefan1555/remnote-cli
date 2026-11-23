@@ -20,7 +20,7 @@ echo "========================================="
 echo ""
 
 # 1. TypeScript Type Checking
-echo -e "${YELLOW}[1/6] Running TypeScript type check...${NC}"
+echo -e "${YELLOW}[1/7] Running TypeScript type check...${NC}"
 if npm run typecheck; then
   echo -e "${GREEN}✓ Type check passed${NC}"
 else
@@ -29,8 +29,18 @@ else
 fi
 echo ""
 
-# 2. Generated SDK constants
-echo -e "${YELLOW}[2/6] Checking generated SDK constants...${NC}"
+# 2. Release version policy
+echo -e "${YELLOW}[2/7] Checking release version policy...${NC}"
+if npm run check:version; then
+  echo -e "${GREEN}✓ Release version policy is current${NC}"
+else
+  echo -e "${RED}✗ Release version policy is inconsistent${NC}"
+  FAILURES=$((FAILURES + 1))
+fi
+echo ""
+
+# 3. Generated SDK constants and CLI contract
+echo -e "${YELLOW}[3/7] Checking generated SDK constants...${NC}"
 if npm run check:sdk-constants; then
   echo -e "${GREEN}✓ Generated SDK constants is current${NC}"
 else
@@ -47,8 +57,8 @@ else
 fi
 echo ""
 
-# 3. ESLint
-echo -e "${YELLOW}[3/6] Running ESLint...${NC}"
+# 4. ESLint
+echo -e "${YELLOW}[4/7] Running ESLint...${NC}"
 if npm run lint; then
   echo -e "${GREEN}✓ Lint check passed${NC}"
 else
@@ -57,8 +67,8 @@ else
 fi
 echo ""
 
-# 4. Prettier Format Check
-echo -e "${YELLOW}[4/6] Running Prettier format check...${NC}"
+# 5. Prettier Format Check
+echo -e "${YELLOW}[5/7] Running Prettier format check...${NC}"
 if npm run format:check; then
   echo -e "${GREEN}✓ Format check passed${NC}"
 else
@@ -68,8 +78,8 @@ else
 fi
 echo ""
 
-# 5. Tests and coverage
-echo -e "${YELLOW}[5/6] Running tests with coverage...${NC}"
+# 6. Tests and coverage
+echo -e "${YELLOW}[6/7] Running tests with coverage...${NC}"
 # Vitest creates worker files under coverage/.tmp. Start every coverage run from
 # an empty generated directory so a preceding non-coverage test run cannot race
 # its cleanup with the V8 provider.
@@ -82,8 +92,8 @@ else
 fi
 echo ""
 
-# 6. Build and installed-bin smoke
-echo -e "${YELLOW}[6/6] Building and checking the CLI executable...${NC}"
+# 7. Build and installed-bin smoke
+echo -e "${YELLOW}[7/7] Building and checking the CLI executable...${NC}"
 if npm run build && npm run test:bin; then
   echo -e "${GREEN}✓ Build and executable smoke passed${NC}"
 else

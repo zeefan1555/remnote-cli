@@ -47,10 +47,13 @@ Required proof scopes cannot be narrowed merely to pass.
 
 ```bash
 npm run typecheck
+npm run check:version
 npm run check:sdk-constants
 ./code-quality.sh
 npm run build
 ```
+Version changes follow [the versioning policy](docs/guides/versioning.md). Keep
+`package.json`, `package-lock.json` and the current `CHANGELOG.md` heading aligned.
 
 If Node is unavailable, first run `source ./node-check.sh`.
 SDK constants are generated from the installed official declaration files; do not
@@ -92,6 +95,7 @@ belong in this repository and in
 functional and documentation changes in `CHANGELOG.md`.
 
 Use this repository's quality and build commands and its GitHub Actions CI.
+Record release versions according to [the versioning policy](docs/guides/versioning.md).
 The original fork adoption workflow is historical guidance for the original forks,
 not this repository's delivery contract; do not modify those forks or their PRs.
 Commit and push to this repository are authorized. Package publication is not

@@ -6,7 +6,7 @@ describe('direct CLI package', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
     const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
     expect(pkg.private).toBe(true);
-    expect(pkg.version).toBe('0.30.1');
+    expect(pkg.version).toBe('0.1.30');
     expect(lock.version).toBe(pkg.version);
     expect(lock.packages[''].version).toBe(pkg.version);
     expect(pkg.bin).toEqual({ 'remnote-cli': 'dist/remnote-cli/index.js' });
@@ -15,6 +15,7 @@ describe('direct CLI package', () => {
     expect(Object.keys(pkg.dependencies).sort()).toEqual(['commander', 'ws', 'zod']);
     expect(pkg.scripts.build).toContain('tsc');
     expect(pkg.scripts.build).not.toContain('mcpb');
+    expect(pkg.scripts['check:version']).toBe('node scripts/check-version.mjs');
     expect(pkg.scripts['test:bin']).toBe('node scripts/smoke-built-cli.mjs');
     expect(pkg.scripts).not.toHaveProperty('prepublishOnly');
     for (const field of ['files', 'repository', 'bugs', 'homepage', 'keywords'])

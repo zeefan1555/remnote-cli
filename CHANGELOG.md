@@ -2,10 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic
-Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+From release 0.1.30 onward, versions follow the project's
+[step-based version policy](docs/guides/versioning.md).
 
-## [Unreleased]
+## [0.1.30] - 2026-11-23
 
 ### Added
 
@@ -17,6 +18,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   and available history after one text write. Report unverified writes as unknown
   outcomes without replay. Reuse the existing `rem inspect --fields cards,rawCards`
   facts and shared card snapshot. Keep metadata updates intact.
+
+### Changed
+
+- Adopt `0.<minor>.<step>` releases with steps from `1` through `100`;
+  `0.1.100` advances to `0.2.1`.
+- Reset the current release line to `0.1.30` across the package, lockfile,
+  changelog and executable.
 
 ### Removed
 
@@ -30,6 +38,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Reject `rem update --content` combined with title or alias changes before any
   Bridge execution. Run separate commands for text and metadata updates.
+
+### Versioning
+
+Historical headings below use an earlier version sequence. Their entries are
+retained verbatim; their numeric order does not describe the current increment
+policy.
 
 ## [0.30.1] - 2026-11-23
 

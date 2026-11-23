@@ -27,7 +27,8 @@ current npm prefix. Later builds in the checkout update the linked command.
 
 - `package.json` remains private.
 - Publish-only package metadata and `prepublishOnly` are removed.
-- Release version is `0.28.0`.
+- The current release version is `0.1.30`; [versioning](versioning.md) documents
+  the release sequence.
 - `npm run test:bin` checks the built executable version, contract and offline
   doctor.
 - CI runs the executable smoke after the build and fails if the tracked tree
