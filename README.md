@@ -340,6 +340,7 @@ For detailed diagnosis, see [troubleshooting](docs/guides/remnote-cli-troublesho
 - [Advanced use cases](docs/advanced-use-cases.md)
 - [Development setup](docs/guides/development-setup.md)
 - [Integration testing](docs/guides/integration-testing.md)
+- [Versioning](docs/guides/versioning.md)
 - [Changelog](CHANGELOG.md)
 
 MIT License. See [LICENSE](LICENSE).

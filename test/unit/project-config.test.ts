@@ -46,6 +46,7 @@ describe('project config', () => {
     const qualityScript = readFileSync('code-quality.sh', 'utf-8');
 
     expect(qualityScript).toContain('npm run test:coverage');
+    expect(qualityScript).toContain('npm run check:version');
     expect(qualityScript).toContain('npm run test:bin');
     expect(qualityScript).not.toContain('if npm test;');
   });

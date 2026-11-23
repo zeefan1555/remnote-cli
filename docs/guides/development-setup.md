@@ -26,8 +26,9 @@ companion plugin and update the cross-repo contract. Generate SDK constants with
 
 ## Checks
 
-`./code-quality.sh` runs typecheck, generated-file freshness, lint, formatting,
-unit tests and coverage. Tests use Vitest and live under `test/unit/`.
+`./code-quality.sh` runs typecheck, release-version consistency, generated-file
+freshness, lint, formatting, unit tests and coverage. Tests use Vitest and live under
+`test/unit/`.
 `npm run build` checks the production entrypoint separately.
 
 Live tests are separate, explicitly authorized operations through

@@ -2,9 +2,9 @@
 
 ## Local Checks
 
-`./code-quality.sh` validates TypeScript, the generated SDK catalog/constants,
-lint, formatting, regression tests and coverage without live RemNote. Build both
-repositories after cross-boundary changes.
+`./code-quality.sh` validates TypeScript, the release version policy, the generated
+SDK catalog/constants, lint, formatting, regression tests and coverage without live
+RemNote. Build both repositories after cross-boundary changes.
 
 Tests cover live KB binding, Origin checks, official SDK scopes, bounded JSON,
 timeouts, disconnects, transaction acknowledgement, metadata recovery and CLI
