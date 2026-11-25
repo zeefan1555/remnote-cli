@@ -6,7 +6,7 @@ describe('direct CLI package', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
     const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
     expect(pkg.private).toBe(true);
-    expect(pkg.version).toBe('0.1.31');
+    expect(pkg.version).toBe('0.1.32');
     expect(lock.version).toBe(pkg.version);
     expect(lock.packages[''].version).toBe(pkg.version);
     expect(pkg.bin).toEqual({ 'remnote-cli': 'dist/remnote-cli/index.js' });

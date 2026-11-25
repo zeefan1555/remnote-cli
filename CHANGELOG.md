@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 From release 0.1.30 onward, versions follow the project's
 [step-based version policy](docs/guides/versioning.md).
 
+## [0.1.32] - 2026-11-25
+
+### Changed
+
+- Accept ordinary Markdown in `card create --content`: real newlines and a blank
+  line between answer bullets now produce readable section spacing.
+- Convert section blank lines to RemNote's empty answer items, collapse repeated
+  blanks, and remove leading, trailing and between-card blanks. Generic `rem
+  create` behavior remains unchanged.
+
 ## [0.1.31] - 2026-11-25
 
 ### Fixed

@@ -267,8 +267,23 @@ examples.
 
 ```bash
 remnote-cli card create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
-remnote-cli card create --content $'Question >>>\n  - Answer line one\n  - Answer line two' --parent-id PARENT_REM_ID
+
+remnote-cli card create \\
+  --content '- Question >>>
+  - Why
+  - Reason
+
+  - How
+  - Action' \\
+  --parent-id PARENT_REM_ID \\
+  --tag-ids HOME_TAG_ID TERM_TAG_ID \\
+  --kb-id KB_ID
 ```
+
+Write multiline cards as ordinary Markdown with real newlines. A blank line
+between answer bullets marks a section boundary; `card create` converts it to
+RemNote's empty answer item. Leading, trailing and multi-card blank lines are
+removed. Ordinary `rem create` input keeps its existing behavior.
 
 One `--content` value can contain multiple cards. The native parser determines the
 card direction and type. Use one parent and tag set per invocation. Read the created Rem IDs with

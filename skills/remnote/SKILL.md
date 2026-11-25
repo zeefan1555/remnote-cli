@@ -166,12 +166,28 @@ requires `--allow-destructive`. Use stale-state guards where provided.
 ## Review card creation
 
 Run `remnote-cli card create --help` for official card syntax, then pass the
-reviewed text directly to `--content`. One invocation uses one parent and tag set.
+reviewed text directly to `--content`. Write multiline cards as ordinary Markdown
+with real newlines. A blank line between answer bullets marks a section boundary;
+the CLI converts it to RemNote's empty answer item. Leading, trailing and
+between-card blank lines are removed. One invocation uses one parent and tag set.
 RemNote determines the technical card type from the text; the CLI has no
-`--card-type` option and no card plan or content-file mode.
+`--card-type` option and no card plan or content-file mode. Ordinary `rem create`
+keeps its existing content handling.
 
 ```bash
 remnote-cli card create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
+
+remnote-cli card create \\
+  --content '- Question >>>
+  - Why
+  - Reason
+
+  - How
+  - Action' \\
+  --parent-id PARENT_REM_ID \\
+  --tag-ids TAG_REM_ID \\
+  --kb-id KB_ID
+
 remnote-cli rem update QUESTION_REM_ID --content "New question" --expected-text-hash CURRENT_TEXT_HASH
 remnote-cli rem update-answer ANSWER_REM_ID --card-id QUESTION_REM_ID --content "New answer" --expected-text-hash CURRENT_ANSWER_TEXT_HASH
 remnote-cli rem inspect QUESTION_REM_ID --fields cards,rawCards
