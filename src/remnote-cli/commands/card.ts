@@ -14,14 +14,16 @@ remnote-cli card create \\
   --content '- Question >>>
   - Why
   - Reason
-
+  -
   - How
   - Action' \\
   --parent-id <PARENT_REM_ID>
 
-One blank line between answer bullets marks a section boundary. card create
-creates and verifies an empty answer item for each boundary.
-Leading, trailing and multi-card blank lines are removed.
+Use one empty answer bullet (two spaces followed by a hyphen) between answer
+groups. card create verifies
+that it becomes an empty native answer item. A single blank line between answer
+bullets remains accepted and is normalized to one separator. Leading, trailing
+and multi-card blank lines are removed.
 If creation or verification fails, read the reported IDs before another write.
 
 One --content value may contain multiple cards. RemNote's native parser determines
@@ -33,7 +35,7 @@ card-format Skill and lint the reviewed text before calling this command.
 
 Official syntax: https://help.remnote.com/en/articles/9252072-how-to-import-flashcards-from-text`;
 
-/** Preserve ordinary Markdown answer-group spacing as empty Rem answer items. */
+/** Normalize blank-line convenience syntax to an explicit empty answer bullet. */
 export function normalizeCardMarkdown(content: string): string {
   const lines = content.replace(/\r\n?/g, '\n').split('\n');
   const output: string[] = [];
@@ -45,7 +47,15 @@ export function normalizeCardMarkdown(content: string): string {
       continue;
     }
     const isAnswer = /^ {2}-(?:\s|$)/.test(line);
-    if (pendingBlank && output.length > 0 && isAnswer && /^ {2}-(?:\s|$)/.test(output.at(-1)!))
+    const isEmptyAnswer = /^ {2}-[ \t]*$/.test(line);
+    if (
+      pendingBlank &&
+      !isEmptyAnswer &&
+      output.length > 0 &&
+      isAnswer &&
+      /^ {2}-(?:\s|$)/.test(output.at(-1)!) &&
+      !/^ {2}-[ \t]*$/.test(output.at(-1)!)
+    )
       output.push('  -');
     output.push(line);
     pendingBlank = false;

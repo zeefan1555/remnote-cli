@@ -61,13 +61,34 @@ describe('native Rem card commands', () => {
     expect(result.stdout).toContain('Question >>>');
     expect(result.stdout).toMatch(/--content '- Question >>>\n\s+- Why\n\s+- Reason/);
     expect(result.stdout).toContain('ordinary Markdown with real newlines');
-    expect(result.stdout).toContain('creates and verifies an empty answer item');
+    expect(result.stdout).toContain(
+      'Use one empty answer bullet (two spaces followed by a hyphen)'
+    );
+    expect(result.stdout).toContain('becomes an empty native answer item');
     expect(result.stdout).toContain("RemNote's native parser determines");
     expect(result.stdout).toContain('https://help.remnote.com/en/articles/9252072');
     expect(result.stdout).not.toContain("$'");
     expect(result.stdout).not.toContain('--card-type');
     expect(result.stdout).not.toContain('--content-file');
     expect(result.stdout).not.toContain('card apply');
+  });
+
+  it('accepts explicit empty bullets and removes surrounding blank lines', async () => {
+    const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
+      remIds: ['question'],
+      titles: ['Question'],
+    });
+    const result = await runCliForTest([
+      'card',
+      'create',
+      '--content',
+      'Question >>>\n  - Why\n  - Reason\n\n  -\n\n  - How\n  - Action',
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(execute).toHaveBeenCalledWith('create_card', {
+      content: 'Question >>>\n  - Why\n  - Reason\n  -\n  - How\n  - Action',
+    });
+    execute.mockRestore();
   });
 
   it('passes ordinary Markdown to create_card with blank answer sections preserved', async () => {

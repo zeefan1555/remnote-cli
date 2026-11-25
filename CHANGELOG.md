@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 From release 0.1.30 onward, versions follow the project's
 [step-based version policy](docs/guides/versioning.md).
 
+## [0.1.34] - 2026-11-25
+
+### Changed
+
+- Make the explicit empty answer bullet (`  -`) the canonical multiline-card
+  separator. Keep accepting a single blank line as convenience, normalize it to
+  one explicit separator, and remove blank lines around an explicit bullet.
+
 ## [0.1.33] - 2026-11-25
 
 ### Fixed
