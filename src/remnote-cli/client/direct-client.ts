@@ -23,6 +23,7 @@ const require = createRequire(import.meta.url);
 const { version } = require('../../../package.json') as { version: string };
 const operations = {
   create_note: ['createNote', schemas.CreateNoteSchema],
+  create_card: ['createCard', schemas.CreateNoteSchema],
   append_journal: ['appendJournal', schemas.AppendJournalSchema],
   search: ['search', schemas.SearchSchema],
   search_by_tag: ['searchByTag', schemas.SearchByTagSchema],

@@ -2469,7 +2469,8 @@ export class RemAdapter {
     operation: string,
     input: unknown,
     fn: (remember: (remIds: string[]) => Promise<void>) => Promise<T>,
-    beforeMutation?: () => void
+    beforeMutation?: () => void,
+    uncertainOnFailure = false
   ): Promise<T> {
     this.assertWriteEnabled(beforeMutation);
     const key = `${kind}:${randomUUID()}`;
@@ -2500,6 +2501,22 @@ export class RemAdapter {
         kind === 'destructive'
           ? 'Write outcome unknown; destructive write may have partially completed or completed before the error'
           : 'Additive writes may be partial';
+      if (uncertainOnFailure) {
+        throw new CliFailure(
+          'unknown_outcome',
+          'card_create_unverified',
+          'Card creation could not be verified; read the known Rem IDs before another write.',
+          {
+            retryable: false,
+            details: {
+              recoveryKey: key,
+              knownRemIds: entry.remIds,
+              reason: error instanceof Error ? error.message : String(error),
+            },
+            cause: error,
+          }
+        );
+      }
       throw new Error(
         `${error instanceof Error ? error.message : String(error)}. ${outcome}; no rollback or retry was attempted. Recovery key: ${key}; known Rem IDs: ${entry.remIds.join(', ') || 'none returned'}. Read back before retry.`,
         { cause: error }
@@ -2991,6 +3008,113 @@ export class RemAdapter {
       .join('\n');
   }
 
+  private prepareCardSeparators(content: string): { content: string; tokens: string[] } {
+    let prefix: string;
+    do {
+      prefix = 'REMNOTECARDSEPARATOR' + randomUUID().replaceAll('-', '');
+    } while (content.includes(prefix));
+    const lines = content.split('\n');
+    const tokens: string[] = [];
+    let inMultilineCard = false;
+    const nonemptyAnswer = (line: string | undefined): boolean =>
+      line !== undefined && /^ {2}-[ \t]+\S/.test(line);
+    for (const [index, line] of lines.entries()) {
+      if (/^\S/.test(line)) inMultilineCard = />>>\s*$/.test(line);
+      if (
+        inMultilineCard &&
+        /^ {2}-[ \t]*$/.test(line) &&
+        nonemptyAnswer(lines[index - 1]) &&
+        nonemptyAnswer(lines[index + 1])
+      ) {
+        const token = prefix + tokens.length + 'X';
+        tokens.push(token);
+        lines[index] = '  - ' + token;
+      }
+    }
+    return { content: lines.join('\n'), tokens };
+  }
+
+  private async restoreCardSeparators(
+    createdRems: PluginRem[],
+    tokens: string[],
+    beforeMutation?: () => void
+  ): Promise<void> {
+    if (tokens.length === 0) return;
+    const ids = new Set(createdRems.map((rem) => rem._id));
+    const texts = await Promise.all(createdRems.map((rem) => this.extractText(rem.text)));
+    const markers: Array<{
+      index: number;
+      token: string;
+      remId: string;
+      parentId: string;
+      cardIds: string[];
+    }> = [];
+    for (const token of tokens) {
+      const matching = texts.flatMap((text, index) => (text.includes(token) ? [index] : []));
+      if (matching.length !== 1 || texts[matching[0]] !== token)
+        throw new Error('Could not uniquely identify a created card separator');
+      const index = matching[0];
+      const rem = await this.plugin.rem.findOne(createdRems[index]._id);
+      const parent = rem && (await rem.getParentRem());
+      if (
+        !rem ||
+        !parent ||
+        !ids.has(parent._id) ||
+        rem.parent !== parent._id ||
+        (await this.extractText(rem.text)) !== token ||
+        !(await rem.isCardItem())
+      )
+        throw new Error('Created separator does not belong to a new multiline card');
+      const cards = await parent.getCards();
+      const cardIds = cards
+        .filter((card) => card.remId === parent._id)
+        .map((card) => card._id)
+        .sort();
+      const siblings = await parent.getChildrenRem();
+      const position = siblings.findIndex((sibling) => sibling._id === rem._id);
+      if (
+        cardIds.length === 0 ||
+        position <= 0 ||
+        position >= siblings.length - 1 ||
+        !(await siblings[position - 1].isCardItem()) ||
+        !(await siblings[position + 1].isCardItem())
+      )
+        throw new Error('Created separator is not between two card answer items');
+      markers.push({ index, token, remId: rem._id, parentId: parent._id, cardIds });
+    }
+    for (const marker of markers) {
+      const current = await this.plugin.rem.findOne(marker.remId);
+      if (
+        !current ||
+        current.parent !== marker.parentId ||
+        (await this.extractText(current.text)) !== marker.token ||
+        !(await current.isCardItem())
+      )
+        throw new Error('Created card separator changed before it could be marked');
+      this.assertWriteEnabled(beforeMutation);
+      await current.setText([]);
+      this.assertWriteEnabled(beforeMutation);
+      await current.setIsCardItem(true);
+      const verified = await this.plugin.rem.findOne(marker.remId);
+      const parent = verified && (await verified.getParentRem());
+      if (
+        !verified ||
+        !parent ||
+        parent._id !== marker.parentId ||
+        (await this.extractText(verified.text)) !== '' ||
+        !(await verified.isCardItem())
+      )
+        throw new Error('Created card separator could not be verified as an empty answer item');
+      const cardIds = (await parent.getCards())
+        .filter((card) => card.remId === parent._id)
+        .map((card) => card._id)
+        .sort();
+      if (JSON.stringify(cardIds) !== JSON.stringify(marker.cardIds))
+        throw new Error('Created card identity changed while marking its separator');
+      createdRems[marker.index] = verified;
+    }
+  }
+
   /** Create with the native parser; ordinary writes never require deletion permission. */
   private async createRemsFromMarkdown(
     markdown: string,
@@ -3201,9 +3325,14 @@ export class RemAdapter {
    * Supports both simple note creation and hierarchical markdown import
    * Supports flashcards create through RemNote markdown syntax.
    */
+  async createCard(params: CreateNoteParams): Promise<{ remIds: string[]; titles: string[] }> {
+    return await this.createNote(params, undefined, true);
+  }
+
   async createNote(
     params: CreateNoteParams,
-    beforeMutation?: () => void
+    beforeMutation?: () => void,
+    preserveCardSeparators = false
   ): Promise<{ remIds: string[]; titles: string[] }> {
     this.assertWriteEnabled(beforeMutation);
 
@@ -3248,10 +3377,15 @@ export class RemAdapter {
     // Scenario 1: title provided
     if (title) {
       let preparedContent: PreparedMarkdown | undefined;
+      let separatorTokens: string[] = [];
       if (hasContent) {
         const normalizedContent = this.normalizeContent(content);
         if (normalizedContent) {
-          preparedContent = await this.prepareMarkdownIdReferenceTokens(normalizedContent);
+          const prepared = preserveCardSeparators
+            ? this.prepareCardSeparators(normalizedContent)
+            : { content: normalizedContent, tokens: [] };
+          separatorTokens = prepared.tokens;
+          preparedContent = await this.prepareMarkdownIdReferenceTokens(prepared.content);
         }
       }
 
@@ -3289,7 +3423,10 @@ export class RemAdapter {
                 beforeMutation,
                 remember
               );
+              if (separatorTokens.length && !createdRems.length)
+                throw new Error('No Rems created for card separators');
               if (createdRems.length > 0) {
+                await this.restoreCardSeparators(createdRems, separatorTokens, beforeMutation);
                 const results = await this.extractRemResults(createdRems);
                 remIds.push(...results.remIds);
                 titles.push(...results.titles);
@@ -3301,7 +3438,8 @@ export class RemAdapter {
 
           return { remIds, titles };
         },
-        beforeMutation
+        beforeMutation,
+        preserveCardSeparators
       );
     } else if (hasContent) {
       // Scenario 2: content only
@@ -3311,7 +3449,10 @@ export class RemAdapter {
         throw new Error('Content is empty');
       }
 
-      const preparedContent = await this.prepareMarkdownIdReferenceTokens(normalizedContent);
+      const prepared = preserveCardSeparators
+        ? this.prepareCardSeparators(normalizedContent)
+        : { content: normalizedContent, tokens: [] };
+      const preparedContent = await this.prepareMarkdownIdReferenceTokens(prepared.content);
       return await this.runJournaledWrite(
         'additive',
         'create_note',
@@ -3331,6 +3472,7 @@ export class RemAdapter {
             throw new Error('No Rems created from markdown content');
           }
 
+          await this.restoreCardSeparators(createdRems, prepared.tokens, beforeMutation);
           await this.addTagRemIdsToTopLevelRems(createdRems, parentId, tagRemIds, beforeMutation);
 
           const results = await this.extractRemResults(createdRems);
@@ -3339,7 +3481,8 @@ export class RemAdapter {
 
           return { remIds, titles };
         },
-        beforeMutation
+        beforeMutation,
+        preserveCardSeparators
       );
     } else {
       throw new Error('create_note requires either title or content');

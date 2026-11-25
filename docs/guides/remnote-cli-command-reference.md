@@ -202,7 +202,10 @@ Behavior rules:
 
 - Multiline content uses ordinary Markdown and real newlines, not literal `\n`.
 - A blank line between answer bullets marks a section boundary. The CLI converts
-  it to RemNote's empty answer item so section spacing survives the native parser.
+  it to RemNote's empty answer item, then verifies its empty text, answer-item
+  status, parent and native card identity before reporting success.
+- Failed creation or verification reports an unknown outcome with known IDs and a
+  recovery key; read back before attempting another write.
 - Leading, trailing and between-card blank lines are removed.
 - One `--content` value may contain multiple cards.
 - RemNote determines the technical card type and direction from the official syntax. There is no card-type option.

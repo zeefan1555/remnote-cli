@@ -169,7 +169,10 @@ Run `remnote-cli card create --help` for official card syntax, then pass the
 reviewed text directly to `--content`. Write multiline cards as ordinary Markdown
 with real newlines. A blank line between answer bullets marks a section boundary;
 the CLI converts it to RemNote's empty answer item. Leading, trailing and
-between-card blank lines are removed. One invocation uses one parent and tag set.
+between-card blank lines are removed. The command verifies separator text,
+card-item status, parent, and native card identity before returning success. A
+failed verification is an unknown outcome; use the reported IDs to read back,
+not to replay the write. One invocation uses one parent and tag set.
 RemNote determines the technical card type from the text; the CLI has no
 `--card-type` option and no card plan or content-file mode. Ordinary `rem create`
 keeps its existing content handling.

@@ -15,13 +15,17 @@ export interface CreateCommandInput extends Record<string, unknown> {
   aliases?: string[];
 }
 
-export async function executeCreate(program: Command, payload: CreateCommandInput): Promise<void> {
+export async function executeCreate(
+  program: Command,
+  payload: CreateCommandInput,
+  action: 'create_note' | 'create_card' = 'create_note'
+): Promise<void> {
   const globalOpts = program.opts();
   const format: OutputFormat = globalOpts.text ? 'text' : 'json';
   const client = createCommandClient(program);
 
   try {
-    const result = await client.execute('create_note', payload);
+    const result = await client.execute(action, payload);
     emit(
       program,
       formatResult(result, format, (data) => {

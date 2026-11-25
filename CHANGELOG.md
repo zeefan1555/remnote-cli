@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 From release 0.1.30 onward, versions follow the project's
 [step-based version policy](docs/guides/versioning.md).
 
+## [0.1.33] - 2026-11-25
+
+### Fixed
+
+- Make empty section separators in multiline cards native answer items and verify
+  their empty text, parent, card-item status and card identity before success.
+  An unverified creation returns a non-retryable unknown outcome and recovery IDs.
+
 ## [0.1.32] - 2026-11-25
 
 ### Changed

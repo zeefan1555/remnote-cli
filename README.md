@@ -283,7 +283,9 @@ remnote-cli card create \\
 Write multiline cards as ordinary Markdown with real newlines. A blank line
 between answer bullets marks a section boundary; `card create` converts it to
 RemNote's empty answer item. Leading, trailing and multi-card blank lines are
-removed. Ordinary `rem create` input keeps its existing behavior.
+removed. The command verifies each separator is an empty native card answer item.
+If verification fails, it reports an unknown outcome and known IDs for readback;
+do not retry blindly. Ordinary `rem create` input keeps its existing behavior.
 
 One `--content` value can contain multiple cards. The native parser determines the
 card direction and type. Use one parent and tag set per invocation. Read the created Rem IDs with

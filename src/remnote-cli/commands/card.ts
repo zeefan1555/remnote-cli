@@ -20,8 +20,9 @@ remnote-cli card create \\
   --parent-id <PARENT_REM_ID>
 
 One blank line between answer bullets marks a section boundary. card create
-converts it to RemNote's empty answer item, so the card keeps readable spacing.
+creates and verifies an empty answer item for each boundary.
 Leading, trailing and multi-card blank lines are removed.
+If creation or verification fails, read the reported IDs before another write.
 
 One --content value may contain multiple cards. RemNote's native parser determines
 the card direction and type; do not pass a separate card-type option. Use
@@ -78,6 +79,6 @@ export function registerCardCreateCommand(
       if (opts.title) payload.title = opts.title;
       if (opts.parentId) payload.parentId = opts.parentId;
       if (opts.tagIds && opts.tagIds.length > 0) payload.tagRemIds = opts.tagIds;
-      await executeCreate(program, payload);
+      await executeCreate(program, payload, 'create_card');
     });
 }

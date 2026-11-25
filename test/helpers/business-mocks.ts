@@ -477,15 +477,15 @@ export class MockRemNotePlugin {
       async (markdown: string, parentId?: string): Promise<MockRem[]> => {
         const allCreated: MockRem[] = [];
 
-        // Parse each non-empty line into (indentLevel, text)
+        // Retain empty bullets: the SDK creates empty Rems for them.
         const lines = markdown
           .split('\n')
           .map((line) => {
             const stripped = line.replace(/^(\s*)[-*]?\s*/, '');
             const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
-            return { indent, text: stripped.trim() };
+            return { indent, text: stripped.trim(), emptyBullet: /^\s*[-*]\s*$/.test(line) };
           })
-          .filter((l) => l.text.length > 0);
+          .filter((l) => l.text.length > 0 || l.emptyBullet);
 
         if (lines.length === 0) return [];
 
@@ -501,6 +501,11 @@ export class MockRemNotePlugin {
           const level = levelOf(line.indent);
           const id = `rem_md_${this.nextId++}`;
           const rem = this.makeRem(id, line.text);
+          if (this.taskSemantics && /\s>>>\s*$/.test(line.text)) {
+            rem.text = [line.text.replace(/\s>>>\s*$/, '')];
+            rem.setPracticeDirectionMock('forward');
+            rem.setCardsMock([new MockCard('card_' + id, id, 'forward', 1, [])]);
+          }
           if (this.taskSemantics && /\s===\s*$/.test(line.text)) {
             rem.text = [line.text.replace(/\s===\s*$/, '')];
             rem.setIsCardItemMock(true);
@@ -523,6 +528,8 @@ export class MockRemNotePlugin {
           } else {
             const stackParent = stack[stack.length - 1].rem;
             await rem.setParent(stackParent as never, (await stackParent.getChildrenRem()).length);
+            if (this.taskSemantics && line.text && (await stackParent.getCards()).length > 0)
+              rem.setIsCardItemMock(true);
           }
 
           stack.push({ rem, level });
