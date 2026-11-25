@@ -25,9 +25,10 @@ describe('repository RemNote Agent Skill', () => {
     expect(skill).not.toContain('must exit 1');
   });
 
-  it('uses native Rem card commands without task-plan instructions', async () => {
+  it('uses dedicated card creation and native Rem updates without task-plan instructions', async () => {
     const skill = await readFile('skills/remnote/SKILL.md', 'utf8');
     for (const command of [
+      'card create',
       'rem create',
       'rem update',
       'rem update-answer',

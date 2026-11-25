@@ -68,11 +68,11 @@ describe('command reference check', () => {
     expect(result.stderr).toContain('rem inspect');
   });
 
-  it('accepts native Rem card commands and generic sdk card inspection', async () => {
+  it('accepts card create, native card updates, and generic sdk card inspection', async () => {
     directory = await mkdtemp(join(tmpdir(), 'remnote-command-refs-'));
     await writeFile(
       join(directory, 'native.md'),
-      'remnote-cli rem create --content "Question >> Answer"\nremnote-cli rem update REM_ID --content "Question"\nremnote-cli rem update-answer ANSWER_ID --card-id REM_ID\nremnote-cli rem inspect REM_ID --fields cards,rawCards\nremnote-cli sdk card --help\nremnote-cli schema sdk.card\n'
+      'remnote-cli card create --content "Question >> Answer"\nremnote-cli rem create --content "Ordinary Rem"\nremnote-cli rem update REM_ID --content "Question"\nremnote-cli rem update-answer ANSWER_ID --card-id REM_ID\nremnote-cli rem inspect REM_ID --fields cards,rawCards\nremnote-cli sdk card --help\nremnote-cli schema card.create\nremnote-cli schema sdk.card\n'
     );
     expect(run(directory).status).toBe(0);
   });

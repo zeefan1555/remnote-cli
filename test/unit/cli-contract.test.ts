@@ -21,8 +21,16 @@ describe('generated CLI contract', () => {
     expect(contract).not.toHaveProperty('plans');
     expect(contract).not.toHaveProperty('requiredCapabilities');
     expect(contract).not.toHaveProperty('receipt');
-    expect(contract.commands.some(({ path }) => path === 'card' || path.startsWith('card '))).toBe(
-      false
+    expect(contract.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'card', kind: 'group' }),
+        expect.objectContaining({
+          path: 'card create',
+          kind: 'action',
+          risk: 'write',
+          bridge: 'required',
+        }),
+      ])
     );
     expect(contract.bridgeActions).not.toContain('transaction_begin');
     expect(contract.sdkFacts).toEqual({

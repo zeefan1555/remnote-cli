@@ -22,6 +22,7 @@ describe('createProgram', () => {
     expect(commandNames).toEqual(
       expect.arrayContaining([
         'rem',
+        'card',
         'table',
         'todo',
         'media',
@@ -42,7 +43,7 @@ describe('createProgram', () => {
     expect(commandNames).toContain('todo');
     expect(commandNames).not.toContain('wiki');
     expect(commandNames).not.toContain('sync');
-    expect(commandNames).not.toContain('card');
+    expect(commandNames).toContain('card');
     expect(commandNames).toContain('sdk');
     expect(commandNames).not.toContain('sdk-capabilities');
     expect(commandNames).not.toContain('sdk-app');

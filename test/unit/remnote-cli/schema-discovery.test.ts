@@ -63,7 +63,7 @@ describe('schema and completion discovery', () => {
     );
     expect(root.candidates.map(({ name }) => name)).not.toContain('sync');
     expect(root.candidates.map(({ name }) => name)).not.toContain('completion');
-    expect(root.candidates.map(({ name }) => name)).not.toContain('card');
+    expect(root.candidates.map(({ name }) => name)).toContain('card');
 
     const group = parseSuccess(
       (await runCliForTest(['completion', 'sdk'])).stdout

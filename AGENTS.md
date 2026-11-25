@@ -27,14 +27,17 @@ needed SDK capability already exists. No MCP transport, proxy, daemon, remote
 endpoint, compatibility shim or product-version matching is maintained.
 Callbacks, private SDK methods and persistent SDK object handles are not supported.
 
-The CLI binds fixed `127.0.0.1:3002`, accepts only the observed WebSocket Origin
-`null`, sends protocol 2 `hello`, and consumes the Bridge's live `ready` identity.
+The CLI binds fixed `127.0.0.1:3002`, accepts the exact WebSocket Origins `null`
+and `https://www.remnoteplugins.com`, sends protocol 2 `hello`, and consumes the
+Bridge's live `ready` identity.
 There is no pairing command, token file, endpoint setting, port setting, persistent
 connection config, or Bridge write gate. Compatibility is protocol 2 plus the SDK
 catalog, not matching product versions. `--kb-id` is validation only.
 
-The trust boundary is the current operating-system user. Origin checking rejects
-ordinary webpages but not native local processes that can forge headers.
+The trust boundary is the current operating-system user. Exact Origin checking
+admits RemNote's sandboxed and marketplace plugin hosts while rejecting missing,
+lookalike and unrelated browser origins; it does not isolate native local processes
+that can forge headers.
 
 `rem create` uses official text for Rems and cards. `rem update --content` and
 `rem update-answer` require current raw-text hashes and verify card identity,

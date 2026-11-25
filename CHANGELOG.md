@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 From release 0.1.30 onward, versions follow the project's
 [step-based version policy](docs/guides/versioning.md).
 
+## [0.1.31] - 2026-11-25
+
+### Fixed
+
+- Accept the exact official marketplace WebSocket Origin
+  `https://www.remnoteplugins.com` alongside RemNote's sandboxed-plugin Origin
+  `null`. Continue rejecting missing, lookalike and unrelated Origins with HTTP 403.
+
 ## [0.1.30] - 2026-11-23
 
 ### Added

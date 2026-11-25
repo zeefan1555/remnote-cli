@@ -74,6 +74,11 @@ describe('command specs', () => {
       risk: 'destructive',
       bridge: 'required',
     });
+    expect(commandSpec(specs, 'card create')).toMatchObject({
+      kind: 'action',
+      risk: 'write',
+      bridge: 'required',
+    });
     expect(commandSpec(specs, 'todo list')).toMatchObject({
       risk: 'read',
       bridge: 'required',

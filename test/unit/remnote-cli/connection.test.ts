@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ALLOWED_ORIGIN,
+  ALLOWED_ORIGINS,
   Connection,
   MAX_PENDING_REQUESTS,
   PROTOCOL_VERSION,
@@ -35,8 +35,12 @@ async function listen(timeout = 2000, port = 0, knowledgeBaseId?: string) {
   return { connection, opened, port: address.port };
 }
 
-async function plugin(port: number, overrides: Partial<BridgeIdentity> = {}) {
-  const ws = new WebSocket('ws://127.0.0.1:' + port, { origin: ALLOWED_ORIGIN });
+async function plugin(
+  port: number,
+  overrides: Partial<BridgeIdentity> = {},
+  origin: (typeof ALLOWED_ORIGINS)[number] = ALLOWED_ORIGINS[0]
+) {
+  const ws = new WebSocket('ws://127.0.0.1:' + port, { origin });
   sockets.push(ws);
   ws.on('error', () => {});
   const message = once(ws, 'message');
@@ -67,12 +71,22 @@ async function expectOriginRejected(port: number, origin?: string) {
 }
 
 describe('zero-configuration command-owned loopback session', () => {
-  it('accepts only the observed RemNote Origin and sends protocol 2 hello', async () => {
-    const { opened, port } = await listen();
+  it.each(ALLOWED_ORIGINS)(
+    'accepts the RemNote plugin Origin %s and sends protocol 2 hello',
+    async (origin) => {
+      const { opened, port } = await listen();
+      await plugin(port, {}, origin);
+      await expect(opened).resolves.toEqual(identity);
+    }
+  );
+
+  it('rejects missing, non-official and lookalike Origins', async () => {
+    const { port } = await listen();
     await expectOriginRejected(port);
     await expectOriginRejected(port, 'https://example.com');
-    await plugin(port);
-    await expect(opened).resolves.toEqual(identity);
+    await expectOriginRejected(port, 'http://www.remnoteplugins.com');
+    await expectOriginRejected(port, 'https://remnoteplugins.com');
+    await expectOriginRejected(port, 'https://www.remnoteplugins.com.example');
   });
 
   it('uses monotonic IDs, correlates concurrent requests and releases its port', async () => {
@@ -128,7 +142,7 @@ describe('zero-configuration command-owned loopback session', () => {
     { type: 'ready', protocolVersion: 2, identity: { ...identity, sdkVersion: '' } },
   ])('rejects an unsupported handshake before SDK work', async (message) => {
     const { connection, opened, port } = await listen();
-    const ws = new WebSocket('ws://127.0.0.1:' + port, { origin: ALLOWED_ORIGIN });
+    const ws = new WebSocket('ws://127.0.0.1:' + port, { origin: ALLOWED_ORIGINS[0] });
     sockets.push(ws);
     const hello = once(ws, 'message');
     await once(ws, 'open');

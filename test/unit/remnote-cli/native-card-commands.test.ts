@@ -7,7 +7,6 @@ import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli
 
 describe('native Rem card commands', () => {
   it.each([
-    ['card'],
     ['card', 'apply', '--plan', '-', '--idempotency-key', 'old-plan'],
     ['card', 'review-stats', 'r'],
     ['flashcards', 'apply'],
@@ -25,7 +24,7 @@ describe('native Rem card commands', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it.each(['card', 'card.apply', 'card.review-stats', 'flashcards', 'task.apply'])(
+  it.each(['card.apply', 'card.review-stats', 'flashcards', 'task.apply'])(
     'does not discover a removed command schema %s',
     async (path) => {
       const result = await runCliForTest(['schema', path]);
@@ -34,11 +33,13 @@ describe('native Rem card commands', () => {
     }
   );
 
-  it('keeps native Rem actions and low-level SDK card inspection in help', async () => {
+  it('exposes card create and keeps native Rem actions plus low-level SDK card help', async () => {
     const root = await runCliForTest(['--help']);
-    expect(root.stdout).not.toMatch(/^\s+card(?:\s|$)/m);
+    expect(root.stdout).toMatch(/^\s+card\s+Create review cards/m);
     expect(root.stdout).not.toMatch(/^\s+(?:apply|task|flashcards)(?:\s|$)/m);
     for (const args of [
+      ['card', '--help'],
+      ['card', 'create', '--help'],
       ['rem', 'create', '--help'],
       ['rem', 'update', '--help'],
       ['rem', 'update-answer', '--help'],
@@ -51,6 +52,61 @@ describe('native Rem card commands', () => {
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain(`Usage: remnote-cli ${args.slice(0, -1).join(' ')}`);
     }
+  });
+
+  it('guides agents through official card text without inventing a card type option', async () => {
+    const result = await runCliForTest(['card', 'create', '--help']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Question >> Answer');
+    expect(result.stdout).toContain('Question >>>');
+    expect(result.stdout).toContain("RemNote's native parser determines");
+    expect(result.stdout).toContain('https://help.remnote.com/en/articles/9252072');
+    expect(result.stdout).not.toContain('--card-type');
+    expect(result.stdout).not.toContain('--content-file');
+    expect(result.stdout).not.toContain('card apply');
+  });
+
+  it('passes official multi-card text and creation context unchanged to create_note', async () => {
+    const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
+      remIds: ['question'],
+      titles: ['Question'],
+    });
+    const content =
+      'First question >>>\n  - First answer\n\nSecond question >>>\n  - Second answer';
+    const result = await runCliForTest([
+      'card',
+      'create',
+      '--content',
+      content,
+      '--title',
+      'Card batch',
+      '--parent-id',
+      'daily',
+      '--tag-ids',
+      'home-topic',
+      'term-topic',
+      '--kb-id',
+      'kb',
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(execute).toHaveBeenCalledWith('create_note', {
+      content,
+      title: 'Card batch',
+      parentId: 'daily',
+      tagRemIds: ['home-topic', 'term-topic'],
+    });
+    execute.mockRestore();
+  });
+
+  it('requires direct card content before opening a bridge session', async () => {
+    const execute = vi.spyOn(DirectClient.prototype, 'execute');
+    const result = await runCliForTest(['card', 'create']);
+    expect(result.exitCode).toBe(EXIT.USAGE);
+    expect(parseFailure(result.stderr)).toMatchObject({
+      subtype: 'commander.missingMandatoryOptionValue',
+    });
+    expect(execute).not.toHaveBeenCalled();
+    execute.mockRestore();
   });
 
   it('reads native card and review facts through rem inspect --fields cards,rawCards', async () => {

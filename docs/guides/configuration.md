@@ -7,11 +7,12 @@ persisted connection configuration. Every live command binds the fixed endpoint
 `127.0.0.1:3002`, sends protocol 2 `hello`, and uses the active knowledge base and
 SDK catalog identity returned by RemNote CLI Bridge.
 
-The listener accepts only the WebSocket upgrade `Origin: null` emitted by
-RemNote's sandboxed plugin. Missing and unknown Origins receive HTTP 403. The
-trust boundary is the current operating-system user: Origin validation blocks an
-ordinary webpage but does not isolate a malicious native local process, which can
-forge request headers.
+The listener accepts only the exact WebSocket upgrade Origins emitted by RemNote's
+sandboxed plugin (`null`) and official marketplace host
+(`https://www.remnoteplugins.com`). Missing, lookalike and unknown Origins receive
+HTTP 403. The trust boundary is the current operating-system user: Origin validation
+blocks ordinary webpages but does not isolate a malicious native local process,
+which can forge request headers.
 
 ## CLI Options
 

@@ -145,6 +145,7 @@ Use friendly commands when available:
 
 ```bash
 remnote-cli rem create
+remnote-cli card create
 remnote-cli rem update
 remnote-cli rem update-answer
 remnote-cli rem children insert
@@ -162,18 +163,22 @@ Preview-first commands need `--apply` for execution. Prefer additive
 `rem children insert`. `rem children replace` destroys child identities and
 requires `--allow-destructive`. Use stale-state guards where provided.
 
-## Native Rem card editing
+## Review card creation
 
-Run `remnote-cli rem create --help` for official card syntax, then pass the
-reviewed text directly to `rem create --content` or through `--content-file -`.
-One invocation uses one parent and tag set.
+Run `remnote-cli card create --help` for official card syntax, then pass the
+reviewed text directly to `--content`. One invocation uses one parent and tag set.
+RemNote determines the technical card type from the text; the CLI has no
+`--card-type` option and no card plan or content-file mode.
 
 ```bash
-remnote-cli rem create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
+remnote-cli card create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
 remnote-cli rem update QUESTION_REM_ID --content "New question" --expected-text-hash CURRENT_TEXT_HASH
 remnote-cli rem update-answer ANSWER_REM_ID --card-id QUESTION_REM_ID --content "New answer" --expected-text-hash CURRENT_ANSWER_TEXT_HASH
 remnote-cli rem inspect QUESTION_REM_ID --fields cards,rawCards
 ```
+
+`rem create` remains the generic note and Rem entry. Existing card reads, question
+updates and direct-answer updates remain under `rem`.
 
 `rem update` changes only the target Rem's own text and preserves its children.
 `rem update-answer` requires an existing card-item directly under the exact card-generating
