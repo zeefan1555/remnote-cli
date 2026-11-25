@@ -200,7 +200,10 @@ remnote-cli card create --content <text> [options]
 
 Behavior rules:
 
-- Content is passed verbatim to RemNote's native parser.
+- Multiline content uses ordinary Markdown and real newlines, not literal `\n`.
+- A blank line between answer bullets marks a section boundary. The CLI converts
+  it to RemNote's empty answer item so section spacing survives the native parser.
+- Leading, trailing and between-card blank lines are removed.
 - One `--content` value may contain multiple cards.
 - RemNote determines the technical card type and direction from the official syntax. There is no card-type option.
 - `title` can create or name a parent structure; it is not part of the review question.
@@ -212,7 +215,18 @@ Examples:
 
 ```bash
 remnote-cli card create --content "Question >> Answer"
-remnote-cli card create --content $'Question >>>\n  - Answer line one\n  - Answer line two'
+
+remnote-cli card create \\
+  --content '- Question >>>
+  - Why
+  - Reason
+
+  - How
+  - Action' \\
+  --parent-id <parent-rem-id> \\
+  --tag-ids <home-topic-id> <term-topic-id> \\
+  --kb-id <kb-id>
+
 remnote-cli card create --content "Question >> Answer" --title "Topic cards" --parent-id <parent-rem-id> --tag-ids <home-topic-id> <term-topic-id>
 ```
 
