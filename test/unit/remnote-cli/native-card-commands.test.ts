@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RemAdapter } from '../../../src/business/rem-adapter.js';
 import { DirectClient } from '../../../src/remnote-cli/client/direct-client.js';
 import { EXIT } from '../../../src/remnote-cli/output/errors.js';
-import { MockCard, MockRemNotePlugin } from '../../helpers/business-mocks.js';
+import { MockCard, MockRem, MockRemNotePlugin } from '../../helpers/business-mocks.js';
 import { parseFailure, parseSuccess, runCliForTest } from '../../helpers/run-cli.js';
 
 describe('native Rem card commands', () => {
@@ -61,7 +61,7 @@ describe('native Rem card commands', () => {
     expect(result.stdout).toContain('Question >>>');
     expect(result.stdout).toMatch(/--content '- Question >>>\n\s+- Why\n\s+- Reason/);
     expect(result.stdout).toContain('ordinary Markdown with real newlines');
-    expect(result.stdout).toContain("RemNote's empty answer item");
+    expect(result.stdout).toContain('creates and verifies an empty answer item');
     expect(result.stdout).toContain("RemNote's native parser determines");
     expect(result.stdout).toContain('https://help.remnote.com/en/articles/9252072');
     expect(result.stdout).not.toContain("$'");
@@ -70,7 +70,7 @@ describe('native Rem card commands', () => {
     expect(result.stdout).not.toContain('card apply');
   });
 
-  it('passes ordinary Markdown to create_note with blank answer sections preserved', async () => {
+  it('passes ordinary Markdown to create_card with blank answer sections preserved', async () => {
     const execute = vi.spyOn(DirectClient.prototype, 'execute').mockResolvedValue({
       remIds: ['question'],
       titles: ['Question'],
@@ -93,7 +93,7 @@ describe('native Rem card commands', () => {
       'kb',
     ]);
     expect(result.exitCode).toBe(0);
-    expect(execute).toHaveBeenCalledWith('create_note', {
+    expect(execute).toHaveBeenCalledWith('create_card', {
       content:
         'Question >>>\n  - Why\n  - Reason\n  -\n  - How\n  - Action\n  -\n  - What\n  - Result\n  -\n  - 来源\n  - Evidence',
       title: 'Card batch',
@@ -115,7 +115,7 @@ describe('native Rem card commands', () => {
       '\n\nFirst >>>\r\n\r\n  - Why\r\n  - Reason\r\n\r\n\r\n  - How\r\n  - Action\r\n\r\nSecond >>>\r\n  - Result\r\n\r\n',
     ]);
     expect(result.exitCode).toBe(0);
-    expect(execute).toHaveBeenCalledWith('create_note', {
+    expect(execute).toHaveBeenCalledWith('create_card', {
       content: 'First >>>\n  - Why\n  - Reason\n  -\n  - How\n  - Action\nSecond >>>\n  - Result',
     });
     execute.mockRestore();
@@ -133,7 +133,7 @@ describe('native Rem card commands', () => {
       'First >>>\n  - A\n\nSecond >>>\n  - B',
     ]);
     expect(result.exitCode).toBe(0);
-    expect(execute).toHaveBeenCalledWith('create_note', {
+    expect(execute).toHaveBeenCalledWith('create_card', {
       content: 'First >>>\n  - A\nSecond >>>\n  - B',
     });
     execute.mockRestore();
@@ -148,6 +148,48 @@ describe('native Rem card commands', () => {
     });
     expect(execute).not.toHaveBeenCalled();
     execute.mockRestore();
+  });
+
+  it('returns non-retryable unknown outcome with created IDs when marking a separator fails', async () => {
+    const plugin = new MockRemNotePlugin();
+    plugin.enableTaskSemantics();
+    plugin.addTestRem('daily', 'Daily');
+    const adapter = new RemAdapter(plugin as never);
+    const execute = vi
+      .spyOn(DirectClient.prototype, 'execute')
+      .mockImplementation(async (action, payload) => {
+        expect(action).toBe('create_card');
+        return await adapter.createCard(payload);
+      });
+    const setter = vi
+      .spyOn(MockRem.prototype, 'setIsCardItem')
+      .mockRejectedValueOnce(new Error('setter failed'));
+    try {
+      const result = await runCliForTest([
+        'card',
+        'create',
+        '--content',
+        '- Question >>>\n  - One\n\n  - Two',
+        '--parent-id',
+        'daily',
+      ]);
+      expect(result.exitCode).toBe(EXIT.UNKNOWN_OUTCOME);
+      expect(result.stdout).toBe('');
+      expect(parseFailure(result.stderr)).toMatchObject({
+        type: 'unknown_outcome',
+        subtype: 'card_create_unverified',
+        retryable: false,
+        details: {
+          recoveryKey: expect.stringMatching(/^additive:/),
+          knownRemIds: expect.arrayContaining(['daily']),
+        },
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(plugin.rem.createTreeWithMarkdown).toHaveBeenCalledTimes(1);
+    } finally {
+      setter.mockRestore();
+      execute.mockRestore();
+    }
   });
 
   it('reads native card and review facts through rem inspect --fields cards,rawCards', async () => {
