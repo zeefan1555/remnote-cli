@@ -3,6 +3,7 @@ import { registerCompositeCommands } from './commands/composite.js';
 import { Command } from 'commander';
 import { createRequire } from 'node:module';
 import { registerCreateCommand } from './commands/create.js';
+import { registerCardCreateCommand } from './commands/card.js';
 import {
   registerListChildrenCommand,
   registerSearchByTagCommand,
@@ -77,6 +78,9 @@ export function createProgram(
   const document = catalog.group(rem, 'document', {
     description: 'Change document status',
   });
+  const card = catalog.group(program, 'card', {
+    description: 'Create review cards from official RemNote text',
+  });
   const table = catalog.group(program, 'table', {
     description: 'Read Advanced Tables',
   });
@@ -88,6 +92,7 @@ export function createProgram(
   });
 
   registerCreateCommand(program, catalog, rem);
+  registerCardCreateCommand(program, catalog, card);
   registerSearchCommand(program, catalog, rem);
   registerSearchByTagCommand(program, catalog, rem);
   registerListChildrenCommand(program, catalog, children);

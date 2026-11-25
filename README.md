@@ -47,9 +47,11 @@ Diagnostics: batch, status, doctor, schema, contract
 Raw SDK: sdk
 ```
 
-Most work uses `rem <action>`. Examples include `rem read`, `rem search`,
-`rem children list`, `rem property set`, and guarded `rem delete`. SDK group and
-method help is available offline; execution still checks the live Bridge catalog.
+Most note work uses `rem <action>`. Create review cards through `card create`;
+`rem create` is the generic Rem and note entry. Other examples include `rem read`,
+`rem search`, `rem children list`, `rem property set`, and guarded `rem delete`.
+SDK group and method help is available offline; execution still checks the live
+Bridge catalog.
 
 ## Requirements
 
@@ -57,7 +59,7 @@ method help is available offline; execution still checks the live Bridge catalog
 - RemNote desktop with the RemNote CLI Bridge plugin enabled.
 - A shell on macOS or Linux for the source installation steps in this README.
 
-The current operating-system user is the trust boundary. The CLI listener accepts only the local WebSocket origin used by RemNote's sandboxed plugin, so ordinary webpages cannot connect. This check does not isolate a native process running as the same user, which can forge request headers. Do not run untrusted local programs while the Bridge is enabled.
+The current operating-system user is the trust boundary. The CLI listener accepts only `null` and the exact official marketplace origin `https://www.remnoteplugins.com`, so ordinary webpages cannot connect. This check does not isolate a native process running as the same user, which can forge request headers. Do not run untrusted local programs while the Bridge is enabled.
 
 ## Install RemNote CLI Bridge
 
@@ -259,15 +261,17 @@ the native status and then reads the exact Rem back.
 
 ## Create cards with official text
 
-`rem create` uses RemNote's native text parser for Rems and cards.
-Run `remnote-cli rem create --help` for card syntax and multiline examples.
+`card create` passes RemNote's official card text directly to the native parser.
+Run `remnote-cli card create --help` for single-line, multiline and multi-card
+examples.
 
 ```bash
-remnote-cli rem create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
-remnote-cli rem create --content-file - --parent-id PARENT_REM_ID
+remnote-cli card create --content "Question >> Answer" --parent-id PARENT_REM_ID --tag-ids TAG_REM_ID
+remnote-cli card create --content $'Question >>>\n  - Answer line one\n  - Answer line two' --parent-id PARENT_REM_ID
 ```
 
-Use one parent and tag set per invocation. Read the created Rem IDs with
+One `--content` value can contain multiple cards. The native parser determines the
+card direction and type. Use one parent and tag set per invocation. Read the created Rem IDs with
 `rem inspect --fields cards,rawCards` to verify native card type, CardIDs, scheduling,
 and available review history. Update question text with `rem update` and existing
 direct answers with `rem update-answer`.

@@ -37,9 +37,12 @@ try {
     throw new Error('Built CLI version does not match package.json');
 
   const help = await run(['--help']);
-  if (/^\s+(?:card|task|flashcards|apply)(?:\s|$)/m.test(help.stdout))
-    throw new Error('Built CLI still exposes a public card task command');
+  if (!/^\s+card\s+Create review cards/m.test(help.stdout))
+    throw new Error('Built CLI does not expose card create');
+  if (/^\s+(?:task|flashcards|apply)(?:\s|$)/m.test(help.stdout))
+    throw new Error('Built CLI still exposes a removed task command');
   for (const args of [
+    ['card', 'create', '--help'],
     ['rem', 'create', '--help'],
     ['rem', 'update', '--help'],
     ['rem', 'update-answer', '--help'],
@@ -70,9 +73,12 @@ try {
   if (
     'plans' in contract.data ||
     'requiredCapabilities' in contract.data ||
-    contract.data.commands.some(({ path }) => path === 'card' || path.startsWith('card '))
+    !contract.data.commands.some(
+      ({ path, kind, risk, bridge }) =>
+        path === 'card create' && kind === 'action' && risk === 'write' && bridge === 'required'
+    )
   )
-    throw new Error('Built CLI contract still exposes task plans');
+    throw new Error('Built CLI contract is missing card create or still exposes task plans');
 
   const doctor = envelope(
     (

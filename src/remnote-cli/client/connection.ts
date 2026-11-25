@@ -5,8 +5,9 @@ import { dispatchRemoteAction, type RemoteActionName } from './remote-actions.js
 export const PROTOCOL_VERSION = 2;
 export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const FIXED_PORT = 3002;
-/** RemNote's sandboxed plugin WebSocket sends this exact observed Origin. */
-export const ALLOWED_ORIGIN = 'null';
+/** Exact browser Origins used by RemNote's local and marketplace plugin hosts. */
+export const ALLOWED_ORIGINS = ['null', 'https://www.remnoteplugins.com'] as const;
+const allowedOrigins = new Set<string>(ALLOWED_ORIGINS);
 export const MAX_PENDING_REQUESTS = 32;
 
 export const IdentitySchema = z
@@ -71,7 +72,7 @@ export class Connection {
         maxPayload: MAX_MESSAGE_BYTES,
         verifyClient: ({ req }, done) => {
           const origin = req.headers.origin;
-          const allowed = origin === ALLOWED_ORIGIN;
+          const allowed = origin !== undefined && allowedOrigins.has(origin);
           done(allowed, allowed ? undefined : 403, allowed ? undefined : 'Forbidden Origin');
         },
       });

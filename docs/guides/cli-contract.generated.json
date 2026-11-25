@@ -46,6 +46,19 @@
       "dynamic": false
     },
     {
+      "path": "card",
+      "kind": "group",
+      "helpSection": "knowledge"
+    },
+    {
+      "path": "card create",
+      "kind": "action",
+      "helpSection": "knowledge",
+      "risk": "write",
+      "bridge": "required",
+      "dynamic": false
+    },
+    {
       "path": "completion",
       "kind": "action",
       "helpSection": "knowledge",

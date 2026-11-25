@@ -140,13 +140,13 @@ Behavior rules:
 - `title` and `content` are both optional, but **at least one must be provided**.
 - Title input support positional `[title]` and `--title <text>`.
 - Title and content input support `[[id:<remId>]]` for exact inline references to existing Rems.
-- Content input from `-c`/`--content`/`--content-file` supports RemNote's native markdown syntax for creating nested hierarchies and flashcards inline.
+- Content input from `-c`/`--content`/`--content-file` supports RemNote's native markdown syntax for nested hierarchies and generic Rems. Use `card create` for review cards.
 - `--content` and `--content-file` are mutually exclusive.
 - Content loaded from file/stdin is passed verbatim (no templating/interpolation).
 - Write content from `--content-file` and stdin is capped at 100 KB.
 - If `parent-id` is not provided, the note will be created under the default root rem in the setting.
 - Tag Rem IDs are applied only to the top-level Rems created. Tag names are not accepted.
-- `--as-document` requires a title/root Rem and preserves any flashcard/concept status created by markdown syntax.
+- `--as-document` requires a title/root Rem and preserves existing native status.
 - `--aliases` requires a title. Values are whitespace-normalized and deduplicated; matches to the primary title are
   ignored while Unicode and case are preserved.
 - Newly created non-leaf Rems are collapsed automatically in their nearest containing Document, daily note, or Portal.
@@ -177,13 +177,47 @@ remnote-cli rem create --title "The Shop on Main Street" --aliases "Obchod na ko
 # Note: if the content is in markdown format, --content/--content-file must be used to avoid misinterpretation of the content as command options
 remnote-cli rem create --content "- Item 1\n  - Item 2" --parent-id <parent-rem-id>
 
-# Flashcards
-remnote-cli rem create --title "Photosynthesis" --content "Front :: Back"
-
 # Hierarchical tree from file or from parsed markdown
 remnote-cli rem create --title "Biology Terms" --content-file /tmp/biology.md
 remnote-cli rem create --title "Biology Terms" --content "# Terms 1\n- Item 1\n  - Item 2"
 ```
+
+## card create
+
+Create review cards from RemNote's official card text.
+
+```bash
+remnote-cli card create --content <text> [options]
+```
+
+| Option                 | Default | Description                                      |
+| ---------------------- | ------- | ------------------------------------------------ |
+| `--content <text>`     | required | RemNote official card text                       |
+| `--title <text>`       | none    | Optional parent Rem or card-cluster title        |
+| `--parent-id <id>`     | none    | Parent Rem ID                                    |
+| `--tag-ids <id...>`    | none    | Exact tag Rem IDs to add                         |
+| `--kb-id <id>`         | none    | Require this exact active knowledge base         |
+
+Behavior rules:
+
+- Content is passed verbatim to RemNote's native parser.
+- One `--content` value may contain multiple cards.
+- RemNote determines the technical card type and direction from the official syntax. There is no card-type option.
+- `title` can create or name a parent structure; it is not part of the review question.
+- Native references use `[[id:<remId>]]`.
+- The command does not accept a content file, JSON plan, idempotency key or apply flag.
+- WWH and GRAI are Agent-level content formats. The CLI only owns native RemNote text parsing.
+
+Examples:
+
+```bash
+remnote-cli card create --content "Question >> Answer"
+remnote-cli card create --content $'Question >>>\n  - Answer line one\n  - Answer line two'
+remnote-cli card create --content "Question >> Answer" --title "Topic cards" --parent-id <parent-rem-id> --tag-ids <home-topic-id> <term-topic-id>
+```
+
+Official import syntax:
+<https://help.remnote.com/en/articles/9252072-how-to-import-flashcards-from-text>
 
 ## rem search
 
@@ -789,7 +823,7 @@ Behavior rules:
   - positional `[content]` (backward-compatible)
   - `--content <text>`
   - `--content-file <path|->`
-- Content input from `--content`/`--content-file` supports RemNote's native markdown syntax for creating nested hierarchies and flashcards inline.
+- Content input from `--content`/`--content-file` supports RemNote's native markdown syntax for nested hierarchies. Use `card create` for review cards.
 - Journal content supports `[[id:<remId>]]` for exact inline references to existing Rems.
 - `--tag-ids` applies exact tag Rem IDs to the created journal entry root/top-level Rems. Tag names are not accepted.
 - Newly created non-leaf journal Rems are collapsed automatically in today's daily-note context.

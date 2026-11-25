@@ -29,8 +29,9 @@ There is no HTTP MCP endpoint, OAuth provider, MCPB proxy, daemon or semver matc
 
 ## Connection And Safety
 
-1. The CLI binds fixed endpoint `127.0.0.1:3002` and accepts only the observed
-   RemNote WebSocket Origin `null`; missing/unknown Origins receive HTTP 403.
+1. The CLI binds fixed endpoint `127.0.0.1:3002` and accepts only the exact
+   RemNote WebSocket Origins `null` and `https://www.remnoteplugins.com`.
+   Missing, lookalike and unknown Origins receive HTTP 403.
 2. The CLI sends protocol 2 `hello`. The Bridge answers `ready` with plugin and SDK
    versions, catalog hash, and the live active knowledge-base identity.
 3. An optional `--kb-id` is explicit validation only. The CLI verifies the live SDK

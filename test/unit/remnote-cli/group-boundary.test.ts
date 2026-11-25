@@ -19,6 +19,7 @@ describe('command group boundaries', () => {
 
   it.each([
     [['rem']],
+    [['card']],
     [['table']],
     [['todo']],
     [['media']],

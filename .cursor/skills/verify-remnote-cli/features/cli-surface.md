@@ -10,7 +10,7 @@
 
 ## How to get to it (user POV)
 
-- `remnote-cli --version`、`remnote-cli --help`、`remnote-cli rem create --help`、`remnote-cli rem update --help`、`remnote-cli rem update-answer --help`、`remnote-cli rem inspect --help`、`remnote-cli schema rem.search`、`remnote-cli sdk card --help`
+- `remnote-cli --version`、`remnote-cli --help`、`remnote-cli card create --help`、`remnote-cli rem create --help`、`remnote-cli rem update --help`、`remnote-cli rem update-answer --help`、`remnote-cli rem inspect --help`、`remnote-cli schema rem.search`、`remnote-cli sdk card --help`
 
 ## Driving it with verify.sh
 
@@ -20,7 +20,7 @@ Preconditions:
 
 - **构建。** `verify.sh build`，日志末尾 tsc 无错误、退出码 0。
 - **单测。** `verify.sh unit`，日志含 `Test Files  N passed`。
-- **帮助。** `verify.sh cli`，日志含版本号、`Direct RemNote SDK automation`、根 help 分区、Rem 命令帮助、`rem search` schema 和离线 SDK card help。旧公开卡片命令返回 `unknown_subcommand` 和 exit 2。
+- **帮助。** `verify.sh cli`，日志含版本号、`Direct RemNote SDK automation`、根 help 分区、card create 官方文本引导、Rem 命令帮助、`rem search` schema 和离线 SDK card help。旧 apply 工作流返回 `unknown_subcommand` 和 exit 2。
 
 ## Gotchas
 

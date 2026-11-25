@@ -1,6 +1,7 @@
 # Direct CLI and RemNote CLI Bridge
 
-Status: approved in the maintainer conversation, 2026-10-02.
+Status: approved in the maintainer conversation, 2026-10-02; marketplace Origin
+amendment approved, 2026-11-25.
 
 ## Decision
 
@@ -18,8 +19,9 @@ still require a plugin update; business changes do not.
 
 - Protocol version 2 and actual SDK catalog capabilities determine compatibility.
 - There is no pairing token or HMAC challenge. The listener binds fixed
-  `127.0.0.1:3002`, accepts only the observed RemNote upgrade Origin `null`, and
-  rejects missing/unknown Origins with HTTP 403.
+  `127.0.0.1:3002`, accepts only the exact RemNote upgrade Origins `null` and
+  `https://www.remnoteplugins.com`, and rejects missing, lookalike or unknown
+  Origins with HTTP 403.
 - The CLI sends `hello`; the Bridge reports its plugin/SDK versions, catalog hash
   and active knowledge base in `ready`. Optional `--kb-id` validates that id.
 - Every request is bound to the socket, exact KB and deadline. Official permissions

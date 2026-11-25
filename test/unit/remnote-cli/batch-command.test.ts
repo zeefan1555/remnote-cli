@@ -183,7 +183,7 @@ describe('batch command', () => {
         '{"argv":["rem", "read","--help"]}',
         '{"argv":["rem", "read","--depth"]}',
         '{"argv":["rem"]}',
-        '{"argv":["card"]}',
+        '{"argv":["card", "create"]}',
         '{"argv":["status"]}',
       ].join('\n')
     );
@@ -208,11 +208,8 @@ describe('batch command', () => {
     expect(output.results[3].error?.message).toMatch(/argument missing/);
     expect(output.results[4]).toMatchObject({ ok: true, exitCode: 0 });
     expect(String(output.results[4].result)).toMatch(/Inspect and modify RemNote Rems/);
-    expect(output.results[5]).toMatchObject({
-      ok: false,
-      exitCode: EXIT.USAGE,
-      error: { subtype: 'unknown_subcommand' },
-    });
+    expect(output.results[5]).toMatchObject({ ok: false, exitCode: EXIT.USAGE });
+    expect(output.results[5].error?.message).toMatch(/required option.*--content/i);
     expect(output.results[6]).toMatchObject({ ok: true, exitCode: 0, result: { ok: true } });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalled();
