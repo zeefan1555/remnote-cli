@@ -167,8 +167,9 @@ requires `--allow-destructive`. Use stale-state guards where provided.
 
 Run `remnote-cli card create --help` for official card syntax, then pass the
 reviewed text directly to `--content`. Write multiline cards as ordinary Markdown
-with real newlines. A blank line between answer bullets marks a section boundary;
-the CLI converts it to RemNote's empty answer item. Leading, trailing and
+with real newlines. Use one empty answer bullet (`  -`) between answer groups; the
+CLI verifies it as a native empty answer item. A single blank line between answer
+bullets is accepted and normalized to the same separator. Leading, trailing and
 between-card blank lines are removed. The command verifies separator text,
 card-item status, parent, and native card identity before returning success. A
 failed verification is an unknown outcome; use the reported IDs to read back,
@@ -184,7 +185,7 @@ remnote-cli card create \\
   --content '- Question >>>
   - Why
   - Reason
-
+  -
   - How
   - Action' \\
   --parent-id PARENT_REM_ID \\

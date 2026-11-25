@@ -201,9 +201,11 @@ remnote-cli card create --content <text> [options]
 Behavior rules:
 
 - Multiline content uses ordinary Markdown and real newlines, not literal `\n`.
-- A blank line between answer bullets marks a section boundary. The CLI converts
-  it to RemNote's empty answer item, then verifies its empty text, answer-item
-  status, parent and native card identity before reporting success.
+- Use one empty answer bullet (`  -`) between answer groups. The CLI verifies
+  its empty text, answer-item status, parent and native card identity before
+  reporting success. A single blank line between answer bullets is accepted as
+  convenience and normalized to one explicit separator; surrounding blank lines
+  are removed.
 - Failed creation or verification reports an unknown outcome with known IDs and a
   recovery key; read back before attempting another write.
 - Leading, trailing and between-card blank lines are removed.
@@ -223,7 +225,7 @@ remnote-cli card create \\
   --content '- Question >>>
   - Why
   - Reason
-
+  -
   - How
   - Action' \\
   --parent-id <parent-rem-id> \\

@@ -272,7 +272,7 @@ remnote-cli card create \\
   --content '- Question >>>
   - Why
   - Reason
-
+  -
   - How
   - Action' \\
   --parent-id PARENT_REM_ID \\
@@ -280,10 +280,11 @@ remnote-cli card create \\
   --kb-id KB_ID
 ```
 
-Write multiline cards as ordinary Markdown with real newlines. A blank line
-between answer bullets marks a section boundary; `card create` converts it to
-RemNote's empty answer item. Leading, trailing and multi-card blank lines are
-removed. The command verifies each separator is an empty native card answer item.
+Write multiline cards as ordinary Markdown with real newlines. Use one empty
+answer bullet (`  -`) between groups; `card create` verifies it becomes an empty
+native card answer item. A single blank line between answer bullets is accepted
+and normalized to the same separator so old input remains safe. Blank lines are
+not kept around an explicit separator or between top-level cards.
 If verification fails, it reports an unknown outcome and known IDs for readback;
 do not retry blindly. Ordinary `rem create` input keeps its existing behavior.
 
