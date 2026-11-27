@@ -63,7 +63,7 @@ describe('version policy check', () => {
     const result = run();
 
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe('Version 0.1.34 is valid.');
+    expect(result.stdout.trim()).toBe('Version 0.1.35 is valid.');
     expect(result.stderr).toBe('');
   });
 

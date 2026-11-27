@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 From release 0.1.30 onward, versions follow the project's
 [step-based version policy](docs/guides/versioning.md).
 
+## [0.1.35] - 2026-11-28
+
+### Fixed
+
+- Distinguish a native delete confirmation or no-op from a partial subtree
+  deletion. Preserve the specific `unknown_outcome` subtype and recovery details
+  through the CLI boundary so callers do not mistake an unchanged target for a
+  successful delete.
+
 ## [0.1.34] - 2026-11-25
 
 ### Changed

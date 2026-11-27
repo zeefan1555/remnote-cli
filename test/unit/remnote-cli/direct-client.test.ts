@@ -263,6 +263,25 @@ describe('local business dispatch', () => {
     });
   });
 
+  it('preserves the pending-confirmation subtype at the CLI boundary', async () => {
+    client = new DirectClient({ allowDestructive: true, persist: false });
+    const plugin = wire.plugin as MockRemNotePlugin;
+    const rem = plugin.addTestRem('delete_pending', 'Delete pending');
+    vi.spyOn(rem, 'remove').mockResolvedValueOnce(undefined);
+
+    await expect(
+      client.execute('delete_rem', {
+        remId: rem._id,
+        dryRun: false,
+        expectedTitle: 'Delete pending',
+      })
+    ).rejects.toMatchObject({
+      type: 'unknown_outcome',
+      subtype: 'delete_confirmation_pending_or_not_applied',
+      retryable: false,
+    });
+  });
+
   it('does not classify a delete preview connection failure as a write outcome', async () => {
     wire.open.mockRejectedValueOnce(
       new Error('Connection lost; write outcome unknown. Do not blindly replay.')

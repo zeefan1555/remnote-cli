@@ -2943,6 +2943,63 @@ describe('RemAdapter', () => {
         expect.objectContaining({ state: 'unknown', remIds: [rem._id] })
       );
     });
+
+    it('reports an unchanged subtree as pending confirmation or not applied', async () => {
+      adapter.updateSettings({ acceptReplaceOperation: true });
+      const rem = plugin.addTestRem('delete_pending', 'Delete pending');
+      plugin.addTestRem('delete_pending_child', 'Child').setParent(rem);
+      vi.spyOn(rem, 'remove').mockResolvedValueOnce(undefined);
+
+      await expect(
+        adapter.deleteRem({
+          remId: rem._id,
+          dryRun: false,
+          expectedTitle: 'Delete pending',
+        })
+      ).rejects.toMatchObject({
+        type: 'unknown_outcome',
+        subtype: 'delete_confirmation_pending_or_not_applied',
+        retryable: false,
+        details: {
+          remId: rem._id,
+          beforeDescendantCount: 1,
+          afterDescendantCount: 1,
+          knownRemIds: [rem._id],
+        },
+      });
+      expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^destructive:/),
+        expect.objectContaining({ state: 'unknown', remIds: [rem._id] })
+      );
+    });
+
+    it('reports a changed subtree with the root still present as partial', async () => {
+      adapter.updateSettings({ acceptReplaceOperation: true });
+      const rem = plugin.addTestRem('delete_partial', 'Delete partial');
+      const child = plugin.addTestRem('delete_partial_child', 'Child');
+      child.setParent(rem);
+      vi.spyOn(rem, 'remove').mockImplementationOnce(async () => {
+        await child.remove();
+      });
+
+      await expect(
+        adapter.deleteRem({
+          remId: rem._id,
+          dryRun: false,
+          expectedTitle: 'Delete partial',
+        })
+      ).rejects.toMatchObject({
+        type: 'unknown_outcome',
+        subtype: 'delete_partial',
+        retryable: false,
+        details: {
+          remId: rem._id,
+          beforeDescendantCount: 1,
+          afterDescendantCount: 0,
+          knownRemIds: [rem._id],
+        },
+      });
+    });
   });
 
   describe('listChildren', () => {

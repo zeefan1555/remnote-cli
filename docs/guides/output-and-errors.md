@@ -71,6 +71,11 @@ unknown group flag exits 2 with `error.details.commandPath`, `suggestions` and
 `unknown_outcome` always has `retryable: false`. Read the exact affected IDs
 before attempting another write or choosing a new idempotency key.
 
+`rem delete` uses specific subtypes after a destructive call. An unchanged target
+tree returns `delete_confirmation_pending_or_not_applied`; the RemNote UI may be
+waiting for confirmation. A changed subtree with the root still present returns
+`delete_partial`.
+
 ## Text
 
 `--text` is for people. It preserves the same exit codes but removes ANSI escape

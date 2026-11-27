@@ -163,6 +163,7 @@ export function asCliFailure(error: unknown): CliFailure {
 }
 
 export function unknownOutcomeFailure(error: unknown): CliFailure {
+  if (error instanceof CliFailure && error.type === 'unknown_outcome') return error;
   const message = messageFrom(error);
   return new CliFailure('unknown_outcome', 'write_response_lost', message, {
     hint: 'Read the exact affected IDs before making another write.',
