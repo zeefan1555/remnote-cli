@@ -2497,6 +2497,18 @@ export class RemAdapter {
     } catch (error) {
       entry.state = 'unknown';
       await save().catch(() => {});
+      if (error instanceof CliFailure && error.type === 'unknown_outcome') {
+        const details =
+          error.details && typeof error.details === 'object' && !Array.isArray(error.details)
+            ? error.details
+            : {};
+        throw new CliFailure(error.type, error.subtype, error.message, {
+          hint: error.hint,
+          retryable: false,
+          details: { ...details, recoveryKey: key, knownRemIds: entry.remIds },
+          cause: error,
+        });
+      }
       const outcome =
         kind === 'destructive'
           ? 'Write outcome unknown; destructive write may have partially completed or completed before the error'
@@ -3888,11 +3900,50 @@ export class RemAdapter {
       throw new Error('Destructive operation requires --allow-destructive');
     }
 
+    const beforeDescendantIds = (await rem.getDescendants()).map((child) => child._id).sort();
+
     return await this.runJournaledWrite('destructive', 'delete_rem', params, async (remember) => {
       await remember([remId]);
       await rem.remove();
-      if (await this.plugin.rem.findOne(remId)) {
-        throw new Error(`Deleted Rem is still present: ${remId}`);
+      const remaining = await this.plugin.rem.findOne(remId);
+      if (remaining) {
+        const afterDescendantIds = (await remaining.getDescendants())
+          .map((child) => child._id)
+          .sort();
+        const unchanged =
+          (await this.getTitleAndDetail(remaining)).title === title &&
+          beforeDescendantIds.length === afterDescendantIds.length &&
+          beforeDescendantIds.every((id, index) => id === afterDescendantIds[index]);
+        if (unchanged) {
+          throw new CliFailure(
+            'unknown_outcome',
+            'delete_confirmation_pending_or_not_applied',
+            `Delete did not change Rem ${remId}; RemNote may be waiting for native confirmation.`,
+            {
+              hint: 'Finish or cancel the RemNote confirmation, then inspect the exact Rem ID. Do not rerun the delete command.',
+              retryable: false,
+              details: {
+                remId,
+                beforeDescendantCount: beforeDescendantIds.length,
+                afterDescendantCount: afterDescendantIds.length,
+              },
+            }
+          );
+        }
+        throw new CliFailure(
+          'unknown_outcome',
+          'delete_partial',
+          `Delete left Rem ${remId} present after changing part of its subtree.`,
+          {
+            hint: 'Inspect the exact Rem and descendants before another write.',
+            retryable: false,
+            details: {
+              remId,
+              beforeDescendantCount: beforeDescendantIds.length,
+              afterDescendantCount: afterDescendantIds.length,
+            },
+          }
+        );
       }
       return {
         remId,

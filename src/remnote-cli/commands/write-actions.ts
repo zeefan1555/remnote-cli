@@ -347,6 +347,7 @@ export function registerDeleteCommand(
         '',
         'Preview is the default and performs no writes.',
         'Apply requires --allow-destructive and --expected-title, then reads the exact Rem ID back to confirm absence.',
+        'If the target subtree is unchanged, RemNote may be waiting for a native delete confirmation. Finish or cancel it before inspecting again.',
         'Deletion removes the Rem and all of its descendants.',
       ].join('\n')
     )

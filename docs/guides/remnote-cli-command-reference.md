@@ -744,6 +744,12 @@ destructive authorization and a successful absence readback. The durable journal
 records the exact target. An uncertain response is `unknown_outcome`; read the ID
 before trying again.
 
+If the command resolves but the target and every loaded descendant remain
+unchanged, the error subtype is `delete_confirmation_pending_or_not_applied`.
+RemNote may be waiting for a native confirmation. Finish or cancel that dialog,
+then inspect the exact Rem ID. If the root remains but its descendants changed,
+the subtype is `delete_partial`.
+
 ## rem move
 
 Move an existing Rem and its subtree under a new parent. The command is a dry-run unless `--apply` is provided.
