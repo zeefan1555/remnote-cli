@@ -739,10 +739,11 @@ remnote-cli rem delete <rem-id>
 remnote-cli rem delete <rem-id> --apply --expected-title "Exact title" --allow-destructive
 ```
 
-Preview returns the current title. Apply requires that exact title, explicit
-destructive authorization and a successful absence readback. The durable journal
-records the exact target. An uncertain response is `unknown_outcome`; read the ID
-before trying again.
+Preview returns the current title. Apply requires that exact title and explicit
+destructive authorization. The command removes descendants leaf-first, then the
+target, and verifies every exact Rem ID. The durable journal records the full
+subtree. An uncertain response is `unknown_outcome`; read the IDs before trying
+again.
 
 If the command resolves but the target and every loaded descendant remain
 unchanged, the error subtype is `delete_confirmation_pending_or_not_applied`.

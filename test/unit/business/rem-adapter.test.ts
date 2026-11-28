@@ -2899,7 +2899,15 @@ describe('RemAdapter', () => {
     it('deletes one exact Rem, verifies absence and journals the outcome', async () => {
       adapter.updateSettings({ acceptReplaceOperation: true });
       const rem = plugin.addTestRem('delete_apply', 'Delete apply');
-      plugin.addTestRem('delete_child', 'Child').setParent(rem);
+      const child = plugin.addTestRem('delete_child', 'Child');
+      child.setParent(rem);
+      const removalOrder: string[] = [];
+      vi.spyOn(child, 'remove').mockImplementationOnce(async () => {
+        removalOrder.push(child._id);
+      });
+      vi.spyOn(rem, 'remove').mockImplementationOnce(async () => {
+        removalOrder.push(rem._id);
+      });
       vi.spyOn(plugin.rem, 'findOne')
         .mockResolvedValueOnce(rem)
         .mockResolvedValue(undefined as never);
@@ -2916,10 +2924,11 @@ describe('RemAdapter', () => {
         changed: true,
         verified: true,
       });
+      expect(removalOrder).toEqual([child._id, rem._id]);
       expect(await plugin.rem.findOne(rem._id)).toBeUndefined();
       expect(plugin.storage.setLocal).toHaveBeenLastCalledWith(
         expect.stringMatching(/^destructive:/),
-        expect.objectContaining({ state: 'applied', remIds: [rem._id] })
+        expect.objectContaining({ state: 'applied', remIds: [child._id, rem._id] })
       );
     });
 
@@ -2947,7 +2956,6 @@ describe('RemAdapter', () => {
     it('reports an unchanged subtree as pending confirmation or not applied', async () => {
       adapter.updateSettings({ acceptReplaceOperation: true });
       const rem = plugin.addTestRem('delete_pending', 'Delete pending');
-      plugin.addTestRem('delete_pending_child', 'Child').setParent(rem);
       vi.spyOn(rem, 'remove').mockResolvedValueOnce(undefined);
 
       await expect(
@@ -2962,8 +2970,8 @@ describe('RemAdapter', () => {
         retryable: false,
         details: {
           remId: rem._id,
-          beforeDescendantCount: 1,
-          afterDescendantCount: 1,
+          subtreeSize: 1,
+          deletedCount: 0,
           knownRemIds: [rem._id],
         },
       });
@@ -2978,9 +2986,10 @@ describe('RemAdapter', () => {
       const rem = plugin.addTestRem('delete_partial', 'Delete partial');
       const child = plugin.addTestRem('delete_partial_child', 'Child');
       child.setParent(rem);
-      vi.spyOn(rem, 'remove').mockImplementationOnce(async () => {
-        await child.remove();
-      });
+      vi.spyOn(plugin.rem, 'findOne')
+        .mockResolvedValueOnce(rem)
+        .mockResolvedValueOnce(undefined as never)
+        .mockResolvedValueOnce(rem);
 
       await expect(
         adapter.deleteRem({
@@ -2994,9 +3003,9 @@ describe('RemAdapter', () => {
         retryable: false,
         details: {
           remId: rem._id,
-          beforeDescendantCount: 1,
-          afterDescendantCount: 0,
-          knownRemIds: [rem._id],
+          subtreeSize: 2,
+          deletedCount: 1,
+          knownRemIds: [child._id, rem._id],
         },
       });
     });
