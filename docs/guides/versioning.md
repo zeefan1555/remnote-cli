@@ -1,6 +1,6 @@
 # Versioning
 
-The current package version is **0.1.35**.
+The current package version is **0.1.36**.
 
 ## Policy
 

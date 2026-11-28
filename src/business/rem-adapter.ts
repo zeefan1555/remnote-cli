@@ -3900,50 +3900,54 @@ export class RemAdapter {
       throw new Error('Destructive operation requires --allow-destructive');
     }
 
-    const beforeDescendantIds = (await rem.getDescendants()).map((child) => child._id).sort();
+    const deleteOrder: PluginRem[] = [];
+    const seenIds = new Set<string>();
+    const collectDeleteOrder = async (current: PluginRem): Promise<void> => {
+      if (seenIds.has(current._id)) return;
+      seenIds.add(current._id);
+      for (const child of await current.getChildrenRem()) await collectDeleteOrder(child);
+      deleteOrder.push(current);
+    };
+    await collectDeleteOrder(rem);
 
     return await this.runJournaledWrite('destructive', 'delete_rem', params, async (remember) => {
-      await remember([remId]);
-      await rem.remove();
-      const remaining = await this.plugin.rem.findOne(remId);
-      if (remaining) {
-        const afterDescendantIds = (await remaining.getDescendants())
-          .map((child) => child._id)
-          .sort();
-        const unchanged =
-          (await this.getTitleAndDetail(remaining)).title === title &&
-          beforeDescendantIds.length === afterDescendantIds.length &&
-          beforeDescendantIds.every((id, index) => id === afterDescendantIds[index]);
-        if (unchanged) {
+      await remember(deleteOrder.map((target) => target._id));
+      const deletedIds: string[] = [];
+      for (const target of deleteOrder) {
+        await target.remove();
+        if (await this.plugin.rem.findOne(target._id)) {
+          if (deletedIds.length === 0) {
+            throw new CliFailure(
+              'unknown_outcome',
+              'delete_confirmation_pending_or_not_applied',
+              `Delete did not remove ${target._id}; RemNote may be waiting for native confirmation.`,
+              {
+                hint: 'Finish or cancel the RemNote confirmation, then inspect the exact Rem ID. Do not rerun the delete command.',
+                retryable: false,
+                details: {
+                  remId: target._id,
+                  subtreeSize: deleteOrder.length,
+                  deletedCount: 0,
+                },
+              }
+            );
+          }
           throw new CliFailure(
             'unknown_outcome',
-            'delete_confirmation_pending_or_not_applied',
-            `Delete did not change Rem ${remId}; RemNote may be waiting for native confirmation.`,
+            'delete_partial',
+            `Delete removed ${deletedIds.length} descendants but ${target._id} remains.`,
             {
-              hint: 'Finish or cancel the RemNote confirmation, then inspect the exact Rem ID. Do not rerun the delete command.',
+              hint: 'Inspect the exact Rem and descendants before another write.',
               retryable: false,
               details: {
-                remId,
-                beforeDescendantCount: beforeDescendantIds.length,
-                afterDescendantCount: afterDescendantIds.length,
+                remId: target._id,
+                subtreeSize: deleteOrder.length,
+                deletedCount: deletedIds.length,
               },
             }
           );
         }
-        throw new CliFailure(
-          'unknown_outcome',
-          'delete_partial',
-          `Delete left Rem ${remId} present after changing part of its subtree.`,
-          {
-            hint: 'Inspect the exact Rem and descendants before another write.',
-            retryable: false,
-            details: {
-              remId,
-              beforeDescendantCount: beforeDescendantIds.length,
-              afterDescendantCount: afterDescendantIds.length,
-            },
-          }
-        );
+        deletedIds.push(target._id);
       }
       return {
         remId,

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 From release 0.1.30 onward, versions follow the project's
 [step-based version policy](docs/guides/versioning.md).
 
+## [0.1.36] - 2026-11-28
+
+### Changed
+
+- Delete descendants leaf-first before the target so RemNote does not stop on a
+  native non-empty subtree confirmation. Verify each exact Rem ID and journal the
+  complete subtree before the first removal.
+
 ## [0.1.35] - 2026-11-28
 
 ### Fixed
